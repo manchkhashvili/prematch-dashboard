@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Matches — Prematch Dashboard</title>
+  <!-- ?v= bumped 2026-05-27 (Phase 3.3 light theme) — bust browser cache when
+       style.css changes. Bump again on future visual updates. -->
+  <link rel="stylesheet" href="/style.css?v=20260527c" />
+  <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
+  <script src="/theme.js?v=20260527"></script>
+  <!-- Phase 3.12: cross-page alert poller. -->
+  <script src="/alerts.js?v=20260527d" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html" class="active">Matches</a>
+      <a href="/arbs.html">Arbs / +EV</a>
+      <a href="/bets.html">Bets</a>
+      <a href="/calc.html">Calc</a>
+      <a href="/unmatched.html">Unmatched</a>
+    </nav>
+    <div class="status" id="status">
+      <span id="cb-status">CB —</span>
+      <span id="pin-status">Pin —</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <label>
+      <input type="checkbox" id="filter-has-pin" />
+      Has Pinnacle reference
+    </label>
+    <label title="When ON, the [+] expander hides markets CB serves that Pinnacle does not (H2, Q1–Q4, CB-only soccer markets). Turn OFF to see every CB market.">
+      <input type="checkbox" id="hide-no-pin-ref" checked />
+      Hide markets without Pinnacle reference
+    </label>
+    <span class="row-count" id="row-count">…</span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="matches">
+      <thead>
+        <tr>
+          <th>Start (UTC)</th>
+          <th>Sport</th>
+          <th>League</th>
+          <th>Home</th>
+          <th>Away</th>
+          <th class="num">CB H</th>
+          <th class="num" title="Draw side — populated for soccer 3-way (1X2). Basketball rows show —.">CB X</th>
+          <th class="num">CB A</th>
+          <th class="num">Pin H</th>
+          <th class="num" title="Draw side — populated for soccer 3-way (1X2). Basketball rows show —.">Pin X</th>
+          <th class="num">Pin A</th>
+          <th class="num">Edge H%</th>
+          <th class="num" title="Draw edge — populated for soccer 3-way (1X2). Basketball rows show —.">Edge X%</th>
+          <th class="num">Edge A%</th>
+          <th></th>
+        </tr>
+        <tr class="filter-row">
+          <th><input class="col-filter" data-field="start_time" placeholder="filter…" /></th>
+          <th><input class="col-filter" data-field="sport"      placeholder="filter…" /></th>
+          <th><input class="col-filter" data-field="league"     placeholder="filter…" /></th>
+          <th><input class="col-filter" data-field="home"       placeholder="filter…" /></th>
+          <th><input class="col-filter" data-field="away"       placeholder="filter…" /></th>
+          <th colspan="10"><button id="clear-filters" type="button" title="Clear all column filters">clear filters</button></th>
+        </tr>
+      </thead>
+      <tbody id="matches-body">
+        <tr><td colspan="15" class="empty">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+const POLL_MS = 30_000;
+const filterHasPin = document.getElementById("filter-has-pin");
+const hideNoPinRef = document.getElementById("hide-no-pin-ref");
+filterHasPin.addEventListener("change", render);
+// Toggle filters MARKETS inside the [+] expander, not main rows — so we
+// only need to re-render the visible expanders (full render works fine too).
+hideNoPinRef.addEventListener("change", render);
+let matchesCache = [];
+
+// Column-filter state — substring (case-insensitive) match against the field.
+// For start_time the comparison is against the FORMATTED display string
+// (e.g. "05-25 19:00") so the user can type "05-25" or "19:" as they expect.
+const colFilters = {};   // field → lowercased query string
+document.querySelectorAll(".col-filter").forEach(input => {
+  input.addEventListener("input", () => {
+    const v = input.value.trim().toLowerCase();
+    if (v) colFilters[input.dataset.field] = v;
+    else   delete colFilters[input.dataset.field];
+    render();
+  });
+});
+document.getElementById("clear-filters").addEventListener("click", () => {
+  document.querySelectorAll(".col-filter").forEach(i => { i.value = ""; });
+  for (const k of Object.keys(colFilters)) delete colFilters[k];
+  render();
+});
+
+function rowMatchesFilters(r) {
+  for (const [field, q] of Object.entries(colFilters)) {
+    let v;
+    if (field === "start_time")  v = fmtTime(r.start_time);
+    else                          v = r[field];
+    if (!v) return false;
+    if (!String(v).toLowerCase().includes(q)) return false;
+  }
+  return true;
+}
+
+function fmtNum(v, digits = 2) {
+  return (v === null || v === undefined) ? "—" : v.toFixed(digits);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined) return "—";
+  const s = (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+  return s;
+}
+function pctClass(v) {
+  if (v === null || v === undefined) return "edge-zero";
+  if (v >= 2)  return "edge-pos-bold";
+  if (v > 0)   return "edge-pos";
+  return "edge-neg";
+}
+function fmtTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toISOString().slice(5, 16).replace("T", " ");
+}
+
+// Build a prefill URL for the "Log bet" link on each matches row.
+// We can only prefill the match identity here — market/side/odds get filled
+// in manually from the form (the expander has the full market list for
+// reference but per-market log buttons would require a much bigger rework).
+function buildBetPrefillUrl(r) {
+  const p = new URLSearchParams({
+    sport: r.sport || "",
+    match_label: `${r.home} vs ${r.away}`,
+    period: "FT",
+    market_type: "moneyline",
+    side: "home",
+    book: "cb",
+    odds_taken: r.cb_home ? r.cb_home.toFixed(2) : "",
+    stake: "20",
+    bankroll_at_time: "500",
+    ...(r.cb_event_id ? { cb_event_id: r.cb_event_id } : {}),
+    ...(r.start_time ? { start_time: r.start_time } : {}),
+  });
+  return "/bets.html?" + p.toString();
+}
+function fmtAge(sec) {
+  if (sec === null || sec === undefined) return "—";
+  if (sec < 60)  return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m" + String(sec % 60).padStart(2, "0") + "s";
+  return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
+}
+
+// Render the per-game markets-status badge. The badge tells the user
+// whether this game has full alt-line coverage (loaded), only list-view
+// markets (list_only), or had an expansion failure (expand_failed).
+function statusBadge(status) {
+  if (status === "loaded") {
+    return `<span class="status-badge status-loaded" title="Full detail-page markets loaded (alt-lines + H1/H2/Q1–Q4)">FULL</span>`;
+  }
+  if (status === "expand_failed") {
+    return `<span class="status-badge status-failed" title="Detail-page expansion failed this cycle; showing list-view ML/spread/total only">FAIL</span>`;
+  }
+  // list_only
+  return `<span class="status-badge status-list" title="No detail-page markets loaded (CB served nothing in-scope, or first cycle); showing list-view ML/spread/total only">LIST</span>`;
+}
+
+// Render the "how stale" badge — when did we last successfully expand this
+// game's detail page.
+function freshnessBadge(iso) {
+  if (!iso) {
+    return `<span class="freshness freshness-none" title="never successfully expanded">—</span>`;
+  }
+  const ageSec = (Date.now() - new Date(iso).getTime()) / 1000;
+  let label;
+  if      (ageSec < 60)    label = Math.floor(ageSec) + "s";
+  else if (ageSec < 3600)  label = Math.floor(ageSec / 60) + "m";
+  else                     label = Math.floor(ageSec / 3600) + "h" + Math.floor((ageSec % 3600) / 60) + "m";
+  let cls;
+  if      (ageSec < 600)   cls = "freshness-fresh";
+  else if (ageSec < 3600)  cls = "freshness-ok";
+  else if (ageSec < 10800) cls = "freshness-stale";
+  else                     cls = "freshness-very-stale";
+  return `<span class="freshness ${cls}" title="last expanded ${label} ago (${new Date(iso).toISOString().slice(11, 19)} UTC)">${label}</span>`;
+}
+
+// 2-letter sport prefix for the compact status bar ("bb" / "sc" / first 2
+// of any future sport).
+function sportPrefix(s) {
+  if (s === "basketball") return "bb";
+  if (s === "soccer")     return "sc";
+  return s.slice(0, 2);
+}
+
+// Format the per-sport status line. Returns
+// "<source-label> bb:<count> (<age>) | sc:<count> (<age>)" plus a class
+// hint for the parent span (ok/stale/err).
+function buildSourceStatus(label, sports, source, staleThresholdSec) {
+  const parts = [];
+  let anyErr = false;
+  let worstAge = 0;
+  for (const [sport, st] of Object.entries(sports || {})) {
+    const s = st[source];
+    parts.push(`${sportPrefix(sport)}:${s.count} (${fmtAge(s.age_sec)})`);
+    if (s.error) anyErr = true;
+    if (typeof s.age_sec === "number") worstAge = Math.max(worstAge, s.age_sec);
+  }
+  const text = `${label} ${parts.join(" | ")}`;
+  let cls;
+  if (anyErr) cls = "err";
+  else if (worstAge > staleThresholdSec) cls = "stale";
+  else cls = "ok";
+  return { text, cls };
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    const cbEl  = document.getElementById("cb-status");
+    const pinEl = document.getElementById("pin-status");
+    const cb  = buildSourceStatus("CB",  s.sports, "cb",  600);
+    const pin = buildSourceStatus("Pin", s.sports, "pin", 240);
+    cbEl.textContent  = cb.text;
+    cbEl.className    = cb.cls;
+    pinEl.textContent = pin.text;
+    pinEl.className   = pin.cls;
+  } catch (e) {
+    document.getElementById("cb-status").textContent = "status error";
+    document.getElementById("cb-status").className = "err";
+  }
+}
+
+async function pollMatches() {
+  try {
+    const r = await fetch("/api/matches");
+    matchesCache = await r.json();
+    render();
+  } catch (e) {
+    document.getElementById("matches-body").innerHTML =
+      `<tr><td colspan="15" class="empty">error loading matches</td></tr>`;
+  }
+}
+
+function render() {
+  const wantPin = filterHasPin.checked;
+  const rows = matchesCache
+    .filter(r => !wantPin || r.has_pin)
+    .filter(rowMatchesFilters);
+  const filteredHasPin = matchesCache
+    .filter(rowMatchesFilters)
+    .filter(r => r.has_pin).length;
+  document.getElementById("row-count").textContent =
+    `${rows.length} match${rows.length === 1 ? "" : "es"}` +
+    (wantPin ? "" : ` (${filteredHasPin} with Pinnacle)`);
+
+  const body = document.getElementById("matches-body");
+  if (rows.length === 0) {
+    body.innerHTML = `<tr><td colspan="15" class="empty">no matches</td></tr>`;
+    return;
+  }
+  const open = new Set();
+  body.querySelectorAll("tr.expander-row").forEach(tr => {
+    if (tr.style.display !== "none") open.add(tr.dataset.parent);
+  });
+
+  body.innerHTML = "";
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    tr.className = "match-row";
+    tr.id = `match-${r.cb_event_id}`;
+    tr.dataset.eid = r.cb_event_id;
+    tr.innerHTML = `
+      <td class="mono dim">${fmtTime(r.start_time)}</td>
+      <td class="dim">${r.sport || ""}</td>
+      <td>${r.league || ""}</td>
+      <td>${r.home}</td>
+      <td>${r.away}</td>
+      <td class="num">${fmtNum(r.cb_home)}</td>
+      <td class="num">${fmtNum(r.cb_draw)}</td>
+      <td class="num">${fmtNum(r.cb_away)}</td>
+      <td class="num">${fmtNum(r.pin_home)}</td>
+      <td class="num">${fmtNum(r.pin_draw)}</td>
+      <td class="num">${fmtNum(r.pin_away)}</td>
+      <td class="num ${pctClass(r.edge_home_pct)}">${fmtPct(r.edge_home_pct)}</td>
+      <td class="num ${pctClass(r.edge_draw_pct)}">${fmtPct(r.edge_draw_pct)}</td>
+      <td class="num ${pctClass(r.edge_away_pct)}">${fmtPct(r.edge_away_pct)}</td>
+      <td class="expand-cell">
+        ${statusBadge(r.markets_status)}
+        ${freshnessBadge(r.last_expanded_at)}
+        <a class="log-bet-link" title="Log a bet on this match — fill in market/side/odds in the form"
+           href="${buildBetPrefillUrl(r)}">Log</a>
+        <button class="expand-btn" data-eid="${r.cb_event_id}">+</button>
+      </td>
+    `;
+    body.appendChild(tr);
+
+    const exp = document.createElement("tr");
+    exp.className = "expander-row";
+    exp.dataset.parent = r.cb_event_id;
+    exp.style.display = open.has(r.cb_event_id) ? "" : "none";
+    exp.innerHTML = `<td colspan="15">${renderMarkets(r)}</td>`;
+    body.appendChild(exp);
+  }
+
+  body.querySelectorAll(".expand-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const eid = btn.dataset.eid;
+      openExpander(eid, false);
+    });
+  });
+
+  // After every render, honor any deep-link in the URL hash.
+  applyHashIfAny();
+}
+
+function openExpander(eid, forceOpen) {
+  const btn = document.querySelector(`.expand-btn[data-eid="${eid}"]`);
+  const exp = document.querySelector(`tr.expander-row[data-parent="${eid}"]`);
+  if (!btn || !exp) return false;
+  const isOpen = exp.style.display !== "none";
+  const shouldOpen = forceOpen ? true : !isOpen;
+  exp.style.display = shouldOpen ? "" : "none";
+  btn.classList.toggle("open", shouldOpen);
+  btn.textContent = shouldOpen ? "−" : "+";
+  return true;
+}
+
+// On page load (and after every render), if the URL has #match-{eid},
+// scroll to that row and pop the expander open.
+let hashHandled = null;
+function applyHashIfAny() {
+  const m = window.location.hash.match(/^#match-(.+)$/);
+  if (!m) return;
+  const eid = m[1];
+  if (eid === hashHandled) return;
+  const row = document.getElementById(`match-${eid}`);
+  if (!row) return;
+  hashHandled = eid;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("highlight");
+  openExpander(eid, true);
+}
+window.addEventListener("hashchange", () => {
+  hashHandled = null;
+  applyHashIfAny();
+});
+
+// Display order for period groups in the expander.
+const PERIOD_ORDER = ["FT", "H1", "H2", "Q1", "Q2", "Q3", "Q4"];
+const MARKET_TYPE_ORDER = { moneyline: 0, spread: 1, total: 2, team_total: 3 };
+
+// Build a human-readable label for one expander market row. Mirrors
+// edge.py's _market_label so the matches expander matches the arbs page.
+//   moneyline / spread / total →   "Moneyline", "Spread -2.5", "Total 9.5"
+//   team_total / submarket suffixes:
+//     "Team Total +1.5 (home)", "Total +9.5 (corners)"
+function expanderLabel(m) {
+  const lineStr = (m.line === null || m.line === undefined)
+    ? ""
+    : ` ${m.line >= 0 ? "+" : ""}${m.line}`;
+  // market_type → display: "team_total" → "Team Total"
+  const name = m.market_type.replace(/_/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+  const parts = [`${name}${lineStr}`];
+  if (m.team_side) parts.push(`(${m.team_side})`);
+  if (m.submarket) parts.push(`(${m.submarket})`);
+  return parts.join(" ");
+}
+
+// Sides expected on a market entry, in canonical display order. Used both
+// for header labels and for indexing into m.cb / m.pin / m.pin_fair.
+function sidesForMarket(m) {
+  if (m.market_type === "total" || m.market_type === "team_total") {
+    return ["over", "under"];
+  }
+  // moneyline (2-way or 3-way) + spread: detect 3-way ML by presence of
+  // "draw" in CB selections (soccer 1X2). Spread is always 2-way.
+  if (m.market_type === "moneyline" && m.cb && "draw" in m.cb) {
+    return ["home", "draw", "away"];
+  }
+  return ["home", "away"];
+}
+
+function sideHeader(side) {
+  if (side === "home")  return "Home";
+  if (side === "away")  return "Away";
+  if (side === "draw")  return "Draw";
+  if (side === "over")  return "Over";
+  if (side === "under") return "Under";
+  return side;
+}
+
+function renderMarkets(r) {
+  let ms = r.markets || [];
+  if (ms.length === 0) {
+    return `<div class="expander"><div class="empty">no markets</div></div>`;
+  }
+
+  // Apply the "hide markets without Pinnacle reference" toggle.
+  // m.pin === null means the matcher / pairing logic found no Pin counterpart
+  // for this CB market (e.g. H2 / CB-only soccer markets).
+  if (hideNoPinRef.checked) {
+    ms = ms.filter(m => m.pin !== null && m.pin !== undefined);
+    if (ms.length === 0) {
+      return `<div class="expander"><div class="empty">no Pinnacle-referenced markets (turn off filter to see all CB markets)</div></div>`;
+    }
+  }
+
+  // Group by period. Within each period, sort ML → spread (by line) →
+  // total (by line) → team_total (by line). Submarket markets (corners)
+  // appear after the parent equivalents for their (period, market_type).
+  const byPeriod = new Map();
+  for (const m of ms) {
+    const p = m.period || "?";
+    if (!byPeriod.has(p)) byPeriod.set(p, []);
+    byPeriod.get(p).push(m);
+  }
+  for (const arr of byPeriod.values()) {
+    arr.sort((a, b) => {
+      const ta = MARKET_TYPE_ORDER[a.market_type] ?? 99;
+      const tb = MARKET_TYPE_ORDER[b.market_type] ?? 99;
+      if (ta !== tb) return ta - tb;
+      // Parent markets before submarket (corners) markets for same type.
+      const sa = a.submarket ? 1 : 0;
+      const sb = b.submarket ? 1 : 0;
+      if (sa !== sb) return sa - sb;
+      // team_total: group by team_side (home before away) then by line.
+      if (a.market_type === "team_total" && b.market_type === "team_total") {
+        const tsa = a.team_side === "home" ? 0 : 1;
+        const tsb = b.team_side === "home" ? 0 : 1;
+        if (tsa !== tsb) return tsa - tsb;
+      }
+      const la = (a.line === null || a.line === undefined) ? -Infinity : a.line;
+      const lb = (b.line === null || b.line === undefined) ? -Infinity : b.line;
+      return la - lb;
+    });
+  }
+
+  const sortedPeriods = Array.from(byPeriod.keys()).sort((a, b) => {
+    const ia = PERIOD_ORDER.indexOf(a);
+    const ib = PERIOD_ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  const sections = sortedPeriods.map(period => {
+    const periodMarkets = byPeriod.get(period);
+    // Per-period market rows. Each market may have 2 or 3 sides depending
+    // on shape, so we render a compact 3-column layout per side: CB / Pin / Fair.
+    const rows = periodMarkets.map(m => {
+      const label = expanderLabel(m);
+      const sides = sidesForMarket(m);
+      const cb   = m.cb       || {};
+      const pin  = m.pin      || {};
+      const fair = m.pin_fair || {};
+      const cells = sides.map(side => `
+        <td class="side-block">
+          <div class="side-header">${sideHeader(side)}</div>
+          <div class="side-row"><span class="side-label">CB</span> <span class="num">${fmtNum(cb[side])}</span></div>
+          <div class="side-row"><span class="side-label">Pin</span> <span class="num">${fmtNum(pin[side])}</span></div>
+          <div class="side-row dim"><span class="side-label">Fair</span> <span class="num">${fmtNum(fair[side])}</span></div>
+        </td>
+      `).join("");
+      // Pad to 3 columns so 2-way and 3-way markets share a clean grid.
+      const padding = sides.length < 3
+        ? `<td class="side-block side-pad"></td>`.repeat(3 - sides.length)
+        : "";
+      return `
+        <tr>
+          <td class="market-label">${label}</td>
+          ${cells}
+          ${padding}
+        </tr>
+      `;
+    }).join("");
+    return `
+      <div class="period-section">
+        <h5 class="period-header">${period} <span class="period-count">${periodMarkets.length} market${periodMarkets.length === 1 ? "" : "s"}</span></h5>
+        <table class="markets-table markets-table-grid">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th class="num">Side 1</th>
+              <th class="num">Side 2</th>
+              <th class="num">Side 3</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="expander">
+      <h4>All markets — ${r.home} vs ${r.away}
+        <span class="market-count">${ms.length} total${hideNoPinRef.checked ? " (filtered to Pinnacle-referenced only)" : ""}</span>
+      </h4>
+      ${sections}
+    </div>
+  `;
+}
+
+pollStatus();
+pollMatches();
+setInterval(pollStatus,  10_000);
+setInterval(pollMatches, POLL_MS);
+</script>
+</body>
+</html>

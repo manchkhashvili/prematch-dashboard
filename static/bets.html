@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bets — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527c" />
+  <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
+  <script src="/theme.js?v=20260527"></script>
+  <!-- Phase 3.12: cross-page alert poller. -->
+  <script src="/alerts.js?v=20260527d" defer></script>
+  <style>
+    /* Page-local: the form and per-row sparkline are unique to this page. */
+    details.new-bet {
+      margin: 12px 18px 0;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+    }
+    details.new-bet summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      list-style: none;
+      user-select: none;
+    }
+    details.new-bet summary::before {
+      content: "+ ";
+      color: var(--accent);
+      font-family: var(--mono);
+    }
+    details.new-bet[open] summary::before {
+      content: "− ";
+    }
+    .bet-form {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px 14px;
+      margin-top: 14px;
+      font-size: 12px;
+    }
+    .bet-form label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      color: var(--text-dim);
+    }
+    .bet-form input,
+    .bet-form select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 5px 7px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .bet-form input:focus,
+    .bet-form select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .bet-form .full-row {
+      grid-column: 1 / -1;
+    }
+    .bet-form-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    .btn {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      padding: 6px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { color: var(--text); border-color: var(--text-dim); }
+    .form-error {
+      color: var(--bad);
+      font-size: 11px;
+      margin-left: 10px;
+    }
+
+    .tab-bar {
+      padding: 0 18px;
+      display: flex;
+      gap: 6px;
+      margin-top: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-bar .tab {
+      padding: 6px 14px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 12px;
+      border-bottom: 2px solid transparent;
+      user-select: none;
+    }
+    .tab-bar .tab.on {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+
+    .sparkline {
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .clv-pos { color: var(--good); font-weight: 600; }
+    .clv-neg { color: var(--bad); }
+    .clv-zero { color: var(--text-dim); }
+
+    .settle-cell {
+      display: flex;
+      gap: 4px;
+      flex-wrap: nowrap;
+    }
+    .settle-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 2px 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .settle-btn:hover { color: var(--text); border-color: var(--text-dim); }
+    .settle-btn.won  { color: var(--good); border-color: var(--good); }
+    .settle-btn.lost { color: var(--bad);  border-color: var(--bad); }
+    .settle-btn.del  { color: var(--text-faint); }
+    .settle-btn.del:hover { color: var(--bad); border-color: var(--bad); }
+
+    .status-chip {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .status-open   { color: var(--text-dim); border-color: var(--border); }
+    .status-won    { color: var(--good); border-color: var(--good); background: var(--good-bg-soft); }
+    .status-lost   { color: var(--bad); border-color: var(--bad); background: var(--bad-bg-soft); }
+    .status-pushed { color: var(--text-dim); border-color: var(--text-dim); }
+    .status-void   { color: var(--text-faint); border-color: var(--text-faint); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html">Matches</a>
+      <a href="/arbs.html">Arbs / +EV</a>
+      <a href="/bets.html" class="active">Bets</a>
+      <a href="/calc.html">Calc</a>
+      <a href="/unmatched.html">Unmatched</a>
+    </nav>
+  </header>
+
+  <!-- ── New bet form ─────────────────────────────────────────────────── -->
+  <details class="new-bet" id="new-bet-details">
+    <summary>Log a new bet</summary>
+    <form class="bet-form" id="bet-form">
+      <label>Sport
+        <select name="sport" required>
+          <option value="basketball">basketball</option>
+          <option value="soccer">soccer</option>
+          <option value="tennis">tennis</option>
+        </select>
+      </label>
+      <label>Match (Home vs Away)
+        <input name="match_label" type="text" required placeholder="Lakers vs Warriors" />
+      </label>
+      <label>Period
+        <select name="period" required>
+          <option value="FT">FT (full match)</option>
+          <option value="H1">H1 (first half)</option>
+          <option value="Q1">Q1</option>
+          <option value="Q2">Q2</option>
+          <option value="Q3">Q3</option>
+          <option value="Q4">Q4</option>
+        </select>
+      </label>
+      <label>Market
+        <select name="market_type" required>
+          <option value="moneyline">moneyline</option>
+          <option value="spread">spread (handicap)</option>
+          <option value="total">total (O/U)</option>
+          <option value="team_total">team_total</option>
+          <option value="corners">corners</option>
+        </select>
+      </label>
+      <label>Line (null for ML)
+        <input name="line" type="number" step="0.25" placeholder="e.g. -3.5 or 224.5" />
+      </label>
+      <label>Side
+        <select name="side" required>
+          <option value="home">home</option>
+          <option value="away">away</option>
+          <option value="draw">draw</option>
+          <option value="over">over</option>
+          <option value="under">under</option>
+        </select>
+      </label>
+      <label>Book
+        <select name="book" required>
+          <option value="cb">CrystalBet</option>
+          <option value="pin">Pinnacle</option>
+          <option value="other">other</option>
+        </select>
+      </label>
+      <label>Odds taken (decimal)
+        <input name="odds_taken" type="number" step="0.01" min="1.01" required />
+      </label>
+      <label>Stake ($)
+        <input name="stake" type="number" step="1" min="0.01" required value="20" />
+      </label>
+      <label>Bankroll at time ($)
+        <input name="bankroll_at_time" type="number" step="50" min="0" required value="500" />
+      </label>
+      <label>CB event id (optional)
+        <input name="cb_event_id" type="text" placeholder="leave blank for off-platform" />
+      </label>
+      <label>Kickoff (optional, ISO)
+        <input name="start_time" type="text" placeholder="2026-05-28T15:00:00+00:00" />
+      </label>
+      <label class="full-row">Note
+        <input name="note" type="text" placeholder="optional comment" />
+      </label>
+      <div class="bet-form-actions">
+        <button type="submit" class="btn">Log bet</button>
+        <button type="button" class="btn btn-secondary" id="form-reset">Reset</button>
+        <span class="form-error" id="form-error"></span>
+      </div>
+    </form>
+  </details>
+
+  <!-- ── Tabs + table ─────────────────────────────────────────────────── -->
+  <div class="tab-bar">
+    <span class="tab on" data-tab="open">Open</span>
+    <span class="tab"    data-tab="settled">Settled</span>
+    <span class="tab"    data-tab="all">All</span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="bets-table">
+      <thead>
+        <tr>
+          <th>Placed</th>
+          <th>Kickoff</th>
+          <th>Sport</th>
+          <th>Match</th>
+          <th>Market / Side</th>
+          <th>Book</th>
+          <th class="num" title="Decimal odds taken at placement">Odds</th>
+          <th class="num">Stake</th>
+          <th class="num" title="Current CB decimal odds for this market+side">CB now</th>
+          <th class="num" title="Current Pinnacle no-vig fair for this market+side">Pin fair now</th>
+          <th class="num" title="Edge based on current Pin fair">Edge now</th>
+          <th class="num" title="Closing Line Value — positive means our side shortened (sharp says we picked well)">CLV</th>
+          <th title="Pin fair over time since placement">Trend</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="bets-body">
+        <tr><td colspan="15" class="empty">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+"use strict";
+
+const POLL_MS = 30_000;
+let currentTab = "open";  // "open" | "settled" | "all"
+
+const tbody = document.getElementById("bets-body");
+const formError = document.getElementById("form-error");
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+document.querySelectorAll(".tab-bar .tab").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab-bar .tab").forEach(x => x.classList.remove("on"));
+    t.classList.add("on");
+    currentTab = t.dataset.tab;
+    fetchAndRender();
+  });
+});
+
+// ── Form submission ────────────────────────────────────────────────────────
+function readFormToPayload(form) {
+  const fd = new FormData(form);
+  const o = {};
+  for (const [k, v] of fd.entries()) {
+    if (v === "" || v == null) continue;
+    o[k] = v;
+  }
+  // Type coercion: numbers
+  for (const k of ["line","odds_taken","stake","bankroll_at_time"]) {
+    if (k in o) {
+      const n = parseFloat(o[k]);
+      if (isNaN(n)) delete o[k];
+      else o[k] = n;
+    }
+  }
+  return o;
+}
+
+document.getElementById("bet-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  formError.textContent = "";
+  const payload = readFormToPayload(e.target);
+  try {
+    const r = await fetch("/api/bets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      formError.textContent = "Error: " + txt.slice(0, 200);
+      return;
+    }
+    e.target.reset();
+    document.getElementById("new-bet-details").open = false;
+    fetchAndRender();
+  } catch (err) {
+    formError.textContent = "Network error: " + err.message;
+  }
+});
+
+document.getElementById("form-reset").addEventListener("click", () => {
+  document.getElementById("bet-form").reset();
+  formError.textContent = "";
+});
+
+// ── Prefill from URL params (used by 'Log bet' buttons on other pages) ─────
+function prefillFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.size === 0) return;
+  const form = document.getElementById("bet-form");
+  for (const [k, v] of params.entries()) {
+    const el = form.elements.namedItem(k);
+    if (el) el.value = v;
+  }
+  document.getElementById("new-bet-details").open = true;
+}
+
+// ── Sparkline ──────────────────────────────────────────────────────────────
+function makeSparkline(history, width = 80, height = 22) {
+  // history: list of {recorded_at, cb_decimal, pin_fair_decimal} oldest first.
+  // We plot pin_fair_decimal. Returns inline SVG markup.
+  const pts = history.filter(h => h.pin_fair_decimal != null).map(h => h.pin_fair_decimal);
+  if (pts.length < 2) {
+    return `<svg class="sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"></svg>`;
+  }
+  const mn = Math.min(...pts), mx = Math.max(...pts);
+  const rng = mx - mn || 1;
+  const stepX = width / (pts.length - 1);
+  // Direction: pin_fair_decimal DROPPING over time means implied prob RISING
+  // for our side → positive CLV. Color the line accordingly.
+  const last = pts[pts.length - 1], first = pts[0];
+  const color = last < first ? "var(--good)" : (last > first ? "var(--bad)" : "var(--text-dim)");
+  const path = pts.map((p, i) => {
+    const x = (i * stepX).toFixed(1);
+    const y = (height - ((p - mn) / rng) * height).toFixed(1);
+    return (i === 0 ? "M" : "L") + x + "," + y;
+  }).join(" ");
+  return `<svg class="sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.3" stroke-linejoin="round" />
+  </svg>`;
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function fmtNum(v, digits = 3) {
+  return (v === null || v === undefined) ? "—" : Number(v).toFixed(digits);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+}
+function fmtTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toISOString().slice(5, 16).replace("T", " ");
+}
+function pctClass(v) {
+  if (v === null || v === undefined) return "";
+  if (v >= 5)  return "edge-pos-bold";
+  if (v > 0)   return "edge-pos";
+  return "edge-neg";
+}
+function clvClass(v) {
+  if (v === null || v === undefined) return "clv-zero";
+  if (v > 0.5)  return "clv-pos";
+  if (v < -0.5) return "clv-neg";
+  return "clv-zero";
+}
+
+async function fetchHistoryFor(betId) {
+  try {
+    const r = await fetch(`/api/bets/${betId}/history`);
+    if (!r.ok) return [];
+    return await r.json();
+  } catch (e) { return []; }
+}
+
+async function fetchAndRender() {
+  try {
+    const r = await fetch(`/api/bets?status=${encodeURIComponent(currentTab)}`);
+    const bets = await r.json();
+    if (!Array.isArray(bets) || bets.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="15" class="empty">no bets in this tab</td></tr>`;
+      return;
+    }
+    // Fetch history in parallel for sparklines.
+    const histories = await Promise.all(bets.map(b => fetchHistoryFor(b.id)));
+
+    tbody.innerHTML = bets.map((b, i) => {
+      const hist = histories[i] || [];
+      const sparkSVG = makeSparkline(hist);
+      const lineLabel = (b.line === null || b.line === undefined)
+        ? "" : ` ${b.line > 0 ? "+" : ""}${b.line}`;
+      const market = `${b.market_type}${lineLabel} (${b.period})`
+        + (b.submarket ? ` [${b.submarket}]` : "")
+        + (b.team_side ? ` [${b.team_side}]` : "");
+      const settle = (b.status === "open")
+        ? `<div class="settle-cell">
+             <button class="settle-btn won"  data-action="settle"  data-outcome="won"  data-id="${b.id}">Won</button>
+             <button class="settle-btn lost" data-action="settle"  data-outcome="lost" data-id="${b.id}">Lost</button>
+             <button class="settle-btn"      data-action="settle"  data-outcome="pushed" data-id="${b.id}" title="Push (stake returned)">P</button>
+             <button class="settle-btn"      data-action="settle"  data-outcome="void"   data-id="${b.id}" title="Void">V</button>
+             <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
+           </div>`
+        : `<div class="settle-cell">
+             <span class="row-count" style="margin:0">payout $${(b.payout || 0).toFixed(2)}</span>
+             <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
+           </div>`;
+      return `
+        <tr>
+          <td class="mono dim">${fmtTime(b.placed_at)}</td>
+          <td class="mono dim">${fmtTime(b.start_time)}</td>
+          <td class="dim">${b.sport}</td>
+          <td>${b.match_label}</td>
+          <td><span class="dim">${market}</span> · <b>${b.side}</b></td>
+          <td class="dim">${b.book}</td>
+          <td class="num">${fmtNum(b.odds_taken)}</td>
+          <td class="num">$${b.stake.toFixed(0)}</td>
+          <td class="num">${fmtNum(b.cb_odds_now)}</td>
+          <td class="num">${fmtNum(b.pin_fair_now)}</td>
+          <td class="num ${pctClass(b.edge_now_pct)}">${fmtPct(b.edge_now_pct)}</td>
+          <td class="num ${clvClass(b.clv_pct)}">${fmtPct(b.clv_pct)}</td>
+          <td>${sparkSVG}</td>
+          <td><span class="status-chip status-${b.status}">${b.status}</span></td>
+          <td>${settle}</td>
+        </tr>
+      `;
+    }).join("");
+
+    // Attach action handlers.
+    tbody.querySelectorAll("button[data-action]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        const action = btn.dataset.action;
+        if (action === "settle") {
+          await fetch(`/api/bets/${id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ outcome: btn.dataset.outcome }),
+          });
+        } else if (action === "delete") {
+          if (!confirm("Delete this bet permanently?")) return;
+          await fetch(`/api/bets/${id}`, { method: "DELETE" });
+        }
+        fetchAndRender();
+      });
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="15" class="empty">error loading bets: ${e.message}</td></tr>`;
+  }
+}
+
+prefillFromQuery();
+fetchAndRender();
+setInterval(fetchAndRender, POLL_MS);
+</script>
+</body>
+</html>

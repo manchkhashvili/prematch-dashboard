@@ -1,0 +1,51 @@
+# CrystalBet ↔ Pinnacle team name aliases
+#
+# CB and Pinnacle don't always use the same name for the same team:
+#   - CB says "Connecticut", Pinnacle says "Connecticut Sun"
+#   - CB transliterates Georgian/Russian differently from Pinnacle
+#   - CB sometimes carries the full Italian club name with year
+#     ("Pallacanestro Trieste 2004"), Pinnacle uses the short form ("Trieste")
+#
+# The matcher applies these aliases (case-insensitive on the key) BEFORE
+# the unicode-strip → lowercase → token-drop pipeline. Both CB and
+# Pinnacle names go through the same alias map, so as long as both sides
+# converge on the same canonical form after aliasing, the match works.
+#
+# ─────────────────────────────────────────────────────────────────────
+# How to curate
+# ─────────────────────────────────────────────────────────────────────
+#  1. Edit this file while the server is running — the matcher reloads
+#     it on every poll cycle (mtime cache). No restart needed.
+#  2. Open the Unmatched page in the dashboard (or read
+#     data/unmatched_log.csv). Each unmatched CB event shows its
+#     best Pinnacle candidate and the similarity score.
+#  3. Anything in the 60–79 range is usually fixable with an alias —
+#     same teams, different name format.
+#  4. Anything <50 likely doesn't have a Pinnacle counterpart at all
+#     (CB carries the league, Pinnacle doesn't). Skip those.
+#  5. Add the alias here, watch the match rate move in the dashboard
+#     header, repeat.
+#
+# YAML format: `source_name: canonical_name`. Quotes around either side
+# are only needed when the name contains a colon, hash, or starts with
+# a special character. When in doubt, quote.
+
+aliases:
+  # ── WNBA — CB drops the franchise suffix ────────────────────────────
+  "Connecticut": "Connecticut Sun"
+  "Phoenix": "Phoenix Mercury"
+
+  # ── Examples — uncomment + edit when you observe these mismatches ───
+  # Italian Serie A — CB carries full club name with founding year
+  # "Pallacanestro Trieste 2004": "Trieste"
+  # "Juvecaserta 2021": "Juvecaserta"
+  # "Rucker San Vendemiano": "San Vendemiano"
+  # "Virtus Gvm Roma 1960": "Virtus Roma"
+  # "Skalijera Verona": "Verona"
+
+  # VTB / Russian leagues — transliteration differences
+  # "Zenit": "Zenit Saint Petersburg"
+  # "UNICS": "UNICS Kazan"
+
+  # Adriatic / Balkans
+  # "BC Kalev/Cramo": "Kalev"

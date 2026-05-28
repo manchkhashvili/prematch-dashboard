@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arbs / +EV — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527c" />
+  <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
+  <script src="/theme.js?v=20260527"></script>
+  <!-- Phase 3.12: cross-page alert poller. Defer = fine; first poll runs 2s after load. -->
+  <script src="/alerts.js?v=20260527d" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html">Matches</a>
+      <a href="/arbs.html" class="active">Arbs / +EV</a>
+      <a href="/bets.html">Bets</a>
+      <a href="/calc.html">Calc</a>
+      <a href="/unmatched.html">Unmatched</a>
+    </nav>
+    <div class="status" id="status">
+      <span id="cb-status">CB —</span>
+      <span id="pin-status">Pin —</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="chip-group" id="kind-filter">
+      <span class="chip on" data-kind="all">All</span>
+      <span class="chip"    data-kind="+EV">+EV</span>
+      <span class="chip"    data-kind="ARB">ARB</span>
+    </div>
+    <label>
+      Min edge %
+      <input type="number" id="min-edge" value="1" step="0.5" />
+    </label>
+    <label class="alert-controls" title="Plays a soft 'ping' when a NEW opportunity at or above this threshold appears. Dedupes per (game, market, side) — same opportunity won't beep twice in a session.">
+      <input type="checkbox" id="alert-enabled" />
+      Alert ≥
+      <input type="number" id="alert-threshold" value="15" step="1" min="1" />
+      %
+    </label>
+    <label title="When checked, manually muted rows are hidden entirely instead of dimmed in place.">
+      <input type="checkbox" id="hide-muted" />
+      Hide muted
+    </label>
+    <span class="row-count" id="row-count">…</span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="opps">
+      <thead>
+        <tr>
+          <th>Start (UTC)</th>
+          <th>Sport</th>
+          <th>Match</th>
+          <th>Market</th>
+          <th>Side</th>
+          <th class="num">CB odds</th>
+          <th class="num" title="Pinnacle no-vig fair price for the same side as the CB bet. Differs from the matches-page 'Pin H/Pin A' columns, which show Pinnacle's vigged posted prices.">Pin fair</th>
+          <th class="num">Edge%</th>
+          <th>Kind</th>
+          <th class="num">Kelly</th>
+          <th title="Open the bet tracker with this opportunity prefilled"></th>
+        </tr>
+      </thead>
+      <tbody id="opps-body">
+        <tr><td colspan="11" class="empty">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+const POLL_MS = 30_000;
+let cache = [];
+let kindFilter = "all";
+const minEdgeInput = document.getElementById("min-edge");
+const alertEnabled = document.getElementById("alert-enabled");
+const alertThreshold = document.getElementById("alert-threshold");
+
+document.querySelectorAll("#kind-filter .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#kind-filter .chip").forEach(c => c.classList.remove("on"));
+    chip.classList.add("on");
+    kindFilter = chip.dataset.kind;
+    fetchAndRender();
+  });
+});
+minEdgeInput.addEventListener("change", fetchAndRender);
+
+// ── Sound alert for new ≥ N% edges ─────────────────────────────────────────
+// Persist alert config across reloads (localStorage isn't supported in
+// claude.ai artifacts but works fine in a regular browser; if it fails
+// silently it's no worse than the defaults).
+try {
+  if (localStorage.getItem("alert_enabled") === "1") alertEnabled.checked = true;
+  const stored = localStorage.getItem("alert_threshold");
+  if (stored) alertThreshold.value = stored;
+} catch (e) { /* private mode / disabled — ignore */ }
+alertEnabled.addEventListener("change", () => {
+  try { localStorage.setItem("alert_enabled", alertEnabled.checked ? "1" : "0"); } catch (e) {}
+});
+alertThreshold.addEventListener("change", () => {
+  try { localStorage.setItem("alert_threshold", alertThreshold.value); } catch (e) {}
+});
+
+// Phase 3.12: sound + poll logic moved to shared static/alerts.js, which
+// runs on every dashboard page (matches, arbs, bets, calc, unmatched) so
+// alerts fire regardless of which tab you're on. The seen-set persists in
+// localStorage so navigating BACK to arbs.html doesn't replay current opps.
+// This page only keeps the UI controls (enabled + threshold) which write
+// to localStorage — alerts.js reads from there.
+
+function fmtNum(v, digits = 3) {
+  return (v === null || v === undefined) ? "—" : Number(v).toFixed(digits);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined) return "—";
+  return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+}
+function pctClass(v) {
+  if (v >= 5)   return "edge-pos-bold";
+  if (v > 0)    return "edge-pos";
+  return "edge-neg";
+}
+function fmtTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toISOString().slice(5, 16).replace("T", " ");
+}
+function fmtAge(sec) {
+  if (sec === null || sec === undefined) return "—";
+  if (sec < 60)   return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m" + String(sec % 60).padStart(2, "0") + "s";
+  return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
+}
+
+// 2-letter sport prefix for the compact status bar.
+function sportPrefix(s) {
+  if (s === "basketball") return "bb";
+  if (s === "soccer")     return "sc";
+  return s.slice(0, 2);
+}
+
+function buildSourceStatus(label, sports, source, staleThresholdSec) {
+  const parts = [];
+  let anyErr = false;
+  let worstAge = 0;
+  for (const [sport, st] of Object.entries(sports || {})) {
+    const s = st[source];
+    parts.push(`${sportPrefix(sport)}:${s.count} (${fmtAge(s.age_sec)})`);
+    if (s.error) anyErr = true;
+    if (typeof s.age_sec === "number") worstAge = Math.max(worstAge, s.age_sec);
+  }
+  const text = `${label} ${parts.join(" | ")}`;
+  let cls;
+  if (anyErr) cls = "err";
+  else if (worstAge > staleThresholdSec) cls = "stale";
+  else cls = "ok";
+  return { text, cls };
+}
+
+async function pollStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const cbEl  = document.getElementById("cb-status");
+    const pinEl = document.getElementById("pin-status");
+    const cb  = buildSourceStatus("CB",  s.sports, "cb",  600);
+    const pin = buildSourceStatus("Pin", s.sports, "pin", 240);
+    cbEl.textContent  = cb.text;
+    cbEl.className    = cb.cls;
+    pinEl.textContent = pin.text;
+    pinEl.className   = pin.cls;
+  } catch (e) { /* swallow */ }
+}
+
+// ── Phase 3.9: "already logged a bet on this" tracking ─────────────────────
+// Build a Set of stable keys for every bet we've logged, so we can flag the
+// corresponding opportunity rows. Key: (cb_event_id|market_type|period|
+// line|side|submarket|team_side) — same tuple the bet form prefills.
+let loggedBetKeys = new Set();
+
+// ── Phase 3.11: manual user flags (highlight + mute) per row ───────────────
+// Same key shape as bet-key. Persisted to localStorage so flags survive
+// reloads AND survive CB pulling/re-adding the same market.
+const HIGHLIGHT_KEY = "arbs_user_highlighted_v1";
+const MUTED_KEY     = "arbs_user_muted_v1";
+
+function loadKeySet(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch (e) { return new Set(); }
+}
+function saveKeySet(storageKey, set) {
+  try { localStorage.setItem(storageKey, JSON.stringify([...set])); }
+  catch (e) {}
+}
+
+let userHighlighted = loadKeySet(HIGHLIGHT_KEY);
+let userMuted       = loadKeySet(MUTED_KEY);
+let hideMuted       = false;
+
+const hideMutedInput = document.getElementById("hide-muted");
+// Restore checkbox state across reloads.
+try {
+  if (localStorage.getItem("arbs_hide_muted") === "1") {
+    hideMutedInput.checked = true;
+    hideMuted = true;
+  }
+} catch (e) {}
+hideMutedInput.addEventListener("change", () => {
+  hideMuted = hideMutedInput.checked;
+  try { localStorage.setItem("arbs_hide_muted", hideMuted ? "1" : "0"); } catch (e) {}
+  render();   // no need to refetch — local state only affects display
+});
+
+function toggleFlag(set, storageKey, key) {
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+  saveKeySet(storageKey, set);
+}
+
+function betKey(o) {
+  return [
+    o.cb_event_id || "",
+    o.market_type || "",
+    o.period || "",
+    o.line == null ? "" : o.line,
+    o.side || "",
+    o.submarket || "",
+    o.team_side || "",
+  ].join("|");
+}
+
+async function refreshLoggedBets() {
+  try {
+    // Pull ALL bets (open + settled) — once you've bet a market, you've
+    // committed your view on it, so we flag it regardless of outcome.
+    const r = await fetch("/api/bets?status=all");
+    if (!r.ok) return;
+    const bets = await r.json();
+    loggedBetKeys = new Set(bets.map(betKey));
+  } catch (e) { /* swallow — not fatal */ }
+}
+
+async function fetchAndRender() {
+  const minEdge = parseFloat(minEdgeInput.value || "1");
+  const params = new URLSearchParams({ min_edge: minEdge });
+  if (kindFilter !== "all") params.set("kind", kindFilter);
+  try {
+    // Fetch opportunities and bet list in parallel — both are needed before render.
+    const [oppsRes] = await Promise.all([
+      fetch("/api/opportunities?" + params.toString()),
+      refreshLoggedBets(),
+    ]);
+    cache = await oppsRes.json();
+    render();
+    // Alert ping handled by shared /alerts.js (Phase 3.12) — runs on every
+    // page, polls independently, persists seen-set in localStorage.
+  } catch (e) {
+    document.getElementById("opps-body").innerHTML =
+      `<tr><td colspan="11" class="empty">error loading opportunities</td></tr>`;
+  }
+}
+
+function render() {
+  const body = document.getElementById("opps-body");
+  document.getElementById("row-count").textContent =
+    `${cache.length} row${cache.length === 1 ? "" : "s"}`;
+  if (cache.length === 0) {
+    body.innerHTML = `<tr><td colspan="11" class="empty">no opportunities at current threshold</td></tr>`;
+    return;
+  }
+  body.innerHTML = cache.map(o => {
+    const partner = (o.kind === "ARB" && o.arb_partner_side && o.arb_partner_odds)
+      ? `<div class="partner">+ Pin ${o.arb_partner_side} @ ${Number(o.arb_partner_odds).toFixed(2)}</div>`
+      : "";
+    // Prefill payload for the bet tracker. The CB side is always logged on
+    // book='cb' (CB is the side we're betting). For ARB rows the user
+    // typically wants to log BOTH legs separately; we prefill the CB leg
+    // here, then the second click on the Pin partner side does that leg.
+    const prefill = new URLSearchParams({
+      sport: o.sport || "",
+      match_label: (o.match_label || "").replace(" — ", " vs "),
+      period: o.period || "FT",
+      market_type: o.market_type || "moneyline",
+      ...(o.line != null ? { line: o.line } : {}),
+      side: o.side || "",
+      ...(o.submarket ? { submarket: o.submarket } : {}),
+      ...(o.team_side ? { team_side: o.team_side } : {}),
+      book: "cb",
+      odds_taken: o.cb_odds.toFixed(2),
+      stake: (o.kelly_stake && o.kelly_stake > 0) ? Math.round(o.kelly_stake) : "20",
+      bankroll_at_time: "500",
+      ...(o.cb_event_id ? { cb_event_id: o.cb_event_id } : {}),
+      ...(o.start_time ? { start_time: o.start_time } : {}),
+    }).toString();
+    const key = betKey(o);
+    const hasBet = loggedBetKeys.has(key);
+    const isHighlighted = userHighlighted.has(key);
+    const isMuted = userMuted.has(key);
+    const rowClasses = [
+      "opp-row",
+      hasBet         ? "has-bet"          : "",
+      isHighlighted  ? "user-highlighted" : "",
+      isMuted        ? "user-muted"       : "",
+      (isMuted && hideMuted) ? "user-hidden" : "",
+    ].filter(Boolean).join(" ");
+    const titleParts = [];
+    if (hasBet)        titleParts.push("You already have a bet logged on this market.");
+    if (isHighlighted) titleParts.push("You highlighted this row.");
+    if (isMuted)       titleParts.push("You muted this row.");
+    titleParts.push("Click to open this match on the Matches page");
+    return `
+      <tr class="${rowClasses}" data-eid="${o.cb_event_id || ''}" data-key="${key}"
+          title="${titleParts.join(' ')}">
+        <td class="mono dim">${fmtTime(o.start_time)}</td>
+        <td class="dim">${o.sport || ""}</td>
+        <td>${o.match_label}</td>
+        <td class="dim">${o.market}</td>
+        <td>${o.side}${partner}</td>
+        <td class="num">${fmtNum(o.cb_odds)}</td>
+        <td class="num">${fmtNum(o.pin_no_vig)}</td>
+        <td class="num ${pctClass(o.edge_pct)}">${fmtPct(o.edge_pct)}</td>
+        <td><span class="kind ${o.kind === '+EV' ? 'kind-ev' : 'kind-arb'}">${o.kind}</span></td>
+        <td class="num">${o.kelly_stake ? o.kelly_stake.toFixed(0) : "—"}</td>
+        <td style="white-space:nowrap; text-align:right;">
+          <a class="log-bet-link" href="/bets.html?${prefill}" title="Log this bet">Log</a>
+          <button class="row-flag-btn${isHighlighted ? ' active' : ''}"
+                  data-action="highlight" data-key="${key}"
+                  title="Highlight this row (amber). Toggle on/off.">★</button>
+          <button class="row-flag-btn${isMuted ? ' active' : ''}"
+                  data-action="mute" data-key="${key}"
+                  title="Mute this row (dim). Toggle on/off.">−</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  // Row click → matches page deep link, BUT excluding the Log link AND the
+  // flag buttons so their own actions aren't pre-empted.
+  body.querySelectorAll(".opp-row").forEach(tr => {
+    const eid = tr.dataset.eid;
+    if (!eid) return;
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.closest("a.log-bet-link")) return;
+      if (ev.target.closest("button.row-flag-btn")) return;
+      window.location.href = `/matches.html#match-${eid}`;
+    });
+  });
+
+  // Phase 3.11: wire highlight / mute buttons. Stop propagation so the
+  // row-click navigation above doesn't fire.
+  body.querySelectorAll("button.row-flag-btn").forEach(btn => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const key = btn.dataset.key;
+      const action = btn.dataset.action;
+      if (!key) return;
+      if (action === "highlight") {
+        toggleFlag(userHighlighted, HIGHLIGHT_KEY, key);
+      } else if (action === "mute") {
+        toggleFlag(userMuted, MUTED_KEY, key);
+      }
+      // Re-render so class changes + button-active state update immediately.
+      render();
+    });
+  });
+}
+
+pollStatus();
+fetchAndRender();
+setInterval(pollStatus,    10_000);
+setInterval(fetchAndRender, POLL_MS);
+</script>
+</body>
+</html>

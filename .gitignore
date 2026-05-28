@@ -1,0 +1,48 @@
+# Personal data — never push
+/data/bets.db
+/data/bets.db-shm
+/data/bets.db-wal
+/data/cache/
+/data/unmatched_log.csv
+
+# Operational telemetry (regenerated each run)
+/dashboard.log
+/dashboard.log~
+/output/
+
+# Dev / debug helpers — kept locally but excluded from the published repo
+# (these were one-off Playwright capture + Pinnacle probe scripts used
+# during scraper development; not part of the running system).
+/scripts/
+
+# Claude Code handoff prompts from earlier phases — historical, not load-bearing.
+# build_log.md stays under git.
+/notes/cc_prompt_*.md
+
+# Python build / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+pytest-cache-files-*/
+
+# Virtual env (recreated by `python -m venv .venv && pip install -r requirements.txt`)
+.venv/
+venv/
+env/
+
+# Playwright browser install — runs `playwright install chromium` after pip install
+.playwright/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+/data/raw/pinnacle_smoke_*.txt

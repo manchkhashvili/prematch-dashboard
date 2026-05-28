@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Calculator — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527c" />
+  <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
+  <script src="/theme.js?v=20260527"></script>
+  <!-- Phase 3.12: cross-page alert poller. -->
+  <script src="/alerts.js?v=20260527d" defer></script>
+  <style>
+    /* Page-local styles — kept here to avoid polluting style.css. The
+       calculator is the only page with a free-form form layout. */
+    .calc-wrap {
+      max-width: 720px;
+      margin: 20px auto;
+      padding: 0 20px 40px;
+    }
+    .calc-section {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+    }
+    .calc-section h2 {
+      margin: 0 0 12px;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-faint);
+    }
+    .calc-grid {
+      display: grid;
+      grid-template-columns: 90px 110px 110px 110px 110px;
+      gap: 8px 12px;
+      align-items: center;
+    }
+    .calc-grid.three { grid-template-columns: 90px 110px 110px 110px 110px; }
+    .calc-grid label {
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+    .calc-grid input[type="number"] {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      width: 100%;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    .calc-grid input[type="number"]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .calc-grid .col-head {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-faint);
+      font-weight: 600;
+    }
+    .calc-grid .out {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text);
+      padding: 5px 8px;
+      background: var(--bg);
+      border: 1px solid transparent;
+      border-radius: 4px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .calc-grid .out.dim {
+      color: var(--text-faint);
+    }
+    .mode-toggle {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .mode-toggle .chip {
+      background: var(--bg);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .mode-toggle .chip.on {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+    }
+    .summary {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 24px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-dim);
+      flex-wrap: wrap;
+    }
+    .summary b {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .bankroll-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .bankroll-row input {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      width: 100px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    .help {
+      color: var(--text-faint);
+      font-size: 11px;
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+    .help code {
+      background: var(--bg);
+      color: var(--text-dim);
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html">Matches</a>
+      <a href="/arbs.html">Arbs / +EV</a>
+      <a href="/bets.html">Bets</a>
+      <a href="/calc.html" class="active">Calc</a>
+      <a href="/unmatched.html">Unmatched</a>
+    </nav>
+  </header>
+
+  <div class="calc-wrap">
+
+    <!-- ── Devig + +EV ─────────────────────────────────────────────── -->
+    <div class="calc-section">
+      <h2>Fair odds (devig) + +EV check</h2>
+
+      <div class="mode-toggle" id="mode-toggle">
+        <span class="chip on" data-mode="2way">2-way (ML, spread, totals)</span>
+        <span class="chip"    data-mode="3way">3-way (1X2 / soccer ML)</span>
+      </div>
+
+      <div class="mode-toggle" id="method-toggle"
+           title="Shin's method corrects for the favorite/dog bias in proportional devig. Default since Phase 3.7. Proportional is shown for comparison.">
+        <span class="chip on" data-method="shin">Shin (default)</span>
+        <span class="chip"    data-method="proportional">Proportional (legacy)</span>
+      </div>
+
+      <div class="bankroll-row">
+        Bankroll
+        <input type="number" id="bankroll" value="500" step="50" min="0" />
+        <span class="help" style="margin-top:0">used for quarter-Kelly stake</span>
+        <button type="button" id="calc-reset"
+                style="margin-left:auto; background:transparent; color:var(--text-dim); border:1px solid var(--border); border-radius:3px; padding:4px 10px; font-family:var(--mono); font-size:11px; letter-spacing:0.05em; text-transform:uppercase; cursor:pointer;"
+                title="Clear all inputs and stored state">
+          Reset
+        </button>
+      </div>
+
+      <div class="calc-grid" id="calc-grid">
+        <!-- header -->
+        <span></span>
+        <span class="col-head">Sharp odds</span>
+        <span class="col-head">Fair odds</span>
+        <span class="col-head">Fair %</span>
+        <span class="col-head">My CB odds</span>
+
+        <!-- rows injected by JS -->
+      </div>
+
+      <div class="summary" id="summary">
+        <span>Vig: <b id="vig-out">—</b></span>
+        <span>—</span>
+      </div>
+
+      <div class="help">
+        Enter the sharp book's <b>decimal</b> odds on the left (e.g. Pinnacle's
+        posted prices). Fair odds and fair % are the no-vig price implied by
+        the market. Optionally enter your CB (or any book's) decimal odds on
+        the right for an instant edge% + quarter-Kelly stake check.
+        Formula: <code>edge = my_odds × fair_prob − 1</code>.
+      </div>
+    </div>
+
+  </div>
+
+<script>
+"use strict";
+
+// ── State ───────────────────────────────────────────────────────────────────
+let mode = "2way";          // "2way" | "3way"
+let method = "shin";        // "shin" | "proportional" — phase 3.7
+const SIDES_2WAY = ["Home", "Away"];
+const SIDES_3WAY = ["Home", "Draw", "Away"];
+let lastInputs = {};         // {side: {sharp, my}}
+
+const grid = document.getElementById("calc-grid");
+const bankrollInput = document.getElementById("bankroll");
+const summary = document.getElementById("summary");
+const vigOut = document.getElementById("vig-out");
+
+// ── Math helpers (mirrors src/vig.py) ───────────────────────────────────────
+
+// Proportional devig — simple, biased on skewed markets. Kept for comparison.
+function devigProportional(decimalOdds) {
+  if (decimalOdds.some(d => !d || d <= 1.0)) return null;
+  const imp = decimalOdds.map(d => 1 / d);
+  const total = imp.reduce((a, b) => a + b, 0);
+  return imp.map(i => i / total);
+}
+
+// Shin's method — numerically solves for insider proportion z so the fair
+// probs sum to 1. Mirrors src/vig._solve_shin_z (Python). Returns array of
+// fair probabilities or null on invalid input. See src/vig.py for the
+// rationale and references.
+function devigShin(decimalOdds) {
+  if (decimalOdds.some(d => !d || d <= 1.0)) return null;
+  const imps = decimalOdds.map(d => 1 / d);
+  const overround = imps.reduce((a, b) => a + b, 0);
+  if (overround <= 1.0) {
+    // No vig — early return as proportional (which is identity here).
+    return imps.map(p => p / overround);
+  }
+
+  function probsAt(z) {
+    return imps.map(pi => {
+      const inner = z * z + 4 * (1 - z) * pi * pi / overround;
+      return (Math.sqrt(inner) - z) / (2 * (1 - z));
+    });
+  }
+  function sumAt(z) {
+    return probsAt(z).reduce((a, b) => a + b, 0);
+  }
+
+  // Bisect z ∈ [0, 0.5]. If sum at z=0 (proportional) is ≤ 1 (degenerate),
+  // fall back to proportional.
+  if (sumAt(0) <= 1.0) return imps.map(p => p / overround);
+  let lo = 0, hi = 0.5;
+  for (let i = 0; i < 60; i++) {
+    const z = (lo + hi) / 2;
+    if (sumAt(z) > 1.0) lo = z; else hi = z;
+  }
+  const probs = probsAt((lo + hi) / 2);
+  const s = probs.reduce((a, b) => a + b, 0);
+  // Renormalize tiny residual.
+  return probs.map(p => p / s);
+}
+
+// Dispatch on current method.
+function devig(decimalOdds) {
+  return method === "shin"
+    ? devigShin(decimalOdds)
+    : devigProportional(decimalOdds);
+}
+
+function fairDecimal(prob) {
+  if (prob <= 0 || prob >= 1) return null;
+  return 1 / prob;
+}
+
+function edgePct(myOdds, fairProb) {
+  // edge = my_odds × fair_prob − 1, expressed as %.
+  return (myOdds * fairProb - 1) * 100;
+}
+
+function quarterKelly(myOdds, fairProb, bankroll) {
+  // f* = (p·d − 1) / (d − 1); we stake f*/4 × bankroll. Negative or zero → 0.
+  if (myOdds <= 1) return 0;
+  const f = (fairProb * myOdds - 1) / (myOdds - 1);
+  if (f <= 0) return 0;
+  return (f / 4) * bankroll;
+}
+
+function vigPct(decimalOdds) {
+  // (sum of implied probs − 1) × 100 — book's overround.
+  if (decimalOdds.some(d => !d || d <= 1.0)) return null;
+  return (decimalOdds.reduce((a, d) => a + 1 / d, 0) - 1) * 100;
+}
+
+// ── DOM helpers ─────────────────────────────────────────────────────────────
+function fmt(v, digits = 3) {
+  return (v === null || v === undefined || isNaN(v))
+    ? "—" : Number(v).toFixed(digits);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+}
+function pctClass(v) {
+  if (v === null || v === undefined || isNaN(v)) return "dim";
+  if (v >= 5) return "edge-pos-bold";
+  if (v > 0) return "edge-pos";
+  return "edge-neg";
+}
+
+// ── Render ──────────────────────────────────────────────────────────────────
+function renderGrid() {
+  const sides = mode === "3way" ? SIDES_3WAY : SIDES_2WAY;
+  // Clear all rows except the first 5 header cells.
+  while (grid.children.length > 5) grid.removeChild(grid.lastChild);
+
+  for (const side of sides) {
+    // label
+    const lbl = document.createElement("label");
+    lbl.textContent = side;
+    grid.appendChild(lbl);
+
+    // sharp input
+    const sharp = document.createElement("input");
+    sharp.type = "number";
+    sharp.step = "0.01";
+    sharp.min = "1.01";
+    sharp.dataset.side = side;
+    sharp.dataset.kind = "sharp";
+    if (lastInputs[side]?.sharp) sharp.value = lastInputs[side].sharp;
+    sharp.addEventListener("input", recompute);
+    grid.appendChild(sharp);
+
+    // fair-odds output
+    const fairO = document.createElement("span");
+    fairO.className = "out dim";
+    fairO.dataset.outFor = side + "-fair";
+    fairO.textContent = "—";
+    grid.appendChild(fairO);
+
+    // fair-% output
+    const fairP = document.createElement("span");
+    fairP.className = "out dim";
+    fairP.dataset.outFor = side + "-prob";
+    fairP.textContent = "—";
+    grid.appendChild(fairP);
+
+    // my-odds input (with edge% inline output below — we'll repurpose by
+    // appending edge text after the input via title attr OR an extra row.
+    // Simplest: stack input and edge inline.)
+    const myWrap = document.createElement("span");
+    myWrap.style.display = "flex";
+    myWrap.style.gap = "4px";
+    myWrap.style.alignItems = "center";
+
+    const my = document.createElement("input");
+    my.type = "number";
+    my.step = "0.01";
+    my.min = "1.01";
+    my.style.flex = "1";
+    my.dataset.side = side;
+    my.dataset.kind = "my";
+    if (lastInputs[side]?.my) my.value = lastInputs[side].my;
+    my.addEventListener("input", recompute);
+    myWrap.appendChild(my);
+    grid.appendChild(myWrap);
+
+    // Edge + Kelly rendered as a second row spanning under the my-odds col.
+    // Layout: empty, empty, empty, empty, edgeOut.
+    grid.appendChild(document.createElement("span"));  // empty 1
+    grid.appendChild(document.createElement("span"));  // empty 2
+    grid.appendChild(document.createElement("span"));  // empty 3
+    const edgeLbl = document.createElement("span");
+    edgeLbl.className = "col-head";
+    edgeLbl.style.textAlign = "right";
+    edgeLbl.textContent = "edge / Kelly";
+    grid.appendChild(edgeLbl);
+    const edgeOut = document.createElement("span");
+    edgeOut.className = "out dim";
+    edgeOut.dataset.outFor = side + "-edge";
+    edgeOut.textContent = "—";
+    grid.appendChild(edgeOut);
+  }
+}
+
+function recompute() {
+  const sides = mode === "3way" ? SIDES_3WAY : SIDES_2WAY;
+  // Capture inputs
+  const sharps = [];
+  const mys = [];
+  lastInputs = {};
+  for (const side of sides) {
+    const sInp = grid.querySelector(`input[data-side="${side}"][data-kind="sharp"]`);
+    const mInp = grid.querySelector(`input[data-side="${side}"][data-kind="my"]`);
+    const s = parseFloat(sInp?.value || "");
+    const m = parseFloat(mInp?.value || "");
+    sharps.push(isNaN(s) ? null : s);
+    mys.push(isNaN(m) ? null : m);
+    lastInputs[side] = { sharp: sInp?.value || "", my: mInp?.value || "" };
+  }
+
+  // Devig
+  const fairProbs = devig(sharps);
+  const bankroll = parseFloat(bankrollInput.value) || 0;
+
+  for (let i = 0; i < sides.length; i++) {
+    const side = sides[i];
+    const fairO = grid.querySelector(`[data-out-for="${side}-fair"]`);
+    const fairP = grid.querySelector(`[data-out-for="${side}-prob"]`);
+    const edgeOut = grid.querySelector(`[data-out-for="${side}-edge"]`);
+
+    if (fairProbs) {
+      const fair = fairProbs[i];
+      fairO.textContent = fmt(fairDecimal(fair), 3);
+      fairO.className = "out";
+      fairP.textContent = (fair * 100).toFixed(2) + "%";
+      fairP.className = "out";
+
+      const myOdds = mys[i];
+      if (myOdds && myOdds > 1.0) {
+        const e = edgePct(myOdds, fair);
+        const k = quarterKelly(myOdds, fair, bankroll);
+        edgeOut.textContent = fmtPct(e) + (k > 0 ? ` / $${k.toFixed(0)}` : "");
+        edgeOut.className = "out " + pctClass(e);
+      } else {
+        edgeOut.textContent = "—";
+        edgeOut.className = "out dim";
+      }
+    } else {
+      fairO.textContent = "—";  fairO.className = "out dim";
+      fairP.textContent = "—";  fairP.className = "out dim";
+      edgeOut.textContent = "—"; edgeOut.className = "out dim";
+    }
+  }
+
+  // Vig
+  const v = vigPct(sharps);
+  if (v !== null) {
+    vigOut.textContent = v.toFixed(2) + "%";
+    vigOut.className = v > 5 ? "edge-neg" : "edge-pos";
+  } else {
+    vigOut.textContent = "—";
+    vigOut.className = "";
+  }
+}
+
+// ── Mode toggle (2-way / 3-way) ─────────────────────────────────────────────
+document.querySelectorAll("#mode-toggle .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#mode-toggle .chip").forEach(c => c.classList.remove("on"));
+    chip.classList.add("on");
+    mode = chip.dataset.mode;
+    lastInputs = {};   // reset on mode change to avoid leaving stale 3rd-side value
+    renderGrid();
+    recompute();
+  });
+});
+
+// ── Method toggle (Shin / Proportional) — Phase 3.7 ────────────────────────
+// Swaps the devig algorithm; inputs stay the same so the user can A/B compare.
+document.querySelectorAll("#method-toggle .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#method-toggle .chip").forEach(c => c.classList.remove("on"));
+    chip.classList.add("on");
+    method = chip.dataset.method;
+    recompute();
+  });
+});
+
+bankrollInput.addEventListener("input", recompute);
+
+// ── Phase 3.9: persist inputs across page navigation ──────────────────────
+// Save mode, method, bankroll, and every sharp/my odds value to localStorage
+// on every change. Restore on page load. Lets the user navigate away to
+// /matches.html or /bets.html and come back without retyping odds.
+const STORAGE_KEY = "calc_state_v1";
+
+function saveState() {
+  try {
+    const state = {
+      mode, method,
+      bankroll: bankrollInput.value,
+      inputs: lastInputs,   // {side: {sharp, my}}
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) { /* private mode / disabled */ }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.mode === "2way" || s.mode === "3way") mode = s.mode;
+    if (s.method === "shin" || s.method === "proportional") method = s.method;
+    if (s.bankroll != null) bankrollInput.value = s.bankroll;
+    if (s.inputs && typeof s.inputs === "object") lastInputs = s.inputs;
+    // Sync toggle chips to restored state.
+    document.querySelectorAll("#mode-toggle .chip").forEach(c => {
+      c.classList.toggle("on", c.dataset.mode === mode);
+    });
+    document.querySelectorAll("#method-toggle .chip").forEach(c => {
+      c.classList.toggle("on", c.dataset.method === method);
+    });
+  } catch (e) { /* corrupt JSON — ignore + clear */
+    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+  }
+}
+
+// Wrap recompute() so every change also persists. We can't override the
+// function (it's hoisted above); instead, install a delegated listener that
+// fires on any input within the grid + bankroll.
+function persistOnChange() {
+  // recompute() runs first via the inputs' own listeners; this fires after,
+  // by which point lastInputs has the fresh values.
+  saveState();
+}
+grid.addEventListener("input", persistOnChange);
+bankrollInput.addEventListener("input", persistOnChange);
+document.querySelectorAll("#mode-toggle .chip, #method-toggle .chip").forEach(c => {
+  c.addEventListener("click", persistOnChange);
+});
+
+// Reset button — wipe inputs + stored state + reset to defaults.
+document.getElementById("calc-reset").addEventListener("click", () => {
+  try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+  lastInputs = {};
+  mode = "2way";
+  method = "shin";
+  bankrollInput.value = "500";
+  document.querySelectorAll("#mode-toggle .chip").forEach(c => {
+    c.classList.toggle("on", c.dataset.mode === "2way");
+  });
+  document.querySelectorAll("#method-toggle .chip").forEach(c => {
+    c.classList.toggle("on", c.dataset.method === "shin");
+  });
+  renderGrid();
+  recompute();
+});
+
+// init — load saved state BEFORE first renderGrid so the inputs render
+// pre-filled, then recompute against the restored values.
+loadState();
+renderGrid();
+recompute();
+</script>
+</body>
+</html>

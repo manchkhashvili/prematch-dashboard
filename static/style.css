@@ -1,0 +1,666 @@
+/* prematch dashboard — vanilla, dense, themeable */
+
+/* Dark theme is the default (Phase 1–3 baseline). Light theme overrides
+   live under :root[data-theme="light"] below; the data-theme attribute
+   is set on <html> by theme.js BEFORE first paint (no flash). */
+:root {
+  --bg:               #0e1116;
+  --bg-elev:          #161b22;
+  --bg-row:           #1c2128;
+  --bg-row-hover:     #232a33;
+  --bg-expander:      #0a0d12;   /* deeper than bg, for inline market panels */
+  --border:           #2d333b;
+  --text:             #e6edf3;
+  --text-dim:         #8b949e;
+  --text-faint:       #6e7681;
+  --accent:           #58a6ff;
+  --good:             #2ea043;
+  --good-bold:        #56d364;
+  --warn:             #d29922;
+  --bad:              #f85149;
+  /* Tinted soft backgrounds for status chips, freshness pills, deep-link highlight.
+     Derived from the matching foreground colors at low alpha. */
+  --accent-highlight: rgba( 88, 166, 255, 0.20);
+  --good-bg-soft:     rgba( 46, 160,  67, 0.10);
+  --warn-bg-soft:     rgba(210, 153,  34, 0.10);
+  --bad-bg-soft:      rgba(248,  81,  73, 0.12);
+  --dim-bg-soft:      rgba(139, 148, 158, 0.06);
+  --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+}
+
+/* Light theme — GitHub-Primer-inspired palette so the structure feels familiar
+   and the accent/good/bad colors still read at a glance. */
+:root[data-theme="light"] {
+  --bg:               #ffffff;
+  --bg-elev:          #f6f8fa;
+  --bg-row:           #ffffff;
+  --bg-row-hover:     #f3f4f6;
+  --bg-expander:      #f6f8fa;
+  --border:           #d0d7de;
+  --text:             #1f2328;
+  --text-dim:         #656d76;
+  --text-faint:       #8c959f;
+  --accent:           #0969da;
+  --good:             #1a7f37;
+  --good-bold:        #116329;
+  --warn:             #9a6700;
+  --bad:              #cf222e;
+  --accent-highlight: rgba(  9, 105, 218, 0.15);
+  --good-bg-soft:     rgba( 26, 127,  55, 0.10);
+  --warn-bg-soft:     rgba(154, 103,   0, 0.10);
+  --bad-bg-soft:      rgba(207,  34,  46, 0.10);
+  --dim-bg-soft:      rgba(101, 109, 118, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── header ────────────────────────────────────────────────────────────── */
+header {
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+header nav {
+  display: flex;
+  gap: 14px;
+}
+
+header nav a {
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 4px 0;
+  border-bottom: 2px solid transparent;
+}
+
+header nav a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+header nav a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.status {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 14px;
+}
+
+.status .ok    { color: var(--good); }
+.status .stale { color: var(--warn); }
+.status .err   { color: var(--bad); }
+
+.controls {
+  padding: 10px 18px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.controls label {
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.controls input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.controls input[type="number"] {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  width: 70px;
+  font-family: var(--mono);
+}
+
+.controls .chip-group {
+  display: flex;
+  gap: 6px;
+}
+
+.controls .chip {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.controls .chip.on {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.row-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* ── tables ────────────────────────────────────────────────────────────── */
+.table-wrap {
+  padding: 0 18px 30px;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 8px;
+}
+
+th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--bg);
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+
+th.num { text-align: right; }
+
+/* column-filter row sits under the headers inside <thead> */
+tr.filter-row th {
+  padding: 4px 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 30px;  /* below the header row */
+}
+.col-filter {
+  width: 100%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 6px;
+}
+.col-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.col-filter::placeholder { color: var(--text-faint); }
+
+#clear-filters {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+#clear-filters:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+td.num {
+  font-family: var(--mono);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+td.mono { font-family: var(--mono); }
+
+tbody tr:hover { background: var(--bg-row-hover); }
+
+td.dim { color: var(--text-faint); }
+
+/* edge% color coding */
+.edge-pos       { color: var(--good); }
+.edge-pos-bold  { color: var(--good-bold); font-weight: 600; }
+.edge-neg       { color: var(--text-faint); }
+.edge-zero      { color: var(--text-dim); }
+
+/* +EV vs ARB chips inside cells */
+.kind {
+  display: inline-block;
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+}
+.kind-ev  { color: var(--good);  border-color: var(--good); }
+.kind-arb { color: var(--accent); border-color: var(--accent); }
+
+/* ARB partner-leg note below the Side cell */
+.partner {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* clickable arbs row */
+tr.opp-row:hover { background: var(--bg-row-hover); }
+
+/* deep-link highlight on matches page when arriving via #match-{id} */
+tr.match-row.highlight {
+  animation: highlight-fade 2.5s ease-out;
+}
+@keyframes highlight-fade {
+  0%   { background: var(--accent-highlight); }
+  100% { background: transparent; }
+}
+
+/* expand button */
+.expand-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  cursor: pointer;
+  padding: 1px 7px;
+  font-size: 13px;
+  border-radius: 3px;
+}
+.expand-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.expand-btn.open  { color: var(--accent); border-color: var(--accent); }
+
+/* expander row */
+.expander-row td {
+  background: var(--bg-expander);
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.expander {
+  padding: 12px 30px 14px;
+  display: grid;
+  gap: 14px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.expander h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.expander h4 .market-count {
+  color: var(--text-faint);
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.expander table {
+  margin-top: 0;
+}
+
+.expander th, .expander td {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.expander td.market-label {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+/* Period section inside the expander — groups markets by FT/H1/H2/Q1–Q4 */
+.period-section {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+}
+
+.period-header {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.period-header .period-count {
+  color: var(--text-faint);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+
+.markets-table {
+  margin: 0;
+}
+
+.markets-table th {
+  position: static;   /* override the sticky-top default — these don't need to stick inside the expander */
+  background: transparent;
+  padding: 3px 10px;
+  font-size: 10px;
+}
+
+/* Phase 2: side-block grid for expander rows. Each market emits up to 3
+   side blocks (home/draw/away OR over/under, padded). Each block stacks
+   CB / Pin / Fair vertically so 2-way and 3-way markets share a clean
+   3-column grid. */
+.markets-table-grid td.side-block {
+  vertical-align: top;
+  padding: 4px 10px;
+  min-width: 100px;
+}
+.markets-table-grid td.side-pad {
+  background: transparent;
+  border: none;
+}
+.side-header {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.side-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.side-row .side-label {
+  color: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.side-row.dim {
+  color: var(--text-dim);
+}
+.markets-table-grid .market-label {
+  vertical-align: top;
+  padding-top: 18px;   /* visually align with the value rows inside side-block */
+}
+
+/* Per-game markets-status badge (FULL / LIST / FAIL) next to the [+] button */
+.expand-cell {
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.status-badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid;
+}
+
+.status-loaded {
+  color: var(--good);
+  border-color: var(--good);
+  background: var(--good-bg-soft);
+}
+
+.status-list {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-bg-soft);
+}
+
+.status-failed {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: var(--bad-bg-soft);
+}
+
+/* "How stale" indicator next to the status badge — tells you when this
+   game's detail was last successfully expanded. Fresh = green, very stale = red. */
+.freshness {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+  min-width: 28px;
+  text-align: center;
+}
+
+.freshness-fresh      { color: var(--good);      background: var(--good-bg-soft); }
+.freshness-ok         { color: var(--text-dim);  background: var(--dim-bg-soft); }
+.freshness-stale      { color: var(--warn);      background: var(--warn-bg-soft); }
+.freshness-very-stale { color: var(--bad);       background: var(--bad-bg-soft); }
+.freshness-none       { color: var(--text-faint); }
+
+/* Sound-alert controls on the arbs page */
+.alert-controls input[type="number"] {
+  width: 50px;
+}
+
+.empty {
+  padding: 60px 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* unmatched-page score color coding */
+.score-high  { color: var(--good); font-weight: 600; }
+.score-mid   { color: var(--warn); font-weight: 600; }
+.score-low   { color: var(--text-dim); }
+.score-faint { color: var(--text-faint); }
+
+.controls .hint {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-left: auto;
+}
+.controls .hint code {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* Phase 3.9 — opp rows on arbs.html flagged when the user already has a bet
+   on the same market+side+line. Subtle accent tint so the row reads as
+   "you've already acted on this" without screaming. */
+tr.opp-row.has-bet:not(.user-highlighted) {
+  background: var(--accent-highlight);
+}
+tr.opp-row.has-bet:not(.user-highlighted):hover {
+  background: var(--accent-highlight);
+  filter: brightness(1.1);
+}
+tr.opp-row.has-bet:not(.user-highlighted) td:first-child {
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;  /* compensate for the 3px border */
+}
+
+/* Phase 3.11 — manual user flags on opp rows.
+
+   user-highlighted: warm amber tint + amber left border. Use when the user
+                     wants to track a specific row (planning to bet, watching
+                     for line movement, etc). Wins over has-bet visually
+                     when both apply (manual override beats automatic).
+
+   user-muted:       opacity reduced. Row stays visible so user can un-mute,
+                     but visually retreats. Composable with any other class. */
+tr.opp-row.user-highlighted {
+  background: var(--warn-bg-soft);
+}
+tr.opp-row.user-highlighted:hover {
+  background: var(--warn-bg-soft);
+  filter: brightness(1.08);
+}
+tr.opp-row.user-highlighted td:first-child {
+  border-left: 3px solid var(--warn);
+  padding-left: 9px;
+}
+
+tr.opp-row.user-muted {
+  opacity: 0.32;
+  filter: grayscale(0.55);
+}
+tr.opp-row.user-muted:hover {
+  opacity: 0.55;
+}
+tr.opp-row.user-muted.user-hidden {
+  display: none;   /* applied when the "hide muted" filter is on */
+}
+
+/* Per-row action buttons: highlight + mute. Sit next to the Log link. */
+.row-flag-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  margin-left: 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  line-height: 1.2;
+  min-width: 18px;
+  text-align: center;
+}
+.row-flag-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.row-flag-btn.active[data-action="highlight"] {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-bg-soft);
+}
+.row-flag-btn.active[data-action="mute"] {
+  color: var(--text-faint);
+  border-color: var(--text-faint);
+  background: var(--dim-bg-soft);
+}
+
+/* "Log bet" link on arbs/matches rows — opens /bets.html with prefilled form. */
+.log-bet-link {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 3px;
+  text-decoration: none;
+}
+.log-bet-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+/* ── theme toggle ──────────────────────────────────────────────────────────
+   Injected into <header> by theme.js. Sits to the right of the status block. */
+#theme-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  user-select: none;
+}
+#theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}

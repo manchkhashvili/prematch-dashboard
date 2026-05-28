@@ -1,0 +1,13 @@
+# Pinned set for the prematch dashboard. Superset of the root requirements.txt;
+# extras = fastapi/uvicorn/jinja2 (web), rapidfuzz (matcher), pyyaml (aliases),
+# pytest (tests).
+httpx
+playwright
+beautifulsoup4
+fastapi
+uvicorn[standard]
+jinja2
+rapidfuzz
+pyyaml
+python-dotenv
+pytest
