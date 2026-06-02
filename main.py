@@ -14,6 +14,10 @@ Common flavors (per-sport mode via SPORTS env var — see below):
     SPORTS=basketball:list,soccer:list python main.py     # lightest, both sports
     python main.py 2>&1 | tee dashboard.log               # tee logs for debugging
 
+    # Anomalies tab — separate hourly full-detail basketball scan, on top of
+    # whatever (light) modes you run. Works even with everything in list mode:
+    ANOMALY_SCAN=1 SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboard.log
+
 Dev mode — one cycle, print table, exit:
 
     python main.py --once                # live both books
@@ -40,6 +44,18 @@ Environment variables (dashboard mode):
                                 SPORTS=basketball_full,soccer_list   (underscore syntax)
                                 SPORTS=basketball                    (basketball only, full)
                                 SPORTS=basketball:full,soccer:off    (soccer disabled)
+
+    ANOMALY_SCAN=0            1=enable the Anomalies tab. Runs a SEPARATE
+                              full-detail basketball scrape (force_detail) on
+                              its own cadence, independent of SPORTS modes, so
+                              the CB ladder anomaly detector has the alt-lines
+                              even when basketball runs in list mode for the
+                              other tabs. (Or add `anomalies:on` to SPORTS.)
+    ANOMALY_SCAN_AT_MINUTE=15,45  clock-align the scan to each listed minute of
+                              every hour. Default "15,45" = every 30 min (fresh
+                              a couple minutes before :00 and :30). Comma-list.
+                              Set to off/-1 to use a fixed interval instead.
+    ANOMALY_SCAN_SEC=1800     fixed-interval fallback when alignment is off.
 
     Legacy (back-compat, prefer SPORTS instead):
     ENABLED_SPORTS=           comma-separated sport names; default = all.

@@ -46,3 +46,4 @@ Thumbs.db
 *.swo
 *~
 /data/raw/pinnacle_smoke_*.txt
+.fuse_hidden*

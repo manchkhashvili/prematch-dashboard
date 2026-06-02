@@ -103,6 +103,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                     cb_event_id=cb_event_id,
                     market_type=cb.market_type, period=cb.period, line=cb.line,
                     submarket=cb.submarket, team_side=cb.team_side,
+                    league=cb.league,
                 ))
 
         # ── ARB pass ────────────────────────────────────────────────────────
@@ -141,6 +142,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                 arb_partner_odds=pin_other_dec,
                 market_type=cb.market_type, period=cb.period, line=cb.line,
                 submarket=cb.submarket, team_side=cb.team_side,
+                league=cb.league,
             ))
 
     return opps

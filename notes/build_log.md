@@ -44,6 +44,589 @@ Now keep scrolling for the dated history.
 
 ---
 
+## 2026-05-31 — Phase 6: Anomalies tab + hourly scanner (separate full scan)
+
+Wires the CB ladder anomaly detector (built earlier today) into the dashboard
+as its own tab, fed by a SEPARATE hourly scan. Builds on the morning entry below.
+
+**Key constraint that shaped the design (user clarified):** the user normally
+runs everything in **list mode** (`SPORTS=basketball:list,soccer:list,tennis:list`).
+List mode skips CB detail-page expansion, so the dashboard's CB state has NO
+alt-line ladders — the anomaly detector has nothing to chew on. So we can't
+reuse dashboard state (my first instinct). Instead the scanner does its **own
+full-detail basketball scrape**, hourly, independent of the SPORTS modes.
+
+**How it's enabled:** `ANOMALY_SCAN=1` (or an `anomalies:on` token in SPORTS).
+Recommended command:
+```
+ANOMALY_SCAN=1 SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboard.log
+```
+Cadence `ANOMALY_SCAN_SEC` (default 3600).
+
+**Scraper change (small, surgical):** added `force_detail: bool` to
+`fetch_crystalbet_basketball_prematch` → `_fetch_for_sport`. When True it
+bypasses the `SKIP_DETAIL_SPORTS` list-view short-circuit so the full ladders
+get scraped even though basketball is in list mode for the other tabs. The
+shared singleton browser is safe: the per-sport `_get_sport_lock(17)` serialises
+the hourly full scan against the routine basketball:list poll (the scan just
+holds the basketball lock for ~3 min/hour; the list poll waits its turn).
+
+**Backend (`src/app.py`):**
+- `_compute_anomalies()` (hourly via `_anomaly_loop`, started in lifespan only
+  when `ANOMALY_SCAN`): scrapes basketball `force_detail=True`, runs
+  `find_ladder_anomalies(markets=spread+total, min_pct=0)`, stores base rows +
+  the full CB-odds snapshot (`_anomaly_cb_odds`).
+- `GET /api/anomalies?min_pct=&spread_only=`: filters the stored rows, then
+  attaches **live** Pinnacle context at request time (so Pin fair/moves stay
+  fresh between hourly CB scans): matches the snapshot CB odds vs current
+  basketball Pin via the existing matcher, finds the no-vig fair at the flagged
+  rung's line via `_closest_pin`+`_maybe_devig`, computes `cb_odds × fair_prob − 1`
+  edge, and pulls the biggest recent move for that match from `_recent_moves`.
+- Returns `{enabled, computed_at, cb_fetched_at, scan_sec, error, count, anomalies}`.
+
+**"Bet rung" definition** (`_anomaly_base_row`): the rung you'd actually back is
+the side+line carrying the inflated price — for an `expected==down` violation
+(home odds rose as the line improved) that's `line_hi`/`odds_hi`; for `up`
+(away/under odds fell) it's `line_lo`/`odds_lo`. The Pin fair + edge are computed
+against that rung.
+
+**Frontend (`static/anomalies.html`):** mirrors the Top Moves page (per user
+request — "same type of top moves tab"). Built-in `Min % off` filter + `Spread
+only` toggle. Columns: start, league, match, market, side, ladder pair, odds
+pair, % off, Pin fair, Pin edge, Pin move, Log. "Log" prefills a CB bet on the
+flagged rung. Nav link `Anomalies` added to all 7 pages.
+
+**Expectation set with user:** the obscure leagues that throw anomalies
+(CIBACOPA, Vietnam VBA, Lebanon, NZ NBL) mostly have no Pinnacle match, and even
+matched ones rarely quote the exact alt-line — so Pin fair/edge will be blank on
+many rows. The CB-only anomaly is still valid; Pinnacle is a bonus when present.
+
+**Tests:** `tests/test_anomalies_api.py` (5 cases): bet-rung direction, endpoint
+filter+sort, spread-only, Pin fair+edge attachment on a matching line, and
+None-when-no-Pin. **459 passing** (was 454). Backend validated in-sandbox by
+calling the endpoint coroutine over a seeded screenshot-style ladder: the
+home +5.0 @ 2.00 spike surfaced at 25% off with Pin fair 1.895 / +5.56% edge.
+
+**Not verifiable in sandbox (handed to CC, `notes/cc_prompt_anomalies_tab_live.md`):**
+the live full-detail scrape + the page rendering. CC runs the recommended
+command, confirms the hourly scan completes (~3 min), the tab populates, the
+filter works, and reports what real anomalies look like with Pin context.
+
+**Side note:** with the morning's `cb_detail.py` rank>0 suppression fix, the
+captured single-match detail sample now yields 0 anomalies (the old H2-totals
+sawtooth was variant-interleaving noise — correctly gone).
+
+---
+
+## 2026-06-01 — Phase 6.7: fast watch loop on flagged games (5 min)
+
+User: re-check only games that ALREADY have >=1 anomaly every 5 min, not the
+whole board. Two-tier scan now: full board every 30 min (Phase 6.6), plus a
+fast watch loop (`ANOMALY_WATCH_SEC`, default 300s) that re-scrapes ONLY the
+watchlisted games.
+
+- `fetch_crystalbet_basketball_games(event_ids)` (crystalbet.py) — loads the
+  list view to locate the games, expands ONLY the targets (permissive,
+  ladder_mode). Cheap vs the full board (expands a handful, not ~150).
+- Watchlist = events with >=1 ladder anomaly, set after each full scan.
+- `_anomaly_watch_loop` every 300s: re-scrape watched games, `_merge_watch_rescan`
+  (pure, tested) swaps just those events' slice of state — a game that re-scans
+  clean DROPS off the watchlist, one still anomalous stays, all other events are
+  untouched. Updates `_anomaly_watch_at`.
+- **Silent by design**: the watch loop does NOT chime or write history — the
+  30-min full scan owns the chime + the history CSVs. (Avoids a chime every
+  5 min; can add a change-only chime later if wanted.)
+- API exposes `watch_count` / `watch_sec` / `watch_at`; the tab shows
+  "watching N flagged games every 5m".
+
+Defaults chosen (stated to user): watchlist = ladder-anomaly events only (not
+consistency-flagged); watch refresh silent. +2 tests, 485 passing. Browser path
+(per-game re-scrape) needs CC live verification. Restart required.
+
+---
+
+## 2026-06-01 — Phase 6.6: 30-min cadence + scan-refresh alert (3rd sound)
+
+User: scan every 30 min, and add a third alert that fires when the scan refreshes.
+
+**Cadence:** `ANOMALY_SCAN_AT_MINUTE` now accepts a comma list of minutes,
+default `15,45` (= every 30 min, fresh just before :00 and :30). New
+`_seconds_until_minutes([...])` picks the soonest upcoming slot; `_anomaly_loop`
+and the API use it. `ANOMALY_SCAN_SEC` fallback default 3600 → 1800. API field
+`at_minute` → `at_minutes` (list); the tab now shows "next scan in Nm".
+
+**Third alert (`playScanChime`):** a calm DESCENDING two-note triangle tone
+(G5→C5), distinct from the +EV square buzzer and the ascending move-triad.
+alerts.js gained `pollScan()` — polls the NEW cheap `/api/anomalies/status`
+heartbeat (timestamp + counts, NO request-time Pinnacle matching, so polling it
+on every page every 30s is free) and chimes once when `computed_at` changes
+(seed-silently on first observation). Toggle "Chime on refresh" on
+/anomalies.html, default ON (user-requested). alerts.js cache-buster bumped
+20260527f → 20260601a across all 7 pages.
+
++3 tests (minutes-list scheduling, status endpoint). 483 passing. Restart +
+hard-reload required (the cache-buster handles the reload).
+
+---
+
+## 2026-05-31 — Phase 6.5: scan coverage instrumentation ("is it missing?")
+
+User saw an empty Anomalies page (0 anomalies + 0 flags across 156 games) and
+rightly asked "can I be sure it's not missing too much?" A blank result is
+ambiguous (clean vs silently-broken). Fix: make every scan auditable.
+`_coverage_stats(cb_odds)` reports odds / games / ladders / rungs / moneylines /
+games_without_ladder (the last ≈ games that fell back to list-view = failed
+detail expansion = un-checkable, the main silent-miss risk). Surfaced three ways:
+the scan log line, the `/api/anomalies` `coverage` block, and the tab row-count
+("scanned N games / M ladders / K rungs"). Also appends a one-row-per-scan
+summary to `output/history/scans_history.csv`. So "0 anomalies out of 150 games /
+600 ladders / 9000 rungs, 4 w/o ladder" reads as genuinely-clean, not broken.
++2 tests, 481 passing. Restart required.
+
+Residual honest gaps (documented for the user): spread+total ladders only (no
+ML-as-ladder, no cross-line arb/middle detector, no team totals); basketball
+only; failed expansions are surfaced via games_without_ladder but still can't be
+checked.
+
+---
+
+## 2026-05-31 — Phase 6.4: scan-history persistence + default 0.5%
+
+To support "watch first, build the bettable detector only if volume justifies
+it", each hourly scan now APPENDS a point-in-time snapshot to:
+  - `output/history/anomalies_history.csv`  (scan_ts + every anomaly, Pin-attached)
+  - `output/history/consistency_history.csv` (scan_ts + every consistency flag)
+So a week of `:45` scans becomes a real dataset ("how often does anything ≥X%
+appear, in which leagues, did any beat Pinnacle") instead of a screen you glance
+at and miss between checks. `_append_scan_history` in `_compute_anomalies`,
+best-effort (wrapped in try/except so a disk hiccup never breaks the scan).
+Default `/api/anomalies` `min_pct` lowered 5.0 → **0.5** (and the tab input), per
+user — surface almost everything now, filter later. +2 tests. 479 passing.
+Server restart required to load it.
+
+---
+
+## 2026-05-31 — Phase 6.3: CB-internal consistency flags ("something's wrong")
+
+User wants a DIAGNOSTIC layer separate from the bettable ladder anomalies: "tell
+me something's wrong, not that there's an opportunity." Tolerate noise (high
+recall, filter later) but NOT trivial noise — e.g. H1 ML 1.6/2.0 next to FT
+1.55/2.1 is normal and must not flag. CB-only (user explicit: no sharp-book
+comparison) — which is a feature, since it works on the obscure leagues where
+Pinnacle is absent.
+
+**Calibrated from the one clean captured game (numbers in src/consistency.py):**
+ML win-prob and spread-ladder win-prob agreed to ≤0.5pp every period; period
+totals summed to the full total within 0.5pt; period HANDICAPS do NOT add
+(favourite pulls away late → H1+H2 ~0.75 short of FT) so we deliberately DON'T
+flag handicap additivity; quarter MLs compress toward 50% (a quarter MORE
+extreme than FT is the weird case). Thresholds sit well above this normal
+variation.
+
+**`src/consistency.py` — `find_consistency_flags(odds)`**, four CB-only checks
+per game, each emitting a `ConsistencyFlag(kind, periods, detail, severity)`:
+1. `ml_vs_spread` — |P_home(ML) − P_home(spread@line0)| ≥ 5pp.
+2. `favourite_flip` — FT and a sub-period disagree on the favourite, both
+   decisive (|P−0.5| ≥ 0.06).
+3. `total_additivity` — period totals don't sum to parent (H1+H2 vs FT, Q1+Q2
+   vs H1, Q3+Q4 vs H2, Q1..Q4 vs FT), ≥ 5 pts.
+4. `quarter_ml_extreme` — a quarter's |P−0.5| exceeds FT's by ≥ 6pp.
+Per-(period,market_type) summaries pick the single section with the most rungs
+(`_main_section`) so incl-OT/regular variants never mix. Thresholds are kwargs.
+
+**Enabler:** the permissive classifier now also captures 2-way moneyline
+(winner / draw-no-bet / moneyline; 1x2 still skipped) so the ML-based checks
+have data. Harmless to the ladder/arb path (it filters to spread/total).
+
+**Wiring:** `_compute_anomalies` also computes flags from the scan's CB odds and
+stores `_recent_consistency`. `/api/anomalies` returns a `consistency` list +
+`consistency_count`, with a `min_severity` filter (default 0 = show all, per the
+user's high-recall-first preference). `static/anomalies.html` gets a second
+"Consistency flags" table (Match / League / Check / Periods / What's wrong /
+Severity).
+
+**Validated offline:** clean captured game → **0 flags**; the user's mild
+1.6/2.0-vs-1.55/2.1 example → **0 flags**; synthetic ML-vs-spread disagreement,
+favourite flip, total mismatch, and quarter-extremity each fire; end-to-end the
+API returns them severity-sorted with plain-English detail. +7 tests
+(test_consistency.py) +1 endpoint test. **476 passing.**
+
+**Honest limit:** a consistency flag says "CB contradicts itself here", not
+"bet X". CB-only it usually can't tell you WHICH side is wrong unless it also
+forms an arb/middle. It's a lead/inspection signal. Deferred: handicap
+additivity (structural offset, too noisy) and spread+total→team-total derivation
+(needs un-skipping team totals) — both noted for a later pass.
+
+### 2026-05-31 correction — ml_vs_spread was extrapolating to line 0 (bad)
+
+First live scan produced 32 flags, ALL `ml_vs_spread`, ALL heavy home favourites,
+ALL same direction (ML > handicap-implied), concentrated in quarters/halves —
+the signature of a METHOD bias, not 32 real contradictions. Two causes:
+1. We read P(home win) by INTERPOLATING the ladder to line 0; for a heavy
+   favourite whose ladder doesn't reach 0, `_interp_at` clamped to the nearest
+   rung → fabricated a low "handicap" number (the bogus 61%).
+2. The Draw-No-Bet ML excludes ties; a ±0.5 handicap doesn't. Interpolating
+   across half-point lines mixes tie conventions — worst in tie-prone Q/H, which
+   is exactly where the flags clustered.
+
+**Fix:** `_build_period_view` now reads `spread_pwin` ONLY from a true pick'em
+(line 0.0) rung — push-on-tie, semantically matching DNB — and never
+interpolates/extrapolates to a 0 the ladder lacks. No pick'em rung → skip the
+check for that period. Result: the 32 artifact flags vanish; the check now fires
+only on trustworthy pick'em disagreements. +1 test (no-pick'em heavy-fav must
+not flag). 477 passing. NOTE: server must be restarted to pick this up.
+
+Audit of the other three checks: `total_additivity` (totals, tie-agnostic) and
+`favourite_flip` (favourite-side sign, tie-robust) are sound. `quarter_ml_extreme`
+shares a milder version of the tie-exclusion caveat (DNB inflates a quarter
+favourite); the 6pp buffer absorbs most of it and it didn't fire live — watch it,
+apply the same discipline if it over-fires. Future option for heavy-favourite
+ML-vs-handicap (no pick'em): fit a normal margin distribution to the ladder and
+read P(margin>0) — but that adds a normality assumption, so deferred unless wanted.
+
+---
+
+## 2026-05-31 — Phase 6.2: anomaly RECALL fix (permissive + per-section)
+
+User flagged a real miss: an "Asian Handicap 1st Period" ladder (home +3.5@1.75
+→ +4.5@1.90, odds up as the line improved — a clear violation) was NOT detected.
+"who knows what else is not."
+
+**Root cause (two bugs, found by inspecting the saved detail HTML):**
+1. **Title allowlist.** The detail parser only keeps sections whose title matches
+   the strict `classify_market_title` allowlist. "Asian Handicap 1st Period" isn't
+   enumerated → the whole section is dropped before the anomaly math runs. The
+   rung labels were fine; the title gate killed it.
+2. **(introduced while fixing #1)** A naive permissive classifier then merged
+   distinct sections that share (period, market_type) into one ladder →
+   fabricated violations. Two sub-causes: (a) my period regex used `[^.]*`, so
+   "1st. Quarter" (the dot) mis-derived to FT and merged the Q1 ladder into the
+   real FT ladder; (b) incl-OT + regular-time sections of the same period both
+   landed in one (period, market_type) bucket. On the clean NBA sample this
+   produced 16 false anomalies.
+
+**Fix — three pieces, anomaly-path only (strict +EV path untouched):**
+- `classify_market_title_permissive` (basketball.py): runs the SAME _SKIP_PATTERNS
+  first (so player/team-total/exotic/3-way noise stays out), then accepts any
+  remaining "handicap"→spread / "total"→total title, period derived from the
+  text. Catches the Asian-Handicap family; still skips props.
+- **Per-section ladders.** Added `Odds.section` (the CB title) + a `per_section`
+  mode to `parse_detail_page` that stamps it and skips the cross-section merge.
+  `find_ladder_anomalies` now keys ladders by section too, so incl-OT /
+  regular-time / quarter sections are analysed independently and never
+  interleave. This is what kills the false positives at the root (more robust
+  than getting variant-rank perfect).
+- Wiring: `fetch_crystalbet_basketball_anomaly_ladders` (force_detail + permissive
+  + bypass_cache) via a `classify_override`/`bypass_cache`/`ladder_mode` plumb
+  through `_fetch_for_sport`/`_expand_and_parse_one`. The standalone CLI uses the
+  permissive path too. The tab/CSV now show the real CB section title.
+
+`Odds.section` is a trailing optional field; cache_persistence lists fields
+explicitly so it's neither persisted nor a load risk (anomaly path is
+bypass_cache anyway).
+
+**Validated offline:** screenshot "Asian Handicap 1st Period" → flagged (home
+8.6%, away 8.8%, labelled with the real title). Clean NBA saved sample → full
+recall (273 odds vs 237 strict) with **0 false anomalies** (was 16 before
+per-section grouping); periods derive correctly (Q1/Q4/H1/H2/FT). +5 tests
+(test_anomaly_recall.py). **468 passing.**
+
+**Honest scope note for the user:** this makes recall on 2-way handicap/total
+ladders comprehensive regardless of title phrasing. It does NOT add moneyline
+(not a ladder), 3-way handicaps, team totals, or player props — those are
+deliberately skipped. The live CC run will confirm recall on real data.
+
+---
+
+## 2026-05-31 — Phase 6.1: clock-align the anomaly scan to :45
+
+User wants the scan synced to the wall clock so it always starts at minute :45
+(finishing ~:48), making the tab fresh when they check at the top of the hour
+or just before. Added `ANOMALY_SCAN_AT_MINUTE` (default 45). `_anomaly_loop`
+now: does one immediate boot scan (so the tab isn't blank for up to an hour),
+then sleeps until the next :MM via `_seconds_until_minute()` before each
+subsequent scan; one quick 2-min retry if an aligned slot's scrape fails.
+Set `ANOMALY_SCAN_AT_MINUTE=off/-1` to fall back to the fixed
+`ANOMALY_SCAN_SEC` interval. `/api/anomalies` now also returns `at_minute` +
+`next_scan_in_sec`, and the tab shows "next at :45 (in Nm)". Uses local wall
+clock — minute-of-hour is offset-agnostic for whole-hour timezones (Georgia is
+UTC+4). +3 tests (clock math, exact-minute target, hour rollover). 463 passing.
+
+---
+
+## 2026-05-31 — CB ladder anomaly detector v1 (monotonicity, CB-only)
+
+New thread the user wants to pursue: **structural mispricing inside CB's own
+alt-line ladders**, independent of Pinnacle. High-leverage because it needs
+only CB data (no matching, no devig) and our basketball full-mode scraper
+already captures every alt-line per game.
+
+**Design discussion outcome (decisions + WHY):**
+- The user's goal is **bettable opportunities**, via the workflow: *find big
+  CB-ladder anomalies → check fair value on Pinnacle → decide*. This session
+  builds only the first stage (the CB-only anomaly screen). Pinnacle
+  cross-check is a deliberately separate later session.
+- Anomaly definition for v1 = **monotonicity violation between adjacent rungs**:
+  as the home handicap line rises, home odds must be non-increasing and away
+  non-decreasing; totals mirror (over non-decreasing, under non-increasing as
+  the line rises). The user's canonical example: home +10.0 @ 1.50 then
+  +11.0 @ 1.60 — line improved for home but price went up.
+- **Why adjacency, not interpolation-outlier (Tier 2):** matches the user's own
+  definition exactly and is fully model-free. Smoothness/outlier detection and
+  the in-ladder arb/middle framing were discussed and explicitly parked.
+- **Why this fills a real gap:** the existing +EV engine only compares a CB rung
+  to Pinnacle when Pinnacle quotes that *exact* line (`LINE_MATCH_TOLERANCE`
+  0.01). CB ships a dense 0.5-step ladder (~54 FT rungs); Pinnacle ships a
+  shallow alt set, so most CB rungs are never evaluated today. The anomaly
+  screen surfaces them CB-internally.
+
+**Important finding — CB's visual highlight is NOT in our captured HTML.** Every
+`DetailSnatch` cell in `data/raw/cb_single_match_detail.html` carries the
+identical class (`sport_more_bt DetailSnatch`) with only a label + odds div —
+no highlight/active/moved marker. The yellow highlight the user sees (e.g. the
+home +5.0 / away -4.5 pair in the screenshot) is applied client-side and is
+absent from `page.content()`. Using it as a signal would require a separate
+live-DOM probe to find what attribute carries it AND what it means
+(boosted? recently moved? value?). Deferred — we don't trust it blind.
+
+**Built (purely additive — no existing file touched):**
+- `src/anomalies.py` — `find_ladder_anomalies(odds, markets, min_pct, min_abs)`
+  returning `LadderAnomaly` rows sorted by wrong-direction % desc. Groups by
+  (event, period, market_type, submarket); compares each rung to the next
+  *present* rung so ladder gaps (CB skips 0.0 and some half-points) never
+  fabricate violations.
+- `scripts/find_ladder_anomalies.py` — CLI. Live mode reuses
+  `fetch_crystalbet_basketball_prematch()`; `--from-saved` runs offline on a
+  captured HTML. Flags: `--min-pct`, `--min-abs`, `--spread-only`, `--headed`,
+  `--no-csv`. Output grouped league → match (biggest first) + CSV to `output/`.
+- `tests/test_anomalies.py` — 11 tests (clean ladders, home/away/total
+  violations, gap handling, event isolation, threshold, sort order, and a
+  reconstruction of the screenshot ladder that flags home +5.0 and away -4.5).
+
+**Offline validation (agent sandbox — no browser):** 11/11 new tests pass; full
+suite **454 passed** (was 443). On the captured single-match sample the FT
+spread ladder is clean (0 anomalies) while the H2 totals ladder shows a
+consistent small ~2–6% half-point sawtooth — i.e. the detector is discriminating,
+not just firing everywhere.
+
+**Not yet done / handed off:** live run needs a browser, so it goes to Claude
+Code via `notes/cc_prompt_ladder_anomalies_live.md`. That run is a
+*measurement* pass — see how many anomalies real live data produces, how big,
+and whether they cluster by league/period — before we design stage 2 (Pinnacle
+fair-value cross-check). STOPPING here for the user / CC to run it.
+
+---
+
+## 2026-05-27 — Phase 5.7: League column on Arbs + Top Moves
+
+User: "wanna add league col in arb and top moves tabs."
+
+**Arbs:** added `league` to the `Opportunity` dataclass (`src/models.py`), set from `cb.league` at both construction sites in `src/edge.py` (+EV + ARB), exposed in `_opp_to_dict`. `static/arbs.html` gets a League column (between Sport and Match); colspans 11→12. League shown is the CB-side league.
+
+**Top Moves:** added `league` (from the Pinnacle `o.league`) to the per-cycle move dict, the cumulative series meta, and the cumulative move dict. `static/moves.html` gets a League column in both modes; colspan 10→11. League shown is the Pinnacle-side league.
+
+Note the two pages source league from different books — arbs from CB (the bet side), moves from Pinnacle (the move side) — which is correct for each context. They're usually the same name but can differ in transliteration.
+
+443/443 tests pass (dataclass field has a default, so no test breakage). Reload arbs + Top Moves to see the new column.
+
+---
+
+## 2026-05-27 — Phase 5.6: cumulative 1-hour moves (net drift)
+
+User: a "sum of 1-hour top moves" view — e.g. a side that went 1.5→1.7 then 1.7→1.9 over the hour should show as 1.5→1.9 net. Added as a second mode on the Top Moves page.
+
+**Backend (`src/app.py`):**
+- New per-market MONEYLINE series: `_pin_ml_series[sport][market_key] = {"meta": {...}, "points": [(ts, fair_prob, odds), ...]}`. Scoped to moneyline only to keep RAM small (~15 MB; full-depth would be 10x+). Recorded inside `_compute_pin_moves` each cycle, pruned to `_HOUR_WINDOW_SEC` (3600).
+- `_compute_cumulative_moves(sport, min_move)` — for each series with ≥2 points, find the side with the largest ABSOLUTE net fair-prob shift (first point → last point). **Signed**: positive = prob rose (odds shortened / money in), negative = prob fell (odds drifted out — the user's 1.5→1.9 case). Returns first_odds → last_odds → fair_now, first/last prob%, net_pp, point count, first/last seen.
+- `GET /api/moves/cumulative?min_move=N` — aggregates across sports, sorts by |net_pp| desc.
+
+**Frontend (`static/moves.html`):** mode toggle chip group "Per cycle (10m)" / "Cumulative (1h)". Switching swaps the endpoint, relabels 4 column headers (Seen→First seen, was→first, Δpp→Net Δpp), and renders signed deltas (green if rose, red if drifted). Log button works in both modes (uses last_odds for cumulative).
+
+**Side-framing note:** for a 2-way market the two sides' shifts are near-equal-and-opposite (not exact, since Shin devig is nonlinear), so we surface the side with the larger absolute move. In the user's example that's the away side shortening 2.6→1.95 (+13pp) rather than the home side drifting 1.5→1.9. Same market, complementary framing. If the user wants it always shown from a fixed side (e.g. always home), that's a trivial change to the side-selection in `_compute_cumulative_moves`.
+
+**Tests (`tests/test_moves.py`):** +4 cumulative cases (net drift over window, single-point→none, flat market→none, series tracks moneyline only). 18 move tests, **443/443 total passing**.
+
+**Memory:** moneyline-only series ≈ 15 MB at 1h. Extending to spread/total would ~3x it; alt-lines ~10x — deferred. The per-match history view (separate parked feature) is still on hold pending the user's scope decision.
+
+---
+
+## 2026-05-27 — Phase 5.5: fair-now odds on Top Moves
+
+User: "add fair odds on top moves page oddswas-now-fairnow."
+
+The odds column now reads **was → now → fair**: previous-cycle posted, current posted, and the no-vig fair decimal price now. `_compute_pin_moves` adds `fair_now_odds = round(1/new_prob, 3)` (from the unrounded fair prob for precision). The gap between `new_odds` (posted) and `fair_now_odds` is the residual vig on that side — e.g. posted 1.70 vs fair 1.707. Fair shown in green to distinguish it from the posted prices.
+
+`tests/test_moves.py` +1 (`test_fair_now_odds_present_and_correct`: matches 1/fair-prob and is ≥ posted). 14 move tests, **438/438 total passing**. Reload the Top Moves page to see the new column.
+
+---
+
+## 2026-05-27 — Phase 5.4: 10-min move window + Log-bet from moves
+
+User: "make it 10 min and also let me write bet log from there too."
+
+**Retention 5→10 min:** `_MOVE_RETENTION_SEC` 300 → 600 in `src/app.py`. moves.html copy (hint, row-count, empty-state) updated to "10 min". The retention test uses the constant directly so it auto-adjusts.
+
+**Log-bet from moves:**
+- `_compute_pin_moves` now includes the structured market spec (`market_type`, `period`, `line`, `submarket`, `team_side`) on each move dict — same fields the arbs Opportunity carries — so the bet-form prefill doesn't have to parse the display label.
+- `static/moves.html` gets a "Log" column. `buildMovePrefillUrl(m)` opens `/bets.html` prefilled with the move's market spec, `book=pin`, `odds_taken=new_odds` (the post-move Pinnacle price), `side=`the move's side. Match label's em-dash is converted to " vs " for the form. If the user is actually betting CrystalBet on that side, they switch book → CB and update odds in the form.
+- Reuses the existing `.log-bet-link` style; no CSS change.
+
+Design note: a move is Pinnacle-side (no cb_event_id), so a bet logged from here has no event id — the bet tracker's live-odds lookup falls back to (home, away) matching, which works for surfacing current odds on the bets page.
+
+438/438 tests pass (structured-field presence covered by the smoke; existing retention/sort tests unaffected). No shared-asset cache-buster bump needed — only moves.html (served HTML) + app.py changed; reload the Top Moves page to pick it up.
+
+---
+
+## 2026-05-27 — Phase 5.3: Top Moves rolling 5-minute window
+
+User: "lets also save last 5 min data on top moves page." Changed the moves feed from a single-cycle snapshot to a rolling 5-minute window.
+
+**Backend (`src/app.py`):**
+- `_recent_moves[sport]` was overwritten each cycle; now it ACCUMULATES. `_compute_pin_moves` appends this cycle's moves to the existing list and prunes anything with `recorded_at` older than `_MOVE_RETENTION_SEC` (300s).
+- Storage order is chronological (insertion). Sorting moved entirely to `/api/moves`, which now sorts by `(recorded_at desc, delta_pp desc)` — newest first, biggest-mover-first within the same cycle. Reads as a "what just moved" feed.
+- Added `timedelta` to the datetime import for the cutoff math.
+
+**Frontend (`static/moves.html`):** hint text + row-count + empty-state copy updated to say "last 5 min" instead of "this cycle".
+
+**Alert compatibility:** the Phase 5.2 move-alert dedup (keyed on `recorded_at`) is unaffected — a move now lives in `/api/moves` for 5 min, so it stays in the alert's `moveSeen` set for 5 min (alerted once, never re-chimes), then ages out naturally when it drops from the window. No change needed to alerts.js.
+
+**Tests (`tests/test_moves.py`):** +2 cases (accumulate-across-cycles, prune-beyond-retention). Updated `test_moves_sorted_by_delta_desc` → `test_api_sort_recency_then_magnitude` since sorting moved to the API layer (storage is now chronological). 13 move tests, **438/438 total passing**.
+
+**Note:** retention is a module constant (`_MOVE_RETENTION_SEC = 300`). At the 60s Pin cadence that's ~5 cycles of moves in the window. Bump the constant if you want a longer feed; no other change needed.
+
+---
+
+## 2026-05-27 — Phase 5.2: top-moves alert with a distinct sound
+
+User: "lets add another alert on top moves and another type of sound of it."
+
+Added a SECOND alert path to the shared `static/alerts.js`, independent of the +EV/ARB buzzer, with its own enable/threshold and a distinct tone so the two are tellable apart by ear.
+
+**Two sounds, two characters:**
+- **+EV/ARB** (existing) — `playPing()`: buzzy 2.5s alternating square-wave alarm (740/620 Hz). Urgent — "act now."
+- **Top move** (new) — `playMoveChime()`: clean ascending major triad C5-E5-G5 (523/659/784 Hz) on a sine wave, ~0.6s. Bright/informational — "a line just moved."
+
+**Move-alert logic (`pollMoves` in alerts.js):**
+- Reads `move_alert_enabled` + `move_alert_threshold` (Δpp, default 5) from localStorage — the controls live on `moves.html`.
+- Only fetches `/api/moves` when the alert is enabled (saves a request on every page when the user doesn't care).
+- Dedup key = `sport|match|market|side|recorded_at`. `recorded_at` is stamped once per Pinnacle cycle, so the two 30s alert-polls within one 60s cycle see identical keys (no double-chime); a genuinely new move next cycle gets a fresh `recorded_at`.
+- Seeds silently on the first poll-while-enabled (`moves_alerts_seeded` marker) so flipping the toggle on doesn't blast every current mover.
+- Prunes seen-keys to the current response so the set stays bounded.
+
+**UI:** `moves.html` gets an "Alert ≥ N pp" checkbox + threshold input in the controls bar, mirroring the arbs alert controls. Writes to localStorage; alerts.js reads. State restored on page load.
+
+**Scheduling:** opp-poll fires at +2s, move-poll at +3s (offset so their fetches don't collide in the same tick); both on the 30s interval.
+
+Cache buster bumped to `?v=20260527f` for alerts.js across all 6 pages. 436/436 tests still pass (no Python change — pure frontend).
+
+**Note:** AudioContext still needs one user gesture per session to unlock (browser autoplay policy) — same as the existing alert. One click anywhere arms both sounds.
+
+---
+
+## 2026-05-27 — Phase 5.1: Pinnacle steam / top-moves detector
+
+User wants to catch the biggest Pinnacle line moves in real time. Built on the existing guest API — no new dependency or cost.
+
+**Research context (from the API-options search this session):** Pinnacle shut down their public API 2025-07-23; the official retail sub no longer exists. Third-party Pinnacle resellers (PinnOdds ~$99/mo WebSocket, etc.) mostly resell the same guest-API data we already poll. A paid feed would buy WebSocket push (~1s latency vs our 60s) + uptime, NOT more accurate lines. So the move detector ships now on the free guest feed; a WebSocket upgrade is a separate future experiment.
+
+**Design (user's calls via AskUserQuestion):**
+- Metric: **no-vig fair-probability shift** (percentage points), not raw odds %. Normalizes favorites vs dogs — an 8pp move on a 1.10 fav is comparable to one on a 3.00 dog.
+- Window: **previous poll cycle → now** (consecutive snapshots). Simplest, least storage; no rolling-window history needed.
+- Surface only the side whose fair prob ROSE by ≥ `_MOVE_MIN_PP` (default 2.0pp) — that's the side sharp money came in on. The opposing side falls by construction; reporting it would be redundant noise.
+
+**Implementation (`src/app.py`, all in-memory):**
+- `_pin_prev_fair[sport]` — previous cycle's `{market_key: {side: fair_prob}}`. `market_key = (raw_event_id, market_type, period, line, submarket, team_side)`.
+- `_recent_moves[sport]` — list of move dicts from the most recent cycle.
+- `_compute_pin_moves(sport, odds)` — called from `_pinnacle_loop_for_sport` after each successful fetch. Devigs every market via the existing `_maybe_devig` (Shin), diffs per-side fair prob against prev, emits rising-side moves ≥ threshold, re-seeds prev.
+- `_move_market_label(o)` — compact label ("moneyline FT", "total FT +220.5", "spread FT -3.5 (corners)").
+- `GET /api/moves?min_move=N` — aggregates `_recent_moves` across sports, sorts by `delta_pp` desc.
+
+**Frontend:** `static/moves.html` — new "Top Moves" page (nav link added to all 6 pages). Columns: seen-time, kickoff, sport, match, market, side, odds-was→now, fair%-was→now, Δpp. Min-move filter input. Polls `/api/moves` every 30s; data refreshes each Pinnacle cycle (~60s). Δ colour-coded (≥8pp bold-green, ≥4pp green).
+
+**Tests:** `tests/test_moves.py` (11 cases) — seed-cycle emits nothing, shortening favorite emits rising-side only, both-sides-not-double-reported, stable market silent, sub-threshold filtered, new-market-midstream no phantom, total-market move, line-change breaks market identity (no cross-line compare), sort-by-delta-desc, market labels.
+
+**436/436 tests passing** (up from 425). End-to-end: `/api/moves` serves 200, page renders, nav links resolve on all pages.
+
+**Notes / limits:**
+- Resolution = `PINNACLE_POLL_SEC` (60s). A market that moves and snaps back within one cycle is invisible — that's the cost of polling vs WebSocket. If the user later trials a WebSocket feed, the same `_compute_pin_moves` logic drops in with a finer cadence.
+- Moves are ephemeral (in-memory, last cycle only). Not persisted to SQLite — if we want a move *history* / steam-replay later, that's a follow-up (generalize the `bet_odds_history` pattern to all markets).
+- `_MOVE_MIN_PP` is a module constant (2.0). The UI min-move filter is applied on top at query time; the constant is the floor of what's ever computed.
+
+---
+
+## 2026-05-27 — Phase 3.13: alerts.js respects user mutes
+
+User: "muted positions in arb are making sounds anyway can you manage that ?"
+
+Bug — alerts.js (the cross-page poller added in Phase 3.12) was polling /api/opportunities independently and didn't know about the manual mutes set in arbs.html (Phase 3.11). Muted rows correctly disappeared/dimmed from the table but still triggered the buzzer because the alert path never checked the mute set.
+
+Fix:
+- `alerts.js` reads `arbs_user_muted_v1` from localStorage at the start of every poll (fresh, so toggling a mute takes effect by the next cycle).
+- Added a `betKey()` helper that EXACTLY mirrors the one in arbs.html (`cb_event_id | market_type | period | line | side | submarket | team_side` — the same tuple shape used by the Log-bet prefill and the user-flag tracking).
+- The sound-trigger condition now requires `!isMuted` in addition to `isNew && edge >= threshold && !isFirstEverPoll && enabled`.
+
+Muted opps still get tracked in `seenKeys` so un-muting later doesn't immediately re-fire on stale data — the opp would need to actually move 5%+ for the existing "edge grew" rule to retrigger. Highlight (★) intentionally does NOT suppress sound; only mute (−) does. Matches the visual semantics.
+
+Cache buster bumped to `?v=20260527e` across all 5 static pages. 425/425 tests still pass (no Python touched).
+
+---
+
+## 2026-05-27 — Phase 4.3: MMA sport added (list-only mode)
+
+User: "lets add mma too, as it is next most covered sport on them". CC discovery prompt at `notes/cc_prompt_phase4_mma_discovery.md` produced findings at `notes/cc_mma_findings.md`; this entry implements them.
+
+**IDs verified by CC:**
+- CB MMA sport_id = **69**
+- Pinnacle MMA sport_id = **22** (3 leagues: UFC, LFA, Road to the UFC)
+
+**Layout (5-entry loadinfo, narrower than basketball/tennis 8-entry):**
+```
+[0] name='1'     handicap=''       → ML home
+[1] name='\t2'   handicap=''       → ML away (same \t whitespace quirk)
+[2] name='Und'   handicap='total'  → OU under odds
+[3] name='Tot'   handicap='total'  → OU line value
+[4] name='Over'  handicap=???      → OU over odds — handicap is unstable!
+```
+
+**Bug found during smoke-test that wasn't in the CC findings:** the Over entry's `handicap` flag is **state-dependent** — it's `'total'` when OU is blank (38/53 sample games) and `''` when OU is live (15/53 sample games). The CC discovery report described the populated form only and we initially mirrored it; smoke-test of the sample fixture caught zero `total` rows because the filter required `handicap=''`.
+
+**Fix:** identify Und / Tot / Over by **name only**. The 5-entry layout makes name unique across all OU entries — no other entry shares these labels. Both handicap states get caught.
+
+**Files added/changed:**
+- `src/scrapers/sports/mma.py` (new, ~140 lines) — custom 5-entry parser; reuses basketball's `_make_odds` / `_safe_float` / `_parse_float` helpers; classify_market_title returns None (list-only)
+- `src/scrapers/crystalbet.py` — added `mma` to imports, MMA_SPORT_ID=69, SAMPLE_OUT_MMA, _SPORT_MODULES/_SPORT_SAMPLE_PATHS entries, parse_html_mma, fetch_crystalbet_mma_prematch, dry_run_parse_saved_mma, --parse-saved-mma CLI flag
+- `src/scrapers/pinnacle.py` — SPORT_ID_MMA=22, `ALLOWED_MARKET_TYPES_BY_SPORT["mma"] = {moneyline, total}` (no spread — can't handicap a fight), fetch_pinnacle_mma wrapper
+- `src/app.py` — added SportConfig for mma to _ALL_SPORTS
+- `tests/test_mma_parser.py` (new, 12 tests) — both synthetic loadinfo (live OU + blank OU + ML-only) and end-to-end fixture (58 ML + 15 total from the captured sample)
+
+**End-to-end smoke against `data/raw/cb_prematch_sample_mma.html`** (58 fights captured by CC):
+```
+Total Odds: 73
+  moneyline: 58  (every fight emits ML)
+  total:     15  (only fights with live OU emit total)
+```
+
+This exactly matches the CC discovery counts. Sample real fights parsed correctly: Pereira vs Gane (line=2.5, under=1.90, over=1.75), Topuria vs Gaethje (line=1.5, under=2.10, over=1.60).
+
+**425/425 tests passing** (up from 413). Zero regressions.
+
+**To enable MMA live:**
+
+```bash
+SPORTS=basketball:list,soccer:list,tennis:list,mma:list python main.py
+```
+
+**Pattern confirmed for future sports** (Phase 3.1 prediction): narrow-layout sports (no AH) take ~140 lines of custom-parser delegation. The expensive work was Phase 2's sport-isolation architecture; new sports keep getting cheaper. If/when you add hockey or baseball, expect ~50-150 lines depending on whether CB ships AH for them.
+
+**v2 follow-ups (deferred):**
+- Method of Victory market (3-way: KO/TKO vs Submission vs Decision) — Pinnacle ships it, CB ships it via detail page only.
+- Will-the-fight-go-the-distance (2-way prop) — Pinnacle ships it as a separate market type.
+- Round betting (props) — usually 5-way markets, requires new market-type infrastructure.
+
+All three would require enabling MMA full-mode + writing a `classify_market_title` for MMA detail pages. Not v1 scope per user request.
+
+---
+
 ## 2026-05-27 — Phase 3.12: cross-page alerts (no startup bip, fires on any tab)
 
 User: "remove default bip when I move to arb page no need to bip on that time, instead add bip on no matter which tab I am on".

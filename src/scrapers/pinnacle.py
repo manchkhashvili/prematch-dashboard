@@ -80,6 +80,7 @@ PINNACLE_BASE = "https://guest.api.arcadia.pinnacle.com/0.1"
 SPORT_ID_BASKETBALL = 4
 SPORT_ID_SOCCER = 29
 SPORT_ID_TENNIS = 33  # verify on first live run — adjust if Pinnacle ships tennis on a different id
+SPORT_ID_MMA = 22     # Phase 4.3 — verified via CC discovery 2026-05-27 ("Mixed Martial Arts": UFC + LFA + Road to UFC)
 
 # Per-sport Referer mostly cosmetic — Pinnacle's WAF doesn't enforce it
 # strictly — but matches what a real user would send. Other headers shared.
@@ -126,6 +127,7 @@ ALLOWED_MARKET_TYPES_BY_SPORT: dict[str, set[str]] = {
     "basketball": {"moneyline", "spread", "total"},                  # Phase 1 set
     "soccer":     {"moneyline", "spread", "total", "team_total"},    # Phase 2 set
     "tennis":     {"moneyline", "spread", "total"},                  # Phase 3.1 — same as basketball
+    "mma":        {"moneyline", "total"},                            # Phase 4.3 — no spread (can't handicap a fight)
 }
 
 
@@ -365,6 +367,14 @@ async def fetch_pinnacle_tennis(*, concurrency: int = 10) -> list[Odds]:
     """Fetch all prematch tennis Odds. 2-way ML + spread + total, no child matchups."""
     return await _fetch_pinnacle_for_sport(
         SPORT_ID_TENNIS, "tennis", concurrency=concurrency,
+    )
+
+
+async def fetch_pinnacle_mma(*, concurrency: int = 10) -> list[Odds]:
+    """Fetch all prematch MMA Odds. 2-way ML + total rounds. Small inventory
+    (typically <10 leagues — UFC, LFA, Road to UFC, occasionally ONE/PFL)."""
+    return await _fetch_pinnacle_for_sport(
+        SPORT_ID_MMA, "mma", concurrency=concurrency,
     )
 
 

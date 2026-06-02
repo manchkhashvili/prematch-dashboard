@@ -65,6 +65,14 @@ class Odds:
     # constructor path for team_total Odds; adding the check now would
     # surprise existing test fixtures.
     team_side: TeamSide | None = None
+    # The CB detail-page market section this row came from (the human-readable
+    # title, e.g. "Asian Handicap 1st Period"). Set by cb_detail on detail-page
+    # Odds; None for list-view Odds. Used by the anomaly scanner to analyse each
+    # ladder section independently so distinct sections that happen to share
+    # (period, market_type) — e.g. incl-OT vs regular-time, or a mis-derived
+    # period — never interleave into a single ladder. Ignored by edge/matcher
+    # and not persisted (cache_persistence lists fields explicitly).
+    section: str | None = None
 
     def __post_init__(self) -> None:
         # Sanity: all decimal odds must be > 1.0. CB renders 1.0 for suspended
@@ -116,3 +124,4 @@ class Opportunity:
     line: float | None = None         # spread/total line; None for ML
     submarket: str | None = None      # corners | None
     team_side: str | None = None      # home | away | None (team_total)
+    league: str | None = None         # CB league name — for the arbs League column

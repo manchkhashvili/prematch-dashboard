@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anomalies — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527e" />
+  <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
+  <script src="/theme.js?v=20260527"></script>
+  <script src="/alerts.js?v=20260601a" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html">Matches</a>
+      <a href="/arbs.html">Arbs / +EV</a>
+      <a href="/moves.html">Top Moves</a>
+      <a href="/anomalies.html" class="active">Anomalies</a>
+      <a href="/bets.html">Bets</a>
+      <a href="/calc.html">Calc</a>
+      <a href="/unmatched.html">Unmatched</a>
+    </nav>
+    <div class="status" id="status">
+      <span id="cb-status">CB —</span>
+      <span id="pin-status">Pin —</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <label>
+      Min % off
+      <input type="number" id="min-pct" value="0.5" step="0.5" min="0" />
+    </label>
+    <label class="alert-controls" title="Show handicap (spread) ladders only; hide totals.">
+      <input type="checkbox" id="spread-only" />
+      Spread only
+    </label>
+    <label class="alert-controls" title="Play a distinct chime (on any page) when the anomaly scan refreshes — every ~30 min.">
+      <input type="checkbox" id="scan-alert" />
+      Chime on refresh
+    </label>
+    <span class="row-count" id="row-count">…</span>
+    <span class="hint" id="hint">
+      CrystalBet alt-line ladder anomalies — rungs where the price moves the
+      wrong way vs its neighbour (e.g. home gets more points but its odds get
+      LONGER). CB-only; no Pinnacle needed to flag them. "Pin fair / edge" is
+      Pinnacle's no-vig price at the flagged rung where available (often blank —
+      Pinnacle rarely quotes the exact alt-line). Scanned hourly via a separate
+      full-detail basketball scrape. "Log" prefills a CB bet on the flagged rung.
+    </span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="anomalies">
+      <thead>
+        <tr>
+          <th>Start (UTC)</th>
+          <th>League</th>
+          <th>Match</th>
+          <th>Market</th>
+          <th>Side</th>
+          <th class="num" title="The two adjacent ladder rungs: line and price. The price moved the wrong way between them.">Ladder (line → line)</th>
+          <th class="num" title="Decimal odds at each rung">Odds → odds</th>
+          <th class="num" title="Wrong-direction move as % of the smaller price">% off</th>
+          <th class="num" title="Pinnacle no-vig fair price at the flagged rung's line (blank if Pinnacle has no match/line)">Pin fair</th>
+          <th class="num" title="+EV edge of the CB rung vs Pinnacle fair: cb_odds × pin_fair_prob − 1">Pin edge</th>
+          <th class="num" title="Biggest recent Pinnacle fair-prob move on this match (last 10 min)">Pin move</th>
+          <th title="Log a CB bet on the flagged rung"></th>
+        </tr>
+      </thead>
+      <tbody id="anom-body">
+        <tr><td colspan="12" class="empty">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="section-title" style="margin:18px 0 6px;font-size:1.05em;">
+    Consistency flags
+    <span class="hint" style="font-weight:normal;">
+      — CB contradicts itself across markets/periods (ML vs handicap, period totals
+      vs full, quarter MLs vs full). Diagnostic only: "something looks wrong here",
+      not an opportunity. Tuned to ignore normal period-to-period variation.
+    </span>
+  </h2>
+  <div class="table-wrap">
+    <table id="consistency">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>League</th>
+          <th>Check</th>
+          <th>Periods</th>
+          <th>What's wrong</th>
+          <th class="num" title="Bigger = weirder (pp or points)">Severity</th>
+        </tr>
+      </thead>
+      <tbody id="cons-body">
+        <tr><td colspan="6" class="empty">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+const POLL_MS = 30_000;
+let meta = {};
+let rows = [];
+const minPctInput = document.getElementById("min-pct");
+const spreadOnly = document.getElementById("spread-only");
+minPctInput.addEventListener("change", fetchAndRender);
+spreadOnly.addEventListener("change", fetchAndRender);
+
+// Scan-refresh chime toggle (read by the shared alerts.js). Default ON.
+const scanAlert = document.getElementById("scan-alert");
+try {
+  const raw = localStorage.getItem("anomaly_scan_alert_enabled");
+  scanAlert.checked = (raw === null) ? true : (raw === "1");
+} catch (e) { scanAlert.checked = true; }
+scanAlert.addEventListener("change", () => {
+  try { localStorage.setItem("anomaly_scan_alert_enabled", scanAlert.checked ? "1" : "0"); }
+  catch (e) {}
+});
+
+// ── Status bar (shared shape with the other pages) ─────────────────────────
+function fmtAge(sec) {
+  if (sec === null || sec === undefined) return "—";
+  if (sec < 60)   return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m" + String(sec % 60).padStart(2, "0") + "s";
+  return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
+}
+function sportPrefix(s) {
+  return ({basketball:"bb", soccer:"sc", tennis:"tn", mma:"mma"})[s] || s.slice(0,2);
+}
+function buildSourceStatus(label, sports, source, staleThresholdSec) {
+  const parts = []; let anyErr = false, worstAge = 0;
+  for (const [sport, st] of Object.entries(sports || {})) {
+    const s = st[source];
+    parts.push(`${sportPrefix(sport)}:${s.count} (${fmtAge(s.age_sec)})`);
+    if (s.error) anyErr = true;
+    if (typeof s.age_sec === "number") worstAge = Math.max(worstAge, s.age_sec);
+  }
+  let cls = anyErr ? "err" : (worstAge > staleThresholdSec ? "stale" : "ok");
+  return { text: `${label} ${parts.join(" | ")}`, cls };
+}
+async function pollStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const cbEl = document.getElementById("cb-status");
+    const pinEl = document.getElementById("pin-status");
+    const cb  = buildSourceStatus("CB",  s.sports, "cb",  600);
+    const pin = buildSourceStatus("Pin", s.sports, "pin", 240);
+    cbEl.textContent = cb.text;  cbEl.className = cb.cls;
+    pinEl.textContent = pin.text; pinEl.className = pin.cls;
+  } catch (e) { /* swallow */ }
+}
+
+function fmtNum(v, d = 3) {
+  return (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+}
+function fmtTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toISOString().slice(5, 16).replace("T", " ");
+}
+function pctClass(p) {
+  if (p >= 10) return "edge-pos-bold";
+  if (p >= 5)  return "edge-pos";
+  return "";
+}
+function edgeClass(e) {
+  if (e === null || e === undefined) return "";
+  if (e >= 2)  return "edge-pos";
+  if (e <= -2) return "edge-neg";
+  return "";
+}
+function fmtSigned(v, d = 1) {
+  if (v === null || v === undefined) return "—";
+  return (v >= 0 ? "+" : "") + Number(v).toFixed(d);
+}
+
+// Build a /bets.html prefill for the flagged rung (CB side).
+function buildBetPrefillUrl(r) {
+  const p = new URLSearchParams({
+    sport: "basketball",
+    match_label: (r.match_label || "").replace(" — ", " vs "),
+    period: r.period || "FT",
+    market_type: r.market_type || "spread",
+    ...(r.bet_line != null ? { line: r.bet_line } : {}),
+    side: r.side || "",
+    ...(r.submarket ? { submarket: r.submarket } : {}),
+    book: "cb",
+    odds_taken: (r.bet_odds != null ? Number(r.bet_odds).toFixed(2) : ""),
+    stake: "20",
+    bankroll_at_time: "500",
+    ...(r.cb_event_id ? { cb_event_id: r.cb_event_id } : {}),
+    ...(r.start_time ? { start_time: r.start_time } : {}),
+  });
+  return "/bets.html?" + p.toString();
+}
+
+async function fetchAndRender() {
+  const minPct = parseFloat(minPctInput.value || "0.5");
+  const url = `/api/anomalies?min_pct=${minPct}&spread_only=${spreadOnly.checked}`;
+  try {
+    const j = await (await fetch(url)).json();
+    meta = j; rows = j.anomalies || [];
+    render();
+    renderConsistency(j.consistency || []);
+  } catch (e) {
+    document.getElementById("anom-body").innerHTML =
+      `<tr><td colspan="12" class="empty">error loading anomalies</td></tr>`;
+  }
+}
+
+const KIND_LABEL = {
+  ml_vs_spread: "ML vs handicap",
+  favourite_flip: "favourite flip",
+  total_additivity: "period totals",
+  quarter_ml_extreme: "quarter ML extreme",
+};
+function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
+function renderConsistency(flags) {
+  const body = document.getElementById("cons-body");
+  if (!meta.enabled) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">scanner off</td></tr>`; return;
+  }
+  if (!flags.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">no consistency flags</td></tr>`; return;
+  }
+  body.innerHTML = flags.map(f => `
+    <tr>
+      <td>${f.match_label}</td>
+      <td class="dim">${f.league || ""}</td>
+      <td>${KIND_LABEL[f.kind] || f.kind}</td>
+      <td class="dim mono">${f.periods}</td>
+      <td>${f.detail}</td>
+      <td class="num ${consClass(f.severity)}">${Number(f.severity).toFixed(1)}</td>
+    </tr>
+  `).join("");
+}
+
+function render() {
+  const body = document.getElementById("anom-body");
+
+  // Reflect scan freshness + next aligned scan in the row-count chip.
+  let scanInfo = "";
+  if (meta.computed_at) {
+    const ageMin = Math.max(0, Math.round((Date.now() - new Date(meta.computed_at)) / 60000));
+    scanInfo = ` · scanned ${ageMin}m ago`;
+  }
+  if (meta.next_scan_in_sec != null) {
+    const nextMin = Math.max(0, Math.round(meta.next_scan_in_sec / 60));
+    scanInfo += ` · next full scan in ${nextMin}m`;
+  }
+  if (meta.watch_sec && meta.watch_count != null) {
+    scanInfo += ` · watching ${meta.watch_count} flagged game${meta.watch_count === 1 ? "" : "s"}`
+              + ` every ${Math.round(meta.watch_sec / 60)}m`;
+  }
+  // Coverage — so "0 anomalies" is auditable: you can see it actually scanned
+  // plenty of ladders/rungs and simply found nothing wrong.
+  const c = meta.coverage || {};
+  if (c.games != null) {
+    scanInfo += ` · scanned ${c.games} games / ${c.ladders} ladders / ${c.rungs} rungs`;
+    if (c.games_without_ladder) scanInfo += ` (${c.games_without_ladder} w/o ladder)`;
+  }
+  document.getElementById("row-count").textContent =
+    `${rows.length} anomaly${rows.length === 1 ? "" : "ies"}${scanInfo}`;
+
+  if (!meta.enabled) {
+    body.innerHTML = `<tr><td colspan="12" class="empty">Anomaly scanner is OFF. Start with `
+      + `<code>ANOMALY_SCAN=1</code> (or add <code>anomalies:on</code> to SPORTS).</td></tr>`;
+    return;
+  }
+  if (meta.error) {
+    body.innerHTML = `<tr><td colspan="12" class="empty">last scan errored: ${meta.error}</td></tr>`;
+    return;
+  }
+  if (!meta.computed_at) {
+    body.innerHTML = `<tr><td colspan="12" class="empty">first full-detail scan running (can take ~3 min)…</td></tr>`;
+    return;
+  }
+  if (rows.length === 0) {
+    body.innerHTML = `<tr><td colspan="12" class="empty">no anomalies above threshold</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td class="mono dim">${fmtTime(r.start_time)}</td>
+      <td class="dim">${r.league || ""}</td>
+      <td>${r.match_label}</td>
+      <td class="dim">${r.market}</td>
+      <td><b>${r.side}</b></td>
+      <td class="num mono">${fmtSigned(r.line_lo)} → ${fmtSigned(r.line_hi)}</td>
+      <td class="num mono">${fmtNum(r.odds_lo, 2)} → ${fmtNum(r.odds_hi, 2)}</td>
+      <td class="num ${pctClass(r.pct)}">${fmtNum(r.pct, 1)}%</td>
+      <td class="num mono">${fmtNum(r.pin_fair_odds, 3)}</td>
+      <td class="num ${edgeClass(r.pin_edge_pct)}">${r.pin_edge_pct == null ? "—" : fmtSigned(r.pin_edge_pct) + "%"}</td>
+      <td class="num" title="${r.pin_move_label || ""}">${r.pin_move_pp == null ? "—" : fmtSigned(r.pin_move_pp) + "pp"}</td>
+      <td><a class="log-bet-link" href="${buildBetPrefillUrl(r)}" title="Log a CB bet on the flagged rung">Log</a></td>
+    </tr>
+  `).join("");
+}
+
+pollStatus();
+fetchAndRender();
+setInterval(pollStatus,    10_000);
+setInterval(fetchAndRender, POLL_MS);
+</script>
+</body>
+</html>

@@ -388,51 +388,56 @@ def parse_div_odds(
 #              1 = fallback (used only if rank-0 absent for that key)
 _RULES: list[tuple[re.Pattern[str], str, str, int]] = [
     # ── FT (incl. OT preferred) ──
-    (re.compile(r"^winner\s*\(incl\.?\s*overtime\)"),                       "moneyline", "FT", 0),
-    (re.compile(r"^total points\s*\(incl\.?\s*overtime\)"),                 "total",     "FT", 0),
-    (re.compile(r"^handicap\s*\(incl\.?\s*overtime\)"),                     "spread",    "FT", 0),
+    # CB uses two naming formats depending on the league:
+    #   "Handicap (incl. overtime)*"         → normalize → "handicap (incl. overtime)"
+    #   "Asian Handicap Including Overtime"  → normalize → "asian handicap including overtime"
+    # Both must be caught at rank=0. The pattern handles "asian " prefix, open-paren
+    # or space after "handicap", and "incl."/"including" spelling variants.
+    (re.compile(r"^winner\s*\(incl\.?\s*overtime\)"),                                    "moneyline", "FT", 0),
+    (re.compile(r"^total points[\s(]+incl(?:uding)?\.?\s*overtime"),                     "total",     "FT", 0),
+    (re.compile(r"^(?:asian\s+)?handicap[\s(]+incl(?:uding)?\.?\s*overtime"),            "spread",    "FT", 0),
 
     # ── FT (regular time fallback) ──
-    (re.compile(r"^total points\s*\(regular time\)$"),                      "total",     "FT", 1),
+    (re.compile(r"^total points\s*\(regular time\)$"),                                   "total",     "FT", 1),
     # No 2-way ML or 2-way spread regular-time variant on CB — these only
     # come as "incl. overtime" (above) or as 3-way "Full Time Result (1X2)"
     # / "Handicap (1X2)" which are out of scope.
 
     # ── H1 ──
     # Use "Draw No Bet" as our 2-way ML (Pinnacle H1 ML is also effectively 2-way).
-    (re.compile(r"^1st half\s*-\s*draw no bet"),                            "moneyline", "H1", 0),
-    (re.compile(r"^1st\.?\s*half\s*-\s*handicap\s*$"),                      "spread",    "H1", 0),
-    (re.compile(r"^1st half\s*-\s*total"),                                  "total",     "H1", 0),
+    (re.compile(r"^1st half\s*-\s*draw no bet"),                                         "moneyline", "H1", 0),
+    (re.compile(r"^1st\.?\s*half\s*-\s*(?:asian\s+)?handicap\s*$"),                     "spread",    "H1", 0),
+    (re.compile(r"^1st half\s*-\s*total"),                                               "total",     "H1", 0),
 
     # ── H2 (incl OT preferred) ──
-    (re.compile(r"^2nd half\s*-\s*draw no bet\s*\(ot\)"),                   "moneyline", "H2", 0),
-    (re.compile(r"^2nd half\s*-\s*handicap\s*\(incl\.?\s*overtime\)"),      "spread",    "H2", 0),
-    (re.compile(r"^2nd half\s*-\s*total\s*\(incl\.?\s*overtime\)"),         "total",     "H2", 0),
+    (re.compile(r"^2nd half\s*-\s*draw no bet\s*\(ot\)"),                                "moneyline", "H2", 0),
+    (re.compile(r"^2nd half\s*-\s*(?:asian\s+)?handicap[\s(]+incl(?:uding)?\.?\s*overtime"), "spread", "H2", 0),
+    (re.compile(r"^2nd half\s*-\s*total\s*\(incl\.?\s*overtime\)"),                     "total",     "H2", 0),
 
     # ── H2 (regular time fallback) ──
-    (re.compile(r"^2nd half\s*-\s*draw no bet\s*$"),                        "moneyline", "H2", 1),
-    (re.compile(r"^2nd\s*half\s*-\s*handicap\s*$"),                         "spread",    "H2", 1),
-    (re.compile(r"^2nd half\s*-\s*total\s*$"),                              "total",     "H2", 1),
+    (re.compile(r"^2nd half\s*-\s*draw no bet\s*$"),                                     "moneyline", "H2", 1),
+    (re.compile(r"^2nd\s*half\s*-\s*(?:asian\s+)?handicap\s*$"),                        "spread",    "H2", 1),
+    (re.compile(r"^2nd half\s*-\s*total\s*$"),                                           "total",     "H2", 1),
 
     # ── Q1 ──
-    (re.compile(r"^1st\s*quarter\s*-\s*draw no bet"),                       "moneyline", "Q1", 0),
-    (re.compile(r"^1st\.?\s*quarter\s*-\s*handicap\s*$"),                   "spread",    "Q1", 0),
-    (re.compile(r"^1st\s*quarter\s*-\s*total\s*points"),                    "total",     "Q1", 0),
+    (re.compile(r"^1st\s*quarter\s*-\s*draw no bet"),                                    "moneyline", "Q1", 0),
+    (re.compile(r"^1st\.?\s*quarter\s*-\s*(?:asian\s+)?handicap\s*$"),                  "spread",    "Q1", 0),
+    (re.compile(r"^1st\s*quarter\s*-\s*total\s*points"),                                 "total",     "Q1", 0),
 
     # ── Q2 ──
-    (re.compile(r"^2nd\s*quarter\s*-\s*draw no bet"),                       "moneyline", "Q2", 0),
-    (re.compile(r"^2nd\s*quarter\s*-\s*handicap\s*$"),                      "spread",    "Q2", 0),
-    (re.compile(r"^2nd\s*quarter\s*-\s*total\s*points"),                    "total",     "Q2", 0),
+    (re.compile(r"^2nd\s*quarter\s*-\s*draw no bet"),                                    "moneyline", "Q2", 0),
+    (re.compile(r"^2nd\s*quarter\s*-\s*(?:asian\s+)?handicap\s*$"),                     "spread",    "Q2", 0),
+    (re.compile(r"^2nd\s*quarter\s*-\s*total\s*points"),                                 "total",     "Q2", 0),
 
     # ── Q3 ──
-    (re.compile(r"^3rd\s*quarter\s*-\s*draw no bet"),                       "moneyline", "Q3", 0),
-    (re.compile(r"^3rd\s*quarter\s*-\s*handicap\s*$"),                      "spread",    "Q3", 0),
-    (re.compile(r"^3rd\s*quarter\s*-\s*total\s*points"),                    "total",     "Q3", 0),
+    (re.compile(r"^3rd\s*quarter\s*-\s*draw no bet"),                                    "moneyline", "Q3", 0),
+    (re.compile(r"^3rd\s*quarter\s*-\s*(?:asian\s+)?handicap\s*$"),                     "spread",    "Q3", 0),
+    (re.compile(r"^3rd\s*quarter\s*-\s*total\s*points"),                                 "total",     "Q3", 0),
 
     # ── Q4 (CB has typos: "4rt." instead of "4th.") ──
-    (re.compile(r"^4(?:th|rt)\.?\s*quarter\s*-\s*draw no bet"),             "moneyline", "Q4", 0),
-    (re.compile(r"^4(?:th|rt)\.?\s*quarter\s*-\s*handicap\s*$"),            "spread",    "Q4", 0),
-    (re.compile(r"^4(?:th|rt)\.?\s*quarter\s*-\s*total\s*points"),          "total",     "Q4", 0),
+    (re.compile(r"^4(?:th|rt)\.?\s*quarter\s*-\s*draw no bet"),                          "moneyline", "Q4", 0),
+    (re.compile(r"^4(?:th|rt)\.?\s*quarter\s*-\s*(?:asian\s+)?handicap\s*$"),           "spread",    "Q4", 0),
+    (re.compile(r"^4(?:th|rt)\.?\s*quarter\s*-\s*total\s*points"),                      "total",     "Q4", 0),
 ]
 
 # Hard-skip patterns: titles matching these are explicitly out of scope, no
@@ -515,4 +520,68 @@ def classify_market_title(title: str) -> Optional[MarketClassification]:
             return MarketClassification(
                 market_type=market_type, period=period, variant_rank=rank,
             )
+    return None
+
+
+# ── Permissive classifier (anomaly scanner only) ──────────────────────────────
+# The strict classify_market_title above is an allowlist of exact title
+# phrasings — right for the +EV pipeline (we only want markets we can confidently
+# map + match to Pinnacle) but it silently DROPS any 2-way handicap/total ladder
+# whose title isn't enumerated, e.g. "Asian Handicap 1st Period". For the CB-only
+# anomaly scan we don't need a Pinnacle-grade mapping; we just need to see every
+# 2-way ladder. This permissive variant:
+#   1. runs the SAME _SKIP_PATTERNS first, so all the prop/3-way/exotic noise
+#      (player totals, team totals, over-exact-under, 1x2, max-consecutive, …)
+#      stays excluded;
+#   2. then accepts ANY remaining title containing "handicap" → spread, or
+#      "total" → total, with the period inferred from the text.
+# Period is only used to GROUP rungs into ladders, so an approximate mapping is
+# fine. "regular time" titles get variant_rank=1 so the incl-OT variant wins on
+# the cb_detail dedup (same convention as the strict path).
+_PERIOD_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(4(?:th|rt)|fourth)\b.*\bquarter\b|\bq4\b"), "Q4"),
+    (re.compile(r"\b(3rd|third)\b.*\bquarter\b|\bq3\b"),         "Q3"),
+    (re.compile(r"\b(2nd|second)\b.*\bquarter\b|\bq2\b"),        "Q2"),
+    (re.compile(r"\b(1st|first|1)\b.*\bquarter\b|\bq1\b"),       "Q1"),
+    (re.compile(r"\b(2nd|second)\b.*\b(half|period)\b"),         "H2"),
+    (re.compile(r"\b(1st|first|1)\b.*\b(half|period)\b"),        "H1"),
+]
+
+
+def _derive_period(norm: str) -> str:
+    """Best-effort period token from a title; defaults to FT. Quarters checked
+    before halves, 2nd before 1st. 'period' is treated as a half (some CB
+    leagues say '1st Period' for the first half). Punctuation is flattened to
+    spaces first so "1st. Quarter" (the dot) still matches the quarter rule."""
+    t = re.sub(r"[^a-z0-9]+", " ", norm)
+    for pat, period in _PERIOD_PATTERNS:
+        if pat.search(t):
+            return period
+    return "FT"
+
+
+def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
+    """Permissive 2-way ladder classifier for the anomaly scanner (see the
+    block comment above). Returns spread/total for any non-skipped
+    handicap/total title; None otherwise."""
+    if not title:
+        return None
+    norm = _normalize_title(title)
+    for pat in _SKIP_PATTERNS:
+        if pat.search(norm):
+            return None
+    rank = 1 if "regular time" in norm else 0
+    period = _derive_period(norm)
+    if "handicap" in norm:
+        return MarketClassification(market_type="spread", period=period, variant_rank=rank)
+    if "total" in norm:
+        return MarketClassification(market_type="total", period=period, variant_rank=rank)
+    # 2-way moneyline — captured so the consistency engine can compare ML win-prob
+    # to the spread ladder per period. "winner" (incl-OT), "draw no bet" (the
+    # 2-way derivative on sub-periods), or "moneyline". 3-way "1x2" is already
+    # excluded by _SKIP_PATTERNS above. n_way=2 → cb_detail parses {home, away}.
+    if "winner" in norm or "draw no bet" in norm or "moneyline" in norm:
+        return MarketClassification(
+            market_type="moneyline", period=period, variant_rank=rank, n_way=2,
+        )
     return None

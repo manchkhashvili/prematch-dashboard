@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Top Moves — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527e" />
+  <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
+  <script src="/theme.js?v=20260527"></script>
+  <!-- Phase 3.12: cross-page alert poller. -->
+  <script src="/alerts.js?v=20260601a" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html">Matches</a>
+      <a href="/arbs.html">Arbs / +EV</a>
+      <a href="/moves.html" class="active">Top Moves</a>
+      <a href="/anomalies.html">Anomalies</a>
+      <a href="/bets.html">Bets</a>
+      <a href="/calc.html">Calc</a>
+      <a href="/unmatched.html">Unmatched</a>
+    </nav>
+    <div class="status" id="status">
+      <span id="cb-status">CB —</span>
+      <span id="pin-status">Pin —</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="chip-group" id="mode-toggle" title="Per cycle: each cycle-over-cycle move. Cumulative: net moneyline drift over the last hour.">
+      <span class="chip on" data-mode="cycle">Per cycle (10m)</span>
+      <span class="chip"    data-mode="cumulative">Cumulative (1h)</span>
+    </div>
+    <label>
+      Min move (pp)
+      <input type="number" id="min-move" value="2" step="0.5" min="0" />
+    </label>
+    <label class="alert-controls" title="Plays a distinct ascending chime (NOT the +EV buzzer) when a NEW Pinnacle move at or above this Δpp appears. Dedupes per cycle — the same move won't chime twice.">
+      <input type="checkbox" id="move-alert-enabled" />
+      Alert ≥
+      <input type="number" id="move-alert-threshold" value="5" step="1" min="1" />
+      pp
+    </label>
+    <span class="row-count" id="row-count">…</span>
+    <span class="hint">
+      Pinnacle no-vig fair-probability shifts over the last 10 minutes (one row
+      per cycle-over-cycle move). Each row is the side sharp money came in on
+      (its fair % rose). Newest first. New moves append every Pinnacle cycle
+      (~60s); rows age off after 10 min. "Log" prefills a bet on that side
+      (Pinnacle odds — switch to CB in the form if betting there).
+    </span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="moves">
+      <thead>
+        <tr>
+          <th id="th-seen">Seen (UTC)</th>
+          <th>Start (UTC)</th>
+          <th>Sport</th>
+          <th>League</th>
+          <th>Match</th>
+          <th>Market</th>
+          <th>Side</th>
+          <th id="th-odds" class="num" title="Posted Pinnacle odds: previous cycle → now → no-vig fair price now">Odds was → now → fair</th>
+          <th id="th-fair" class="num">Fair % was → now</th>
+          <th id="th-delta" class="num">Δ pp</th>
+          <th title="Log a bet on this move's side (prefills Pinnacle odds — switch book/odds in the form if betting CB)"></th>
+        </tr>
+      </thead>
+      <tbody id="moves-body">
+        <tr><td colspan="11" class="empty">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+const POLL_MS = 30_000;
+let cache = [];
+let mode = "cycle";   // "cycle" (per-cycle, 10m) | "cumulative" (net, 1h)
+const minMoveInput = document.getElementById("min-move");
+minMoveInput.addEventListener("change", fetchAndRender);
+
+// ── Mode toggle: per-cycle vs cumulative (Phase 5.6) ───────────────────────
+document.querySelectorAll("#mode-toggle .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#mode-toggle .chip").forEach(c => c.classList.remove("on"));
+    chip.classList.add("on");
+    mode = chip.dataset.mode;
+    updateColumnHeaders();
+    fetchAndRender();
+  });
+});
+
+function updateColumnHeaders() {
+  // Two columns differ between modes; the rest stay.
+  const seenTh = document.getElementById("th-seen");
+  const oddsTh = document.getElementById("th-odds");
+  const fairTh = document.getElementById("th-fair");
+  const deltaTh = document.getElementById("th-delta");
+  if (mode === "cumulative") {
+    seenTh.textContent  = "First seen (UTC)";
+    oddsTh.textContent  = "Odds first → now → fair";
+    fairTh.textContent  = "Fair % first → now";
+    deltaTh.textContent = "Net Δ pp";
+  } else {
+    seenTh.textContent  = "Seen (UTC)";
+    oddsTh.textContent  = "Odds was → now → fair";
+    fairTh.textContent  = "Fair % was → now";
+    deltaTh.textContent = "Δ pp";
+  }
+}
+
+// ── Move-alert controls (Phase 5.2) ────────────────────────────────────────
+// These only write to localStorage; the actual polling + distinct chime live
+// in the shared alerts.js (runs on every page). Restore saved state on load.
+const moveAlertEnabled   = document.getElementById("move-alert-enabled");
+const moveAlertThreshold = document.getElementById("move-alert-threshold");
+try {
+  if (localStorage.getItem("move_alert_enabled") === "1") moveAlertEnabled.checked = true;
+  const stored = localStorage.getItem("move_alert_threshold");
+  if (stored) moveAlertThreshold.value = stored;
+} catch (e) { /* private mode — ignore */ }
+moveAlertEnabled.addEventListener("change", () => {
+  try { localStorage.setItem("move_alert_enabled", moveAlertEnabled.checked ? "1" : "0"); } catch (e) {}
+});
+moveAlertThreshold.addEventListener("change", () => {
+  try { localStorage.setItem("move_alert_threshold", moveAlertThreshold.value); } catch (e) {}
+});
+
+function fmtNum(v, d = 3) {
+  return (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+}
+function fmtTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toISOString().slice(5, 16).replace("T", " ");
+}
+function fmtAge(sec) {
+  if (sec === null || sec === undefined) return "—";
+  if (sec < 60)   return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m" + String(sec % 60).padStart(2, "0") + "s";
+  return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
+}
+function sportPrefix(s) {
+  if (s === "basketball") return "bb";
+  if (s === "soccer")     return "sc";
+  if (s === "tennis")     return "tn";
+  if (s === "mma")        return "mma";
+  return s.slice(0, 2);
+}
+function buildSourceStatus(label, sports, source, staleThresholdSec) {
+  const parts = [];
+  let anyErr = false, worstAge = 0;
+  for (const [sport, st] of Object.entries(sports || {})) {
+    const s = st[source];
+    parts.push(`${sportPrefix(sport)}:${s.count} (${fmtAge(s.age_sec)})`);
+    if (s.error) anyErr = true;
+    if (typeof s.age_sec === "number") worstAge = Math.max(worstAge, s.age_sec);
+  }
+  const text = `${label} ${parts.join(" | ")}`;
+  let cls;
+  if (anyErr) cls = "err";
+  else if (worstAge > staleThresholdSec) cls = "stale";
+  else cls = "ok";
+  return { text, cls };
+}
+async function pollStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const cbEl = document.getElementById("cb-status");
+    const pinEl = document.getElementById("pin-status");
+    const cb  = buildSourceStatus("CB",  s.sports, "cb",  600);
+    const pin = buildSourceStatus("Pin", s.sports, "pin", 240);
+    cbEl.textContent = cb.text;  cbEl.className = cb.cls;
+    pinEl.textContent = pin.text; pinEl.className = pin.cls;
+  } catch (e) { /* swallow */ }
+}
+
+async function fetchAndRender() {
+  const minMove = parseFloat(minMoveInput.value || "2");
+  const url = (mode === "cumulative")
+    ? "/api/moves/cumulative?min_move=" + minMove
+    : "/api/moves?min_move=" + minMove;
+  try {
+    cache = await (await fetch(url)).json();
+    render();
+  } catch (e) {
+    document.getElementById("moves-body").innerHTML =
+      `<tr><td colspan="11" class="empty">error loading moves</td></tr>`;
+  }
+}
+
+function deltaClass(pp) {
+  // Signed: positive = prob rose (money in); negative = drifted out.
+  if (pp >= 8)  return "edge-pos-bold";
+  if (pp >= 4)  return "edge-pos";
+  if (pp <= -4) return "edge-neg";
+  return "";
+}
+function fmtSignedPp(pp) {
+  return (pp >= 0 ? "+" : "") + pp.toFixed(2);
+}
+
+// Build a /bets.html prefill URL for a move. Pinnacle-side, so book=pin and
+// the current Pinnacle odds (new_odds per-cycle / last_odds cumulative). If
+// betting CrystalBet on this side, switch book → CB in the form.
+function buildMovePrefillUrl(m) {
+  const odds = (m.new_odds != null) ? m.new_odds : m.last_odds;
+  const p = new URLSearchParams({
+    sport: m.sport || "",
+    match_label: (m.match_label || "").replace(" — ", " vs "),
+    period: m.period || "FT",
+    market_type: m.market_type || "moneyline",
+    ...(m.line != null ? { line: m.line } : {}),
+    side: m.side || "",
+    ...(m.submarket ? { submarket: m.submarket } : {}),
+    ...(m.team_side ? { team_side: m.team_side } : {}),
+    book: "pin",
+    odds_taken: (odds != null ? Number(odds).toFixed(2) : ""),
+    stake: "20",
+    bankroll_at_time: "500",
+    ...(m.start_time ? { start_time: m.start_time } : {}),
+  });
+  return "/bets.html?" + p.toString();
+}
+
+function render() {
+  const body = document.getElementById("moves-body");
+  const windowLabel = (mode === "cumulative") ? "last 1h" : "last 10 min";
+  document.getElementById("row-count").textContent =
+    `${cache.length} move${cache.length === 1 ? "" : "s"} (${windowLabel})`;
+  if (cache.length === 0) {
+    body.innerHTML = `<tr><td colspan="11" class="empty">no moves above threshold in the ${windowLabel}</td></tr>`;
+    return;
+  }
+
+  if (mode === "cumulative") {
+    body.innerHTML = cache.map(m => `
+      <tr>
+        <td class="mono dim">${fmtTime(m.first_seen)}</td>
+        <td class="mono dim">${fmtTime(m.start_time)}</td>
+        <td class="dim">${m.sport}</td>
+        <td class="dim">${m.league || ""}</td>
+        <td>${m.match_label}</td>
+        <td class="dim">${m.market}</td>
+        <td><b>${m.side}</b></td>
+        <td class="num mono">${fmtNum(m.first_odds)} → ${fmtNum(m.last_odds)} → <span class="edge-pos">${fmtNum(m.fair_now_odds)}</span></td>
+        <td class="num mono">${fmtNum(m.first_prob_pct, 1)}% → ${fmtNum(m.last_prob_pct, 1)}%</td>
+        <td class="num ${deltaClass(m.net_pp)}">${fmtSignedPp(m.net_pp)}</td>
+        <td><a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
+      </tr>
+    `).join("");
+    return;
+  }
+
+  // Per-cycle mode
+  body.innerHTML = cache.map(m => `
+    <tr>
+      <td class="mono dim">${fmtTime(m.recorded_at)}</td>
+      <td class="mono dim">${fmtTime(m.start_time)}</td>
+      <td class="dim">${m.sport}</td>
+      <td class="dim">${m.league || ""}</td>
+      <td>${m.match_label}</td>
+      <td class="dim">${m.market}</td>
+      <td><b>${m.side}</b></td>
+      <td class="num mono">${fmtNum(m.old_odds)} → ${fmtNum(m.new_odds)} → <span class="edge-pos">${fmtNum(m.fair_now_odds)}</span></td>
+      <td class="num mono">${fmtNum(m.old_prob_pct, 1)}% → ${fmtNum(m.new_prob_pct, 1)}%</td>
+      <td class="num ${deltaClass(m.delta_pp)}">+${m.delta_pp.toFixed(2)}</td>
+      <td><a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
+    </tr>
+  `).join("");
+}
+
+pollStatus();
+fetchAndRender();
+setInterval(pollStatus,    10_000);
+setInterval(fetchAndRender, POLL_MS);
+</script>
+</body>
+</html>

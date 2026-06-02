@@ -28,12 +28,13 @@ Endpoints
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -42,6 +43,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import bets
+from src.anomalies import find_ladder_anomalies
+from src.consistency import find_consistency_flags
 from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities
 from src.matcher import (
     MatchedEvent, UnmatchedEvent, log_unmatched,
@@ -51,20 +54,26 @@ from src.models import Odds
 from src.scrapers import cache_persistence
 from src.scrapers.crystalbet import (
     SAMPLE_OUT as CB_SAMPLE_PATH,
+    SAMPLE_OUT_MMA as CB_SAMPLE_PATH_MMA,
     SAMPLE_OUT_SOCCER as CB_SAMPLE_PATH_SOCCER,
     SAMPLE_OUT_TENNIS as CB_SAMPLE_PATH_TENNIS,
     close_crystalbet,
+    fetch_crystalbet_basketball_anomaly_ladders,
+    fetch_crystalbet_basketball_games,
     fetch_crystalbet_basketball_prematch,
+    fetch_crystalbet_mma_prematch,
     fetch_crystalbet_soccer_prematch,
     fetch_crystalbet_tennis_prematch,
     get_detail_status_map,
     get_last_expanded_map,
     parse_html as parse_cb_html,
+    parse_html_mma as parse_cb_html_mma,
     parse_html_soccer as parse_cb_html_soccer,
     parse_html_tennis as parse_cb_html_tennis,
 )
 from src.scrapers.pinnacle import (
     fetch_pinnacle_basketball,
+    fetch_pinnacle_mma,
     fetch_pinnacle_soccer,
     fetch_pinnacle_tennis,
 )
@@ -116,6 +125,13 @@ _ALL_SPORTS: list[SportConfig] = [
         cb_sample_path=CB_SAMPLE_PATH_TENNIS,
         cb_parse_html=parse_cb_html_tennis,
     ),
+    SportConfig(
+        sport_name="mma",
+        cb_fetcher=fetch_crystalbet_mma_prematch,
+        pin_fetcher=fetch_pinnacle_mma,
+        cb_sample_path=CB_SAMPLE_PATH_MMA,
+        cb_parse_html=parse_cb_html_mma,
+    ),
 ]
 
 # Phase 2.5 #5: unified SPORTS env knob. Per-sport mode in one variable.
@@ -156,6 +172,10 @@ def _parse_sports_env(s: str) -> dict[str, str]:
         name = name.strip().lower()
         mode = mode.strip().lower()
         if not name:
+            continue
+        if name == "anomalies":
+            # Not a sport — it's the anomaly-scanner toggle, handled separately
+            # (see ANOMALY_SCAN below). Skip so it doesn't warn as a bad mode.
             continue
         if mode == "off":
             continue
@@ -215,6 +235,51 @@ else:
 SPORT_NAMES = tuple(s.sport_name for s in SPORTS)
 
 
+# ── Anomaly scanner config (Phase 6) ──────────────────────────────────────────
+# A SEPARATE hourly scan: scrapes CB basketball in FULL detail mode
+# (force_detail=True) regardless of the SPORTS=...:list config, runs the
+# CB-only ladder monotonicity detector, and serves the result on the
+# Anomalies tab. Independent of the normal per-sport polls so you can run
+# everything else in light list mode.
+#
+# Enable with ANOMALY_SCAN=1, or by adding an `anomalies` / `anomalies:on`
+# token to SPORTS, e.g.:
+#   ANOMALY_SCAN=1 SPORTS=basketball:list,soccer:list,tennis:list python main.py
+#   SPORTS=basketball:list,soccer:list,anomalies:on python main.py
+def _anomaly_enabled() -> bool:
+    if os.environ.get("ANOMALY_SCAN", "").strip().lower() in ("1", "on", "true", "yes"):
+        return True
+    for token in _SPORTS_ENV.split(","):
+        nm = token.split(":", 1)[0].split("_", 1)[0].strip().lower()
+        if nm == "anomalies":
+            return True
+    return False
+
+
+ANOMALY_SCAN = _anomaly_enabled()
+ANOMALY_SCAN_SEC = int(os.environ.get("ANOMALY_SCAN_SEC", "1800"))  # fixed-interval fallback
+ANOMALY_MARKETS = ("spread", "total")
+# Fast "watch" loop: re-scrape ONLY games that already have >=1 anomaly, this
+# often (default every 5 min), so flagged games refresh faster than the 30-min
+# full board scan. 0 disables the watch loop.
+ANOMALY_WATCH_SEC = int(os.environ.get("ANOMALY_WATCH_SEC", "300"))
+
+# Clock-aligned scan: run at each listed minute of every hour. Default "15,45"
+# = every 30 min, so a fresh scan lands a couple of minutes before :00 and :30.
+# Comma-separated; the scan takes ~3 min. Set ANOMALY_SCAN_AT_MINUTE to ""/"off"
+# /"-1" to fall back to the fixed ANOMALY_SCAN_SEC interval instead.
+_scan_min_env = os.environ.get("ANOMALY_SCAN_AT_MINUTE", "15,45").strip().lower()
+if _scan_min_env in ("", "off", "none", "-1"):
+    ANOMALY_SCAN_AT_MINUTES: list[int] | None = None
+else:
+    try:
+        ANOMALY_SCAN_AT_MINUTES = sorted({int(x) % 60 for x in _scan_min_env.split(",") if x.strip()})
+        if not ANOMALY_SCAN_AT_MINUTES:
+            ANOMALY_SCAN_AT_MINUTES = [15, 45]
+    except ValueError:
+        ANOMALY_SCAN_AT_MINUTES = [15, 45]
+
+
 # ── Shared state (per-sport namespaced) ───────────────────────────────────────
 def _empty_source_state() -> dict[str, Any]:
     return {"odds": [], "fetched_at": None, "error": None, "count": 0}
@@ -226,6 +291,41 @@ def _empty_sport_state() -> dict[str, Any]:
 
 _state: dict[str, Any] = {sport: _empty_sport_state() for sport in SPORT_NAMES}
 _state_lock = asyncio.Lock()
+
+# ── Pinnacle steam / top-moves detector (Phase 5.1) ───────────────────────────
+# For each sport we keep the PREVIOUS cycle's no-vig fair probabilities keyed by
+# market, and a ROLLING WINDOW of moves from the last _MOVE_RETENTION_SEC. A
+# "move" = a side whose fair probability rose by >= _MOVE_MIN_PP percentage
+# points vs the previous snapshot — i.e., sharp money came in on that side.
+# Surfacing only the rising side(s) is the steam signal (the opposing side
+# falls by definition). Phase 5.3: _recent_moves accumulates across cycles and
+# is pruned by age, so the Top Moves page shows the last few minutes of steam
+# rather than just the most recent cycle.
+_pin_prev_fair: dict[str, dict] = {sport: {} for sport in SPORT_NAMES}
+_recent_moves: dict[str, list[dict]] = {sport: [] for sport in SPORT_NAMES}
+_MOVE_MIN_PP = 2.0       # minimum fair-prob shift (percentage points) to surface a move
+_MOVE_RETENTION_SEC = 600  # keep moves for this long (10 min) on the Top Moves feed
+
+# Phase 5.6: per-market MONEYLINE series for the cumulative ("net over 1h")
+# view. Scoped to moneyline only to keep memory small (~15 MB; full-depth
+# would be 10x+). Structure: sport → market_key → {"meta": {...}, "points":
+# [(ts_iso, fair_prob_dict, odds_dict), ...]}. Pruned to _HOUR_WINDOW_SEC.
+_pin_ml_series: dict[str, dict] = {sport: {} for sport in SPORT_NAMES}
+_HOUR_WINDOW_SEC = 3600  # cumulative-moves lookback window (1 hour)
+
+# ── Anomaly scan state (Phase 6) ──────────────────────────────────────────────
+# Filled by the hourly _anomaly_loop. `_anomaly_cb_odds` keeps the full CB odds
+# from the last scan so the endpoint can re-match against the CURRENT Pinnacle
+# state (Pin fair + recent moves stay live even though the CB scan is hourly).
+_recent_anomalies: list[dict] = []          # base anomaly rows (CB-only fields)
+_recent_consistency: list[dict] = []        # CB-internal consistency flags (this scan)
+_anomaly_coverage: dict = {}                 # what the last scan actually processed
+_anomaly_cb_odds: list[Odds] = []           # CB odds snapshot from the last scan
+_anomaly_watchlist: set[str] = set()        # event_ids with >=1 anomaly (fast-refresh set)
+_anomaly_watch_at: datetime | None = None    # last fast watch re-scan time
+_anomalies_computed_at: datetime | None = None
+_anomalies_cb_fetched_at: datetime | None = None
+_anomalies_error: str | None = None
 
 
 # ── Background pollers (parameterized over sport) ─────────────────────────────
@@ -257,6 +357,12 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
                 _snapshot_open_bets_for_sport(sport)
             except Exception as e:
                 log.warning("bet history snapshot failed (%s): %s", sport, e)
+
+            # Phase 5.1: compute Pinnacle line moves vs the previous cycle.
+            try:
+                _compute_pin_moves(sport, odds)
+            except Exception as e:
+                log.warning("pin move detection failed (%s): %s", sport, e)
         except Exception as e:
             log.exception("pinnacle %s fetch failed", sport)
             async with _state_lock:
@@ -294,6 +400,151 @@ def _snapshot_open_bets_for_sport(sport: str) -> None:
                         "bet %d: closing Pin fair stamped at %.3f (kickoff passed)",
                         bet["id"], pin_now,
                     )
+
+
+# ── Pinnacle move detection ────────────────────────────────────────────────────
+def _pin_market_key(o: Odds) -> tuple:
+    """Stable key identifying one Pinnacle market across cycles."""
+    return (o.raw_event_id, o.market_type, o.period, o.line, o.submarket, o.team_side)
+
+
+def _move_market_label(o: Odds) -> str:
+    """Compact market label for a move row, e.g. 'spread FT -3.5' or 'moneyline FT'."""
+    parts = [o.market_type, o.period]
+    if o.line is not None:
+        parts.append(f"{o.line:+g}")
+    label = " ".join(parts)
+    if o.submarket:
+        label += f" ({o.submarket})"
+    if o.team_side:
+        label += f" ({o.team_side})"
+    return label
+
+
+def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
+    """Diff this cycle's Pinnacle no-vig fair probs against the previous cycle.
+
+    Stores the resulting move list in _recent_moves[sport] and updates
+    _pin_prev_fair[sport] for the next cycle. A "move" is a side whose fair
+    probability ROSE by >= _MOVE_MIN_PP points — that's the side money came
+    in on. The opposing side falls by construction; we don't double-report it.
+    """
+    # Build current fair-prob + posted-odds map keyed by market.
+    current: dict[tuple, dict] = {}
+    for o in odds:
+        fair_dec = _maybe_devig(o)
+        if not fair_dec:
+            continue
+        fair_prob = {side: (1.0 / dec) for side, dec in fair_dec.items() if dec and dec > 0}
+        if not fair_prob:
+            continue
+        current[_pin_market_key(o)] = {
+            "fair_prob": fair_prob,
+            "odds": dict(o.selections),
+            "home": o.home, "away": o.away,
+            "label": _move_market_label(o),
+            "league": o.league,
+            "start_time": o.start_time.isoformat() if o.start_time else None,
+            # Structured market spec — drives the Log-bet prefill on moves.html.
+            "market_type": o.market_type,
+            "period": o.period,
+            "line": o.line,
+            "submarket": o.submarket,
+            "team_side": o.team_side,
+        }
+
+    prev = _pin_prev_fair.get(sport, {})
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    moves: list[dict] = []
+
+    for key, cur in current.items():
+        old = prev.get(key)
+        if not old:
+            continue  # market unseen last cycle — no move to compute
+        for side, new_prob in cur["fair_prob"].items():
+            old_prob = old["fair_prob"].get(side)
+            if old_prob is None:
+                continue
+            delta_pp = (new_prob - old_prob) * 100.0
+            if delta_pp < _MOVE_MIN_PP:
+                continue  # only surface the side that strengthened
+            moves.append({
+                "sport": sport,
+                "match_label": f"{cur['home']} — {cur['away']}",
+                "market": cur["label"],
+                "league": cur.get("league"),
+                "side": side,
+                "old_odds": old["odds"].get(side),
+                "new_odds": cur["odds"].get(side),
+                # No-vig fair DECIMAL odds at the current snapshot (1/fair_prob).
+                # Computed from the unrounded prob for precision. The gap
+                # between new_odds (posted) and fair_now_odds is the vig left
+                # on this side right now.
+                "fair_now_odds": round(1.0 / new_prob, 3) if new_prob > 0 else None,
+                "old_prob_pct": round(old_prob * 100.0, 2),
+                "new_prob_pct": round(new_prob * 100.0, 2),
+                "delta_pp": round(delta_pp, 2),
+                "start_time": cur["start_time"],
+                "recorded_at": now_iso,
+                # Structured spec for the Log-bet prefill (Phase 5.4).
+                "market_type": cur["market_type"],
+                "period": cur["period"],
+                "line": cur["line"],
+                "submarket": cur["submarket"],
+                "team_side": cur["team_side"],
+            })
+
+    # Phase 5.3: accumulate into a rolling window instead of overwriting.
+    # Append this cycle's moves to whatever's still within the retention
+    # window, then drop anything older than _MOVE_RETENTION_SEC.
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=_MOVE_RETENTION_SEC)
+    kept: list[dict] = []
+    for m in _recent_moves.get(sport, []) + moves:
+        try:
+            if datetime.fromisoformat(m["recorded_at"]) >= cutoff:
+                kept.append(m)
+        except (ValueError, KeyError):
+            continue  # malformed timestamp — drop it
+    _recent_moves[sport] = kept
+    # Persist current as previous for the next cycle (only the fields we diff).
+    _pin_prev_fair[sport] = {
+        k: {"fair_prob": v["fair_prob"], "odds": v["odds"]}
+        for k, v in current.items()
+    }
+
+    # Phase 5.6: append this cycle's MONEYLINE fair/odds to the 1h series,
+    # then prune. Used by the cumulative ("net over 1h") view.
+    hr_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=_HOUR_WINDOW_SEC)
+    series_map = _pin_ml_series.setdefault(sport, {})
+    seen_keys: set = set()
+    for key, cur in current.items():
+        if key[1] != "moneyline":   # key = (eid, market_type, period, line, sub, team)
+            continue
+        seen_keys.add(key)
+        entry = series_map.get(key)
+        if entry is None:
+            entry = {
+                "meta": {
+                    "home": cur["home"], "away": cur["away"], "label": cur["label"],
+                    "league": cur.get("league"),
+                    "start_time": cur["start_time"], "market_type": cur["market_type"],
+                    "period": cur["period"], "line": cur["line"],
+                    "submarket": cur["submarket"], "team_side": cur["team_side"],
+                },
+                "points": [],
+            }
+            series_map[key] = entry
+        entry["points"].append((now_iso, cur["fair_prob"], cur["odds"]))
+        # Prune points outside the window.
+        entry["points"] = [
+            p for p in entry["points"]
+            if datetime.fromisoformat(p[0]) >= hr_cutoff
+        ]
+    # Drop markets not seen this cycle whose last point has aged out.
+    for k in list(series_map.keys()):
+        pts = series_map[k]["points"]
+        if not pts or datetime.fromisoformat(pts[-1][0]) < hr_cutoff:
+            del series_map[k]
 
 
 async def _crystalbet_loop_for_sport(cfg: SportConfig):
@@ -338,6 +589,361 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
         await asyncio.sleep(CRYSTALBET_POLL_SEC)
 
 
+# ── Anomaly scanner (Phase 6) ─────────────────────────────────────────────────
+def _anomaly_base_row(a) -> dict:
+    """CB-only fields for one ladder anomaly. Pin attachment added at request time.
+
+    The 'inflated' rung — the side+line carrying the suspiciously high price you
+    would actually bet — depends on the violation direction:
+      expected 'down' (odds should fall as the line rises) → high price at line_hi
+      expected 'up'   (odds should rise)                    → high price at line_lo
+    """
+    if a.expected == "down":
+        bet_line, bet_odds = a.line_hi, a.odds_hi
+    else:
+        bet_line, bet_odds = a.line_lo, a.odds_lo
+    return {
+        "sport": "basketball",
+        "league": a.league,
+        "match_label": f"{a.home} — {a.away}",
+        "home": a.home, "away": a.away,
+        "cb_event_id": a.event_id,
+        "start_time": a.start_time.isoformat() if a.start_time else None,
+        "period": a.period,
+        "market_type": a.market_type,
+        "submarket": a.submarket,
+        "section": a.section,
+        # Prefer the real CB section title ("Asian Handicap 1st Period") for the
+        # human label; fall back to the canonical "spread H1" form.
+        "market": a.section or (f"{a.market_type} {a.period}"
+                                + (f" ({a.submarket})" if a.submarket else "")),
+        "side": a.side,
+        "line_lo": a.line_lo, "line_hi": a.line_hi,
+        "odds_lo": a.odds_lo, "odds_hi": a.odds_hi,
+        "expected": a.expected,
+        "pct": round(a.pct, 2),
+        "delta": round(a.delta, 3),
+        "bet_line": bet_line,
+        "bet_odds": bet_odds,
+    }
+
+
+async def _compute_anomalies() -> bool:
+    """Hourly: scrape CB basketball in FULL detail mode, run the ladder
+    detector, store the result. Pin attachment happens later (request time) so
+    fair prices + moves stay live between hourly scans. Returns True if the CB
+    scrape produced odds (lets the loop retry sooner on a cold start)."""
+    global _recent_anomalies, _anomaly_cb_odds
+    global _anomalies_computed_at, _anomalies_cb_fetched_at, _anomalies_error
+    try:
+        if CB_USE_SAVED:
+            from src.scrapers.crystalbet import dry_run_parse_saved
+            cb_odds = dry_run_parse_saved()
+        else:
+            # Permissive full-detail scrape: captures every 2-way handicap/total
+            # ladder (incl. "Asian Handicap 1st Period" the strict classifier drops).
+            cb_odds = await fetch_crystalbet_basketball_anomaly_ladders(
+                headed=not CB_HEADLESS,
+            )
+    except Exception as e:
+        log.exception("anomaly scan: CB full-detail scrape failed")
+        async with _state_lock:
+            _anomalies_error = str(e)[:200]
+        return False
+
+    anoms = find_ladder_anomalies(cb_odds, markets=ANOMALY_MARKETS, min_pct=0.0)
+    rows = [_anomaly_base_row(a) for a in anoms]
+    flags = [_consistency_to_dict(f) for f in find_consistency_flags(cb_odds)]
+    coverage = _coverage_stats(cb_odds)
+    watchlist = {r["cb_event_id"] for r in rows if r["cb_event_id"]}
+    ts = datetime.now(tz=timezone.utc)
+    global _recent_consistency, _anomaly_coverage, _anomaly_watchlist
+    async with _state_lock:
+        _anomaly_cb_odds = cb_odds
+        _recent_anomalies = rows
+        _recent_consistency = flags
+        _anomaly_coverage = coverage
+        _anomaly_watchlist = watchlist
+        _anomalies_computed_at = ts
+        _anomalies_cb_fetched_at = ts
+        _anomalies_error = None
+    # Append a point-in-time snapshot to the history logs. Pin is attached at
+    # scan time so the history can later answer "did any flagged rung beat
+    # Pinnacle". Best-effort — never let logging break the scan.
+    try:
+        bball = _state.get("basketball")
+        pin_odds = bball["pin"]["odds"] if bball else []
+        enriched = _attach_pin_to_anomalies(
+            rows, cb_odds, pin_odds, _recent_moves.get("basketball", []))
+        _append_scan_history(ts.isoformat(), enriched, flags)
+        _append_csv(
+            _SCANS_HISTORY,
+            ["scan_ts", "odds", "games", "ladders", "rungs", "moneylines",
+             "games_without_ladder", "anomalies", "consistency_flags"],
+            [[ts.isoformat(), coverage["odds"], coverage["games"], coverage["ladders"],
+              coverage["rungs"], coverage["moneylines"], coverage["games_without_ladder"],
+              len(rows), len(flags)]],
+        )
+    except Exception:
+        log.exception("anomaly scan history append failed")
+    log.info("anomaly scan complete: %d CB odds across %d games, %d ladders, "
+             "%d rungs, %d ML; %d games without ladder; %d anomalies, %d consistency flags",
+             coverage["odds"], coverage["games"], coverage["ladders"], coverage["rungs"],
+             coverage["moneylines"], coverage["games_without_ladder"], len(rows), len(flags))
+    return bool(cb_odds)
+
+
+def _consistency_to_dict(f) -> dict:
+    return {
+        "sport": f.sport, "league": f.league,
+        "match_label": f.match_label, "home": f.home, "away": f.away,
+        "cb_event_id": f.event_id,
+        "start_time": f.start_time.isoformat() if f.start_time else None,
+        "kind": f.kind, "periods": f.periods, "detail": f.detail,
+        "severity": f.severity,
+    }
+
+
+# Append-only scan history — one row per anomaly / flag PER scan (scan_ts column),
+# so watching the hourly scans builds a real dataset rather than a screen you
+# happen to glance at. Lives outside the in-memory state so it survives restarts.
+_HISTORY_DIR = Path(__file__).resolve().parent.parent / "output" / "history"
+_ANOM_HISTORY = _HISTORY_DIR / "anomalies_history.csv"
+_CONS_HISTORY = _HISTORY_DIR / "consistency_history.csv"
+_SCANS_HISTORY = _HISTORY_DIR / "scans_history.csv"
+
+
+def _coverage_stats(cb_odds: list[Odds]) -> dict:
+    """What the scan actually saw — so a '0 anomalies' result is auditable
+    ('out of N games / M ladders / K rungs') rather than an ambiguous blank.
+    games_without_ladder ≈ games that fell back to list-view (failed detail
+    expansion) and therefore can't be checked for ladder anomalies."""
+    from collections import defaultdict
+    events: set = set()
+    ladders: dict = defaultdict(int)
+    rungs = 0
+    moneylines = 0
+    for o in cb_odds:
+        events.add(o.raw_event_id)
+        if o.market_type in ("spread", "total"):
+            ladders[(o.raw_event_id, o.period, o.market_type, o.section)] += 1
+            rungs += 1
+        elif o.market_type == "moneyline":
+            moneylines += 1
+    n_ladders = sum(1 for c in ladders.values() if c >= 2)
+    games_with_ladder = {k[0] for k, c in ladders.items() if c >= 2}
+    return {
+        "odds": len(cb_odds),
+        "games": len(events),
+        "ladders": n_ladders,
+        "rungs": rungs,
+        "moneylines": moneylines,
+        "games_without_ladder": len(events - games_with_ladder),
+    }
+
+
+def _append_csv(path: Path, header: list[str], rows: list[list]) -> None:
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if is_new:
+            w.writerow(header)
+        w.writerows(rows)
+
+
+def _append_scan_history(scan_ts: str, anomalies: list[dict], flags: list[dict]) -> None:
+    """Append this scan's anomalies (Pin-attached) + consistency flags to the
+    history CSVs. Best-effort: callers wrap in try/except so a disk hiccup never
+    breaks the scan."""
+    _append_csv(
+        _ANOM_HISTORY,
+        ["scan_ts", "league", "match", "start_time", "cb_event_id", "period",
+         "market", "section", "side", "line_lo", "line_hi", "odds_lo", "odds_hi",
+         "pct", "bet_line", "bet_odds", "pin_fair_odds", "pin_edge_pct"],
+        [[scan_ts, a.get("league") or "", a["match_label"], a.get("start_time") or "",
+          a.get("cb_event_id") or "", a["period"], a["market"], a.get("section") or "",
+          a["side"], a["line_lo"], a["line_hi"], a["odds_lo"], a["odds_hi"], a["pct"],
+          a["bet_line"], a["bet_odds"], a.get("pin_fair_odds"), a.get("pin_edge_pct")]
+         for a in anomalies],
+    )
+    _append_csv(
+        _CONS_HISTORY,
+        ["scan_ts", "league", "match", "cb_event_id", "kind", "periods", "detail", "severity"],
+        [[scan_ts, f.get("league") or "", f["match_label"], f.get("cb_event_id") or "",
+          f["kind"], f["periods"], f["detail"], f["severity"]] for f in flags],
+    )
+
+
+def _seconds_until_minute(target_min: int, now: datetime | None = None) -> float:
+    """Seconds from `now` (default: local wall clock) until the next time the
+    clock hits minute target_min at :00 seconds. Always positive. `now` is
+    injectable for testing; minute-of-hour is timezone-offset-agnostic for the
+    whole-hour offsets that matter here."""
+    now = now or datetime.now()
+    target = now.replace(minute=target_min % 60, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(hours=1)
+    return (target - now).total_seconds()
+
+
+def _seconds_until_minutes(minutes: list[int], now: datetime | None = None) -> float:
+    """Seconds until the SOONEST upcoming minute in `minutes` (e.g. [15, 45] →
+    every 30 min). Always positive."""
+    now = now or datetime.now()
+    return min(_seconds_until_minute(m, now) for m in minutes)
+
+
+async def _anomaly_loop():
+    """Run the anomaly scan, clock-aligned to ANOMALY_SCAN_AT_MINUTES (e.g.
+    [15, 45] = every 30 min). Falls back to a fixed ANOMALY_SCAN_SEC interval
+    when alignment is disabled. Does one immediate scan on boot so the tab isn't
+    blank until the first aligned slot."""
+    # Boot scan ASAP (after a short delay so the per-sport pollers init first),
+    # retrying until the first success — otherwise a cold start could leave the
+    # tab blank for up to an hour.
+    await asyncio.sleep(15)
+    ok = await _compute_anomalies()
+    while not ok:
+        await asyncio.sleep(120)
+        ok = await _compute_anomalies()
+
+    while True:
+        if ANOMALY_SCAN_AT_MINUTES is not None:
+            wait = _seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES)
+            log.info("anomaly scan: next run in %.0fs (aligned to minutes %s)",
+                     wait, ANOMALY_SCAN_AT_MINUTES)
+            await asyncio.sleep(wait)
+            ok = await _compute_anomalies()
+            if not ok:
+                # transient fail at the aligned slot — one quick retry instead
+                # of waiting a full hour.
+                await asyncio.sleep(120)
+                await _compute_anomalies()
+        else:
+            await asyncio.sleep(ANOMALY_SCAN_SEC)
+            await _compute_anomalies()
+
+
+def _merge_watch_rescan(
+    event_ids: set[str], fresh_odds: list[Odds],
+    cur_cb: list[Odds], cur_anoms: list[dict], cur_flags: list[dict],
+    cur_watch: set[str],
+) -> tuple[list[Odds], list[dict], list[dict], set[str]]:
+    """Replace the watched events' slice of state with freshly-scanned data.
+    Pure (no globals) so it's unit-testable. A watched game that re-scans clean
+    drops off the watchlist; one still anomalous stays; all OTHER events are
+    left exactly as they were."""
+    kept_cb = [o for o in cur_cb if o.raw_event_id not in event_ids]
+    new_cb = kept_cb + fresh_odds
+
+    fresh_anoms = [_anomaly_base_row(a) for a in
+                   find_ladder_anomalies(fresh_odds, markets=ANOMALY_MARKETS, min_pct=0.0)]
+    new_anoms = [r for r in cur_anoms if r["cb_event_id"] not in event_ids] + fresh_anoms
+
+    fresh_flags = [_consistency_to_dict(f) for f in find_consistency_flags(fresh_odds)]
+    new_flags = [r for r in cur_flags if r["cb_event_id"] not in event_ids] + fresh_flags
+
+    still_anomalous = {r["cb_event_id"] for r in fresh_anoms if r["cb_event_id"]}
+    new_watch = (cur_watch - event_ids) | still_anomalous
+    return new_cb, new_anoms, new_flags, new_watch
+
+
+async def _anomaly_watch_loop():
+    """Every ANOMALY_WATCH_SEC, re-scrape ONLY the games that already have an
+    anomaly and merge fresh results in — so flagged games refresh fast without
+    re-expanding the whole board. Silent (no chime); the 30-min full scan owns
+    the chime + history. Does nothing while the watchlist is empty."""
+    global _anomaly_cb_odds, _recent_anomalies, _recent_consistency
+    global _anomaly_watchlist, _anomaly_watch_at
+    while True:
+        await asyncio.sleep(ANOMALY_WATCH_SEC)
+        watch = set(_anomaly_watchlist)
+        if not watch:
+            continue
+        try:
+            if CB_USE_SAVED:
+                continue  # no per-game re-scrape in saved-HTML dev mode
+            fresh = await fetch_crystalbet_basketball_games(watch, headed=not CB_HEADLESS)
+            new_cb, new_anoms, new_flags, new_watch = _merge_watch_rescan(
+                watch, fresh, _anomaly_cb_odds, _recent_anomalies,
+                _recent_consistency, _anomaly_watchlist)
+            ts = datetime.now(tz=timezone.utc)
+            async with _state_lock:
+                _anomaly_cb_odds = new_cb
+                _recent_anomalies = new_anoms
+                _recent_consistency = new_flags
+                _anomaly_watchlist = new_watch
+                _anomaly_watch_at = ts
+            log.info("anomaly watch re-scan: %d games → %d still anomalous; "
+                     "%d total anomalies now", len(watch), len(new_watch), len(new_anoms))
+        except Exception:
+            log.exception("anomaly watch re-scan failed")
+
+
+def _attach_pin_to_anomalies(
+    rows: list[dict], cb_odds: list[Odds], pin_odds: list[Odds],
+    recent_moves: list[dict],
+) -> list[dict]:
+    """Add live Pinnacle fair-at-line, +EV edge, and recent-move context to each
+    anomaly row. Pin columns stay None where there's no Pinnacle match/line."""
+    if not rows:
+        return []
+    pin_by_event: dict[str, list[Odds]] = {}
+    pin_label_by_event: dict[str, str] = {}
+    if cb_odds and pin_odds:
+        for me in match_events(cb_odds, pin_odds):
+            if not me.cb:
+                continue
+            eid = me.cb[0].raw_event_id
+            pin_by_event[eid] = me.pin
+            if me.pin:
+                pin_label_by_event[eid] = f"{me.pin[0].home} — {me.pin[0].away}"
+    moves_by_label: dict[str, list[dict]] = {}
+    for m in recent_moves:
+        moves_by_label.setdefault(m["match_label"], []).append(m)
+
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        d["pin_fair_odds"] = None
+        d["pin_edge_pct"] = None
+        d["pin_move_pp"] = None
+        d["pin_move_label"] = None
+        pin_rows = pin_by_event.get(r["cb_event_id"])
+        if pin_rows:
+            sel = ({"home": 2.0, "away": 2.0} if r["market_type"] == "spread"
+                   else {"over": 2.0, "under": 2.0})
+            pin = None
+            try:
+                virtual = Odds(
+                    source="crystalbet", sport="basketball",
+                    home=r["home"], away=r["away"],
+                    market_type=r["market_type"], period=r["period"],
+                    selections=sel, fetched_at=datetime.now(tz=timezone.utc),
+                    line=r["bet_line"], submarket=r["submarket"],
+                )
+                pin = _closest_pin(virtual, pin_rows)
+            except Exception:
+                pin = None
+            if pin:
+                fair = _maybe_devig(pin)
+                if fair and r["side"] in fair and fair[r["side"]] > 0:
+                    pin_fair_dec = fair[r["side"]]
+                    d["pin_fair_odds"] = round(pin_fair_dec, 3)
+                    prob = 1.0 / pin_fair_dec
+                    d["pin_edge_pct"] = round((r["bet_odds"] * prob - 1.0) * 100.0, 2)
+            mv = moves_by_label.get(pin_label_by_event.get(r["cb_event_id"], ""), [])
+            if mv:
+                top = max(mv, key=lambda m: m["delta_pp"])
+                d["pin_move_pp"] = top["delta_pp"]
+                d["pin_move_label"] = f'{top["market"]} {top["side"]}'
+        out.append(d)
+    return out
+
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -366,6 +972,16 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(
             _crystalbet_loop_for_sport(cfg), name=f"crystalbet_loop_{cfg.sport_name}",
         ))
+    if ANOMALY_SCAN:
+        tasks.append(asyncio.create_task(_anomaly_loop(), name="anomaly_loop"))
+        log.info(
+            "anomaly scanner ENABLED — full-detail basketball scan every %ds",
+            ANOMALY_SCAN_SEC,
+        )
+        if ANOMALY_WATCH_SEC > 0:
+            tasks.append(asyncio.create_task(_anomaly_watch_loop(), name="anomaly_watch_loop"))
+            log.info("anomaly watch loop ENABLED — flagged games re-scanned every %ds",
+                     ANOMALY_WATCH_SEC)
     try:
         yield
     finally:
@@ -455,6 +1071,100 @@ async def api_matches() -> list[dict]:
     return all_rows
 
 
+@app.get("/api/moves")
+async def api_moves(
+    min_move: float = Query(2.0, ge=0.0, le=100.0,
+                            description="Minimum fair-prob shift (percentage points)"),
+) -> list[dict]:
+    """Pinnacle line moves from the last ~5 minutes (Phase 5.3 rolling window),
+    across all sports. Each row is a side whose no-vig fair probability rose —
+    the side sharp money came in on. Sorted newest-first, then by magnitude
+    within the same cycle, so the feed reads as 'what just moved'."""
+    all_moves: list[dict] = []
+    for sport in SPORT_NAMES:
+        for m in _recent_moves.get(sport, []):
+            if m["delta_pp"] >= min_move:
+                all_moves.append(m)
+    # Newest first; within the same recorded_at (one cycle) biggest mover first.
+    all_moves.sort(key=lambda m: (m["recorded_at"], m["delta_pp"]), reverse=True)
+    return all_moves
+
+
+@app.get("/api/moves/cumulative")
+async def api_moves_cumulative(
+    min_move: float = Query(2.0, ge=0.0, le=100.0,
+                            description="Minimum |net fair-prob shift| (pp) over the 1h window"),
+) -> list[dict]:
+    """Net moneyline drift over the last hour, per market, across all sports.
+    Sorted by absolute net shift desc. Moneyline only (Phase 5.6)."""
+    all_moves: list[dict] = []
+    for sport in SPORT_NAMES:
+        all_moves.extend(_compute_cumulative_moves(sport, min_move))
+    all_moves.sort(key=lambda m: -abs(m["net_pp"]))
+    return all_moves
+
+
+@app.get("/api/anomalies")
+async def api_anomalies(
+    min_pct: float = Query(0.5, ge=0.0, le=1000.0,
+                           description="Minimum wrong-direction move (% of smaller price)"),
+    spread_only: bool = Query(False, description="Handicap ladders only; skip totals"),
+    min_severity: float = Query(0.0, ge=0.0, le=1000.0,
+                                description="Minimum severity for consistency flags"),
+) -> dict:
+    """CB-only ladder monotonicity anomalies from the latest hourly scan, with
+    live Pinnacle fair-at-line + recent-move context attached per row. Sorted
+    by % off, biggest first."""
+    base = [
+        r for r in _recent_anomalies
+        if r["pct"] >= min_pct and (not spread_only or r["market_type"] == "spread")
+    ]
+    bball = _state.get("basketball")
+    pin_odds = bball["pin"]["odds"] if bball else []
+    recent_moves = _recent_moves.get("basketball", [])
+    rows = _attach_pin_to_anomalies(base, _anomaly_cb_odds, pin_odds, recent_moves)
+    rows.sort(key=lambda r: r["pct"], reverse=True)
+    return {
+        "enabled": ANOMALY_SCAN,
+        "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
+        "cb_fetched_at": _anomalies_cb_fetched_at.isoformat() if _anomalies_cb_fetched_at else None,
+        "scan_sec": ANOMALY_SCAN_SEC,
+        "at_minutes": ANOMALY_SCAN_AT_MINUTES,
+        "next_scan_in_sec": (
+            round(_seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES))
+            if ANOMALY_SCAN_AT_MINUTES is not None else None
+        ),
+        "error": _anomalies_error,
+        "coverage": _anomaly_coverage,
+        "watch_count": len(_anomaly_watchlist),
+        "watch_sec": ANOMALY_WATCH_SEC,
+        "watch_at": _anomaly_watch_at.isoformat() if _anomaly_watch_at else None,
+        "count": len(rows),
+        "anomalies": rows,
+        "consistency": [f for f in _recent_consistency if f["severity"] >= min_severity],
+        "consistency_count": sum(1 for f in _recent_consistency if f["severity"] >= min_severity),
+    }
+
+
+@app.get("/api/anomalies/status")
+async def api_anomalies_status() -> dict:
+    """Cheap heartbeat for the cross-page scan-refresh alert — just the last
+    scan's timestamp + counts, with NONE of the request-time Pinnacle matching
+    that /api/anomalies does. Lets alerts.js poll every 30s on every page
+    without paying the full re-match cost."""
+    return {
+        "enabled": ANOMALY_SCAN,
+        "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
+        "next_scan_in_sec": (
+            round(_seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES))
+            if ANOMALY_SCAN_AT_MINUTES is not None else None
+        ),
+        "anomalies": len(_recent_anomalies),
+        "consistency": len(_recent_consistency),
+        "coverage": _anomaly_coverage,
+    }
+
+
 @app.get("/api/unmatched")
 async def api_unmatched() -> list[dict]:
     """CB events across sports with no Pin match + their best below-threshold candidate."""
@@ -499,6 +1209,66 @@ async def api_opportunities(
     # each sport's matched set).
     all_opps.sort(key=lambda d: -d["edge_pct"])
     return all_opps
+
+
+def _compute_cumulative_moves(sport: str, min_move: float) -> list[dict]:
+    """Net moneyline fair-prob drift over the 1h window, per market.
+
+    For each market series with >= 2 points, find the side with the largest
+    ABSOLUTE net shift (first point → last point). Signed: positive = the
+    side's fair prob rose (odds shortened / money in); negative = it fell
+    (odds drifted out). The user's example — a side going 1.5 → 1.7 → 1.9
+    over the hour — surfaces here as that side with a negative net_pp and
+    first_odds 1.5 → last_odds 1.9.
+    """
+    out: list[dict] = []
+    for entry in _pin_ml_series.get(sport, {}).values():
+        pts = entry["points"]
+        if len(pts) < 2:
+            continue
+        first_ts, first_prob, first_odds = pts[0]
+        last_ts, last_prob, last_odds = pts[-1]
+
+        best_side = None
+        best_abs = 0.0
+        best_net = 0.0
+        for side, lp in last_prob.items():
+            fp = first_prob.get(side)
+            if fp is None:
+                continue
+            net_pp = (lp - fp) * 100.0
+            if abs(net_pp) > best_abs:
+                best_abs = abs(net_pp)
+                best_side = side
+                best_net = net_pp
+        if best_side is None or best_abs < min_move:
+            continue
+
+        lp = last_prob[best_side]
+        fp = first_prob[best_side]
+        meta = entry["meta"]
+        out.append({
+            "sport": sport,
+            "match_label": f"{meta['home']} — {meta['away']}",
+            "market": meta["label"],
+            "league": meta.get("league"),
+            "side": best_side,
+            "first_odds": first_odds.get(best_side),
+            "last_odds": last_odds.get(best_side),
+            "fair_now_odds": round(1.0 / lp, 3) if lp > 0 else None,
+            "first_prob_pct": round(fp * 100.0, 2),
+            "last_prob_pct": round(lp * 100.0, 2),
+            "net_pp": round(best_net, 2),
+            "points": len(pts),
+            "first_seen": first_ts,
+            "last_seen": last_ts,
+            "start_time": meta["start_time"],
+            # structured spec for the Log-bet prefill
+            "market_type": meta["market_type"], "period": meta["period"],
+            "line": meta["line"], "submarket": meta["submarket"],
+            "team_side": meta["team_side"],
+        })
+    return out
 
 
 # ── Bets API ──────────────────────────────────────────────────────────────────
@@ -966,6 +1736,7 @@ def _opp_to_dict(o) -> dict:
         "line": o.line,
         "submarket": o.submarket,
         "team_side": o.team_side,
+        "league": o.league,
     }
 
 

@@ -235,6 +235,7 @@ def parse_detail_page(
     sport_name: str,
     classify: Callable[[str], Optional[MarketClassification]],
     scope_to_event: bool = False,
+    per_section: bool = False,
 ) -> list[Odds]:
     """
     Parse the expanded detail block for one game.
@@ -316,6 +317,7 @@ def parse_detail_page(
                 fetched_at=fetched_at, event_id=event_id,
                 league=league, start_time=start_time,
                 submarket=cls.submarket, team_side=None,
+                section=title,
             )
             if odds is not None:
                 ranked.append((cls.variant_rank, odds))
@@ -330,6 +332,7 @@ def parse_detail_page(
                     fetched_at=fetched_at, event_id=event_id,
                     league=league, start_time=start_time,
                     submarket=cls.submarket, team_side=None,
+                    section=title,
                 )
                 if odds is not None:
                     ranked.append((cls.variant_rank, odds))
@@ -344,6 +347,7 @@ def parse_detail_page(
                     fetched_at=fetched_at, event_id=event_id,
                     league=league, start_time=start_time,
                     submarket=cls.submarket, team_side=None,
+                    section=title,
                 )
                 if odds is not None:
                     ranked.append((cls.variant_rank, odds))
@@ -368,9 +372,20 @@ def parse_detail_page(
                     fetched_at=fetched_at, event_id=event_id,
                     league=league, start_time=start_time,
                     submarket=cls.submarket, team_side=cls.team_side,
+                    section=title,
                 )
                 if odds is not None:
                     ranked.append((cls.variant_rank, odds))
+
+    # Per-section mode (anomaly scanner): return EVERY section's rungs as-is,
+    # each Odds carrying its source `section`, with NO cross-section merge or
+    # rank suppression. The anomaly detector then analyses each section as an
+    # independent ladder, so distinct sections that share (period, market_type)
+    # — incl-OT vs regular-time, or a mis-derived period — never interleave into
+    # one ladder and fabricate violations. (Within a section, _parse_spread /
+    # _parse_total already key by line, so there are no intra-section dups.)
+    if per_section:
+        return [odds for _, odds in ranked]
 
     # Merge: keep lowest-rank variant per
     # (period, market_type, line, submarket, team_side) key. Submarket and
@@ -390,7 +405,23 @@ def parse_detail_page(
         if existing is None or rank < existing[0]:
             keyed[key] = (rank, odds)
 
-    return [o for _, o in keyed.values()]
+    # Drop all fallback (rank>0) rows for any (period, market_type, submarket,
+    # team_side) group where a preferred (rank=0) row exists. Without this,
+    # "2nd Half - Total (incl. OT)" (.5 lines, rank=0) and "2nd Half - Total*"
+    # (.0 lines, rank=1) survive as separate line values and get interleaved
+    # into a single ladder, producing spurious monotonicity violations.
+    preferred_groups: set[tuple[str, str, Optional[str], Optional[str]]] = set()
+    for rank, odds in keyed.values():
+        if rank == 0:
+            preferred_groups.add(
+                (odds.period, odds.market_type, odds.submarket, odds.team_side)
+            )
+
+    return [
+        o for rank, o in keyed.values()
+        if rank == 0
+        or (o.period, o.market_type, o.submarket, o.team_side) not in preferred_groups
+    ]
 
 
 def _build_odds(
@@ -402,6 +433,7 @@ def _build_odds(
     league: Optional[str], start_time: Optional[datetime],
     submarket: Optional[str] = None,
     team_side: Optional[str] = None,
+    section: Optional[str] = None,
 ) -> Optional[Odds]:
     """Construct an Odds; return None if the model rejects (suspended side, etc.)."""
     try:
@@ -420,6 +452,7 @@ def _build_odds(
             raw_event_id=event_id,
             submarket=submarket,  # type: ignore[arg-type]
             team_side=team_side,  # type: ignore[arg-type]
+            section=section,
         )
     except ValueError as exc:
         log.debug("Odds rejected: %s", exc)

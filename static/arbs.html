@@ -8,7 +8,7 @@
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
   <!-- Phase 3.12: cross-page alert poller. Defer = fine; first poll runs 2s after load. -->
-  <script src="/alerts.js?v=20260527d" defer></script>
+  <script src="/alerts.js?v=20260601a" defer></script>
 </head>
 <body>
   <header>
@@ -16,6 +16,8 @@
     <nav>
       <a href="/matches.html">Matches</a>
       <a href="/arbs.html" class="active">Arbs / +EV</a>
+      <a href="/moves.html">Top Moves</a>
+      <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
       <a href="/unmatched.html">Unmatched</a>
@@ -55,6 +57,7 @@
         <tr>
           <th>Start (UTC)</th>
           <th>Sport</th>
+          <th>League</th>
           <th>Match</th>
           <th>Market</th>
           <th>Side</th>
@@ -67,7 +70,7 @@
         </tr>
       </thead>
       <tbody id="opps-body">
-        <tr><td colspan="11" class="empty">loading…</td></tr>
+        <tr><td colspan="12" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -262,7 +265,7 @@ async function fetchAndRender() {
     // page, polls independently, persists seen-set in localStorage.
   } catch (e) {
     document.getElementById("opps-body").innerHTML =
-      `<tr><td colspan="11" class="empty">error loading opportunities</td></tr>`;
+      `<tr><td colspan="12" class="empty">error loading opportunities</td></tr>`;
   }
 }
 
@@ -271,7 +274,7 @@ function render() {
   document.getElementById("row-count").textContent =
     `${cache.length} row${cache.length === 1 ? "" : "s"}`;
   if (cache.length === 0) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">no opportunities at current threshold</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="empty">no opportunities at current threshold</td></tr>`;
     return;
   }
   body.innerHTML = cache.map(o => {
@@ -319,6 +322,7 @@ function render() {
           title="${titleParts.join(' ')}">
         <td class="mono dim">${fmtTime(o.start_time)}</td>
         <td class="dim">${o.sport || ""}</td>
+        <td class="dim">${o.league || ""}</td>
         <td>${o.match_label}</td>
         <td class="dim">${o.market}</td>
         <td>${o.side}${partner}</td>

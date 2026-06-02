@@ -77,7 +77,7 @@ if __package__ in (None, ""):
 
 from src.models import Odds
 from src.scrapers import cb_detail, change_cache
-from src.scrapers.sports import basketball, soccer, tennis
+from src.scrapers.sports import basketball, mma, soccer, tennis
 
 # Re-export basketball list-view parsers so existing imports still resolve.
 # Tests import these names from crystalbet directly (test_crystalbet_parser.py).
@@ -92,6 +92,7 @@ SPORTS_URL = "https://www.crystalbet.com/Pages/Sports.aspx"
 BASKETBALL_SPORT_ID = basketball.SPORT_ID  # 17
 SOCCER_SPORT_ID = soccer.SPORT_ID          # 16
 TENNIS_SPORT_ID = tennis.SPORT_ID          # 22
+MMA_SPORT_ID = mma.SPORT_ID                # 69
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -112,17 +113,22 @@ SAMPLE_OUT_SOCCER = (
 SAMPLE_OUT_TENNIS = (
     Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_tennis.html"
 )
+SAMPLE_OUT_MMA = (
+    Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_mma.html"
+)
 
 # Map sport_name → module + saved-HTML path for ergonomic lookup.
 _SPORT_MODULES: dict[str, Any] = {
     basketball.SPORT_NAME: basketball,
     soccer.SPORT_NAME: soccer,
     tennis.SPORT_NAME: tennis,
+    mma.SPORT_NAME: mma,
 }
 _SPORT_SAMPLE_PATHS: dict[str, Path] = {
     basketball.SPORT_NAME: SAMPLE_OUT,
     soccer.SPORT_NAME: SAMPLE_OUT_SOCCER,
     tennis.SPORT_NAME: SAMPLE_OUT_TENNIS,
+    mma.SPORT_NAME: SAMPLE_OUT_MMA,
 }
 
 
@@ -204,21 +210,15 @@ async def _select_basketball(page) -> None:
 
 async def _load_all_leagues_for_sport(page, sport_id: int) -> None:
     """Run DoChampionatPostBack('SelectAllChampionats:<sport_id>'), then wait
-    for game containers to actually render.
+    for game containers to fully render.
 
-    Phase 2.5 fix (2026-05-26 — first-cycle race surfaced in C2.6):
-    Without the wait_for_selector below, an early-cycle race (page JS not
-    fully bootstrapped when we read page.content) yields 0 containers
-    extracted → cycle 'succeeds' with 0 Odds → status bar shows sc:0 (or
-    cycle-1 expansion failures because DoGamesPostBack isn't bound yet).
-    The wait gives CB the extra seconds its JS sometimes needs, and a
-    real timeout surfaces as RuntimeError → cycle's exception handler
-    skips the fetched_at update → next cycle retries cleanly.
+    CB loads leagues progressively via UpdatePanel AJAX — firing on the first
+    visible container (wait_for_selector) then immediately reading page.content()
+    captures only the first batch and misses the rest. We instead poll the
+    container count until it has been stable for several consecutive checks,
+    meaning CB's AJAX has finished writing all leagues to the DOM.
     """
     js = f'DoChampionatPostBack("SelectAllChampionats:{sport_id}")'
-    # Wait for the JS function to bind before calling. Same family of fix
-    # as in _flip_to_english / _select_sport — protects against
-    # CB JS bootstrap race on cold start.
     try:
         await page.wait_for_function(
             "typeof DoChampionatPostBack === 'function'", timeout=30_000,
@@ -230,17 +230,59 @@ async def _load_all_leagues_for_sport(page, sport_id: int) -> None:
         ) from e
     log.info(js)
     await page.evaluate(js)
-    await asyncio.sleep(8)
-    try:
-        await page.wait_for_selector(
-            "div.GContainerList[data-id]", state="attached", timeout=15_000,
-        )
-    except Exception as e:
+
+    # Poll container count until stable: wait for the first container to
+    # appear (guards the 0-games transient), then keep polling until the
+    # count hasn't grown for _STABLE_POLLS consecutive ticks.
+    _POLL_INTERVAL = 1.5   # seconds between polls
+    _STABLE_POLLS  = 3     # how many consecutive equal-count polls = "done"
+    _TIMEOUT       = 45.0  # hard upper bound before we give up and use what we have
+
+    deadline = asyncio.get_event_loop().time() + _TIMEOUT
+    prev_count = 0
+    stable_streak = 0
+
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(_POLL_INTERVAL)
+        try:
+            count = await asyncio.wait_for(
+                page.evaluate(
+                    "() => document.querySelectorAll('div.GContainerList[data-id]').length"
+                ),
+                timeout=5.0,
+            )
+        except Exception:
+            count = prev_count  # page briefly unresponsive — don't reset streak
+
+        if count == 0:
+            stable_streak = 0   # not started yet
+        elif count == prev_count:
+            stable_streak += 1
+            if stable_streak >= _STABLE_POLLS:
+                log.info(
+                    "CB sport_id=%d list view stable at %d containers "
+                    "(after %d polls)",
+                    sport_id, count,
+                    stable_streak + (prev_count > 0),
+                )
+                return
+        else:
+            stable_streak = 0   # count grew — keep waiting
+
+        prev_count = count
+
+    # Timed out — use whatever rendered. Raise only if we got nothing at all.
+    if prev_count == 0:
         raise RuntimeError(
             f"CB sport_id={sport_id} list view rendered no game containers "
-            f"within 15s after SelectAllChampionats "
-            f"({type(e).__name__}); treating as transient — next cycle will retry"
-        ) from e
+            f"within {_TIMEOUT:.0f}s after SelectAllChampionats — "
+            "treating as transient; next cycle will retry"
+        )
+    log.warning(
+        "CB sport_id=%d list view timed out waiting for stable count "
+        "— using %d containers (may be incomplete)",
+        sport_id, prev_count,
+    )
 
 
 async def _load_all_leagues(page) -> None:
@@ -344,6 +386,11 @@ def parse_html_soccer(html: str, fetched_at: datetime) -> list[Odds]:
 def parse_html_tennis(html: str, fetched_at: datetime) -> list[Odds]:
     """Parse a tennis Sports.aspx HTML page."""
     return _parse_html_for_sport(html, fetched_at, tennis)
+
+
+def parse_html_mma(html: str, fetched_at: datetime) -> list[Odds]:
+    """Parse an MMA Sports.aspx HTML page."""
+    return _parse_html_for_sport(html, fetched_at, mma)
 
 
 # ── Singletons: one browser, one page per sport ───────────────────────────────
@@ -715,6 +762,7 @@ def _extract_games_from_list_html(
 
 async def _expand_and_parse_one(
     game: _GameOnList, fetched_at: datetime, sport: Any, page: Any,
+    classify: Any = None, ladder_mode: bool = False,
 ) -> list[Odds]:
     """
     Trigger ExpandDetail for one game on the given sport's page, wait for the
@@ -803,15 +851,19 @@ async def _expand_and_parse_one(
         start_time=game.start_time,
         fetched_at=fetched_at,
         sport_name=sport.SPORT_NAME,
-        classify=sport.classify_market_title,
+        classify=classify or sport.classify_market_title,
         scope_to_event=False,  # block_html is already the scoped table only
+        per_section=ladder_mode,
     )
     return odds
 
 
 # ── Public entry points ───────────────────────────────────────────────────────
 
-async def _fetch_for_sport(sport: Any, *, headed: bool) -> list[Odds]:
+async def _fetch_for_sport(
+    sport: Any, *, headed: bool, force_detail: bool = False,
+    classify_override: Any = None, bypass_cache: bool = False,
+) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
     Per cycle:
@@ -869,13 +921,53 @@ async def _fetch_for_sport(sport: Any, *, headed: bool) -> list[Odds]:
         # every game and bypass the entire expansion loop. Massive cost
         # saving: soccer cold cycle drops from ~60 min to ~30s. Trade-off
         # documented at the SKIP_DETAIL_SPORTS constant up top.
-        if sport_name in SKIP_DETAIL_SPORTS:
+        if sport_name in SKIP_DETAIL_SPORTS and not force_detail:
             all_odds: list[Odds] = []
             for g in games:
                 all_odds.extend(g.list_odds)
             log.info(
                 "CB %s cycle complete (LIST-VIEW-ONLY mode): %d games, %d Odds total",
                 sport_name, len(games), len(all_odds),
+            )
+            return all_odds
+
+        # ── 3-bis. Cache-bypass full expansion (anomaly scan path) ──
+        # When bypass_cache is set we ALWAYS expand every game with the given
+        # classifier and never touch the shared change_cache / detail cache.
+        # This keeps the hourly anomaly scan (permissive classifier) from
+        # contaminating the dashboard's strict-classified basketball cache, and
+        # guarantees the ladders are current each scan. Falls back to list-view
+        # Odds for any game that fails to expand.
+        if bypass_cache:
+            all_odds: list[Odds] = []
+            n_ok = n_fail = 0
+            for i, game in enumerate(games, 1):
+                if i % _PROGRESS_LOG_EVERY == 0:
+                    log.info(
+                        "CB %s anomaly-scan expansion: %d/%d (expanded=%d, fallback=%d)",
+                        sport_name, i, len(games), n_ok, n_fail,
+                    )
+                try:
+                    detail_odds = await _expand_and_parse_one(
+                        game, fetched_at, sport, page,
+                        classify=classify_override, ladder_mode=True,
+                    )
+                    if detail_odds:
+                        all_odds.extend(detail_odds)
+                        n_ok += 1
+                    else:
+                        all_odds.extend(game.list_odds)
+                        n_fail += 1
+                except Exception as e:
+                    log.warning(
+                        "anomaly-scan expand failed for %s (%s vs %s): %s",
+                        game.event_id, game.home, game.away, e,
+                    )
+                    all_odds.extend(game.list_odds)
+                    n_fail += 1
+            log.info(
+                "CB %s anomaly-scan cycle complete: %d expanded, %d fallback → %d Odds",
+                sport_name, n_ok, n_fail, len(all_odds),
             )
             return all_odds
 
@@ -965,10 +1057,78 @@ async def _fetch_for_sport(sport: Any, *, headed: bool) -> list[Odds]:
 
 
 async def fetch_crystalbet_basketball_prematch(
+    *, headed: bool = False, force_detail: bool = False,
+) -> list[Odds]:
+    """Scrape CB prematch basketball with full detail-page expansion.
+
+    `force_detail=True` overrides CB_SKIP_DETAIL_SPORTS / the SPORTS=...:list
+    short-circuit so the full alt-line ladders are scraped even when the
+    dashboard otherwise runs basketball in list-only mode. Used by the hourly
+    anomaly scanner, which needs the ladders the list view doesn't expose.
+    """
+    return await _fetch_for_sport(basketball, headed=headed, force_detail=force_detail)
+
+
+async def fetch_crystalbet_basketball_anomaly_ladders(
     *, headed: bool = False,
 ) -> list[Odds]:
-    """Scrape CB prematch basketball with full detail-page expansion."""
-    return await _fetch_for_sport(basketball, headed=headed)
+    """Full-detail basketball scrape for the hourly anomaly scanner.
+
+    Differs from the normal basketball fetch in three ways:
+      - force_detail: expands ladders even when basketball runs list-only;
+      - PERMISSIVE detail classifier: captures every 2-way handicap/total
+        ladder regardless of title phrasing (catches "Asian Handicap 1st
+        Period" and friends the strict classifier drops), while still excluding
+        prop/3-way/exotic markets via the shared skip-list;
+      - bypass_cache: always re-expands and never touches the dashboard's
+        strict-classified basketball change-cache.
+    """
+    return await _fetch_for_sport(
+        basketball, headed=headed, force_detail=True,
+        classify_override=basketball.classify_market_title_permissive,
+        bypass_cache=True,
+    )
+
+
+async def fetch_crystalbet_basketball_games(
+    event_ids, *, headed: bool = False,
+) -> list[Odds]:
+    """Re-scrape ONLY the given basketball games' detail ladders (permissive,
+    ladder_mode) — for the fast 'watch' loop that re-checks already-flagged
+    games every few minutes without re-expanding the whole board.
+
+    Loads the list view to locate the games (needed to drive ExpandDetail), then
+    expands only the targets. Falls back to a game's list-view Odds if its
+    expansion fails. Shares the basketball sport-lock with the other CB tasks."""
+    wanted = {str(e) for e in event_ids}
+    if not wanted:
+        return []
+    sport = basketball
+    sport_id = sport.SPORT_ID
+    fetched_at = datetime.now(tz=timezone.utc)
+    sport_lock = _get_sport_lock(sport_id)
+    async with sport_lock:
+        page = await _ensure_page_for_sport(sport_id, headed=headed)
+        await _load_all_leagues_for_sport(page, sport_id)
+        list_html = await page.content()
+        games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
+        targets = [g for g in games if g.event_id in wanted]
+        log.info("CB basketball watch re-scan: %d/%d target games present",
+                 len(targets), len(wanted))
+        out: list[Odds] = []
+        for g in targets:
+            try:
+                detail = await _expand_and_parse_one(
+                    g, fetched_at, sport, page,
+                    classify=sport.classify_market_title_permissive,
+                    ladder_mode=True,
+                )
+                out.extend(detail if detail else g.list_odds)
+            except Exception as e:
+                log.warning("watch re-scan expand failed for %s (%s vs %s): %s",
+                            g.event_id, g.home, g.away, e)
+                out.extend(g.list_odds)
+        return out
 
 
 async def fetch_crystalbet_soccer_prematch(
@@ -985,6 +1145,16 @@ async def fetch_crystalbet_tennis_prematch(
     full mode would also work (basketball-style detail expansion) but tennis
     has 500+ matches per cycle which is too heavy without server resources."""
     return await _fetch_for_sport(tennis, headed=headed)
+
+
+async def fetch_crystalbet_mma_prematch(
+    *, headed: bool = False,
+) -> list[Odds]:
+    """Scrape CB prematch MMA. List-only mode (SPORTS=mma:list) recommended —
+    MMA's CB list view exposes ML + total rounds only; per-fight method-of-
+    victory / round-betting markets live behind detail expansion which v1
+    skips. ~58 fights per cycle in typical samples (UFC + regional promotions)."""
+    return await _fetch_for_sport(mma, headed=headed)
 
 
 # ── Per-sport accessors (with sport_name params for app.py / cache_persistence) ──
@@ -1120,6 +1290,18 @@ def dry_run_parse_saved_tennis(out_path: Path = SAMPLE_OUT_TENNIS) -> list[Odds]
     return odds_list
 
 
+def dry_run_parse_saved_mma(out_path: Path = SAMPLE_OUT_MMA) -> list[Odds]:
+    """Parse an already-saved MMA HTML sample without launching a browser."""
+    if not out_path.exists():
+        print(f"No saved HTML at {out_path}")
+        return []
+    html = out_path.read_text(encoding="utf-8")
+    fetched_at = datetime.now(tz=timezone.utc)
+    odds_list = parse_html_mma(html, fetched_at)
+    _print_summary(odds_list, out_path, len(html))
+    return odds_list
+
+
 def _print_summary(odds_list: list[Odds], path: Path, html_len: int) -> None:
     by_type: dict[str, int] = {}
     for o in odds_list:
@@ -1167,6 +1349,11 @@ if __name__ == "__main__":
         action="store_true",
         help="parse data/raw/cb_prematch_sample_tennis.html without launching browser",
     )
+    ap.add_argument(
+        "--parse-saved-mma",
+        action="store_true",
+        help="parse data/raw/cb_prematch_sample_mma.html without launching browser",
+    )
     ap.add_argument("--headless", action="store_true", help="run browser headless")
     args = ap.parse_args()
 
@@ -1176,5 +1363,7 @@ if __name__ == "__main__":
         dry_run_parse_saved_soccer()
     elif args.parse_saved_tennis:
         dry_run_parse_saved_tennis()
+    elif args.parse_saved_mma:
+        dry_run_parse_saved_mma()
     else:
         asyncio.run(dry_run_capture(headed=not args.headless))
