@@ -6,8 +6,7 @@
 /data/unmatched_log.csv
 
 # Operational telemetry (regenerated each run)
-/dashboard.log
-/dashboard.log~
+/dashboard.log*
 /output/
 
 # Dev / debug helpers — kept locally but excluded from the published repo
