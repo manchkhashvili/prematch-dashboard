@@ -86,7 +86,7 @@ SPORT_ID_MMA = 22     # Phase 4.3 — verified via CC discovery 2026-05-27 ("Mix
 # strictly — but matches what a real user would send. Other headers shared.
 def _make_headers(sport_name: str) -> dict[str, str]:
     return {
-        "x-api-key": "guest",
+        "x-api-key": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R",  # from /config/app.json; rotate if 403
         "Origin": "https://www.pinnacle.com",
         "Referer": f"https://www.pinnacle.com/en/{sport_name}/",
     }
