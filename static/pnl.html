@@ -77,7 +77,11 @@ const POLL_MS = 30_000;
 
 function fmtMoney(v) {
   if (v === null || v === undefined) return "—";
-  return (v < 0 ? "−" : "") + "$" + Math.abs(v).toFixed(2);
+  const sign = v < 0 ? "−" : "";
+  const a = Math.abs(v);
+  const r = Math.round(a);
+  // whole amounts show with no cents ($1030, not $1030.00); real cents stay
+  return sign + "$" + (Math.abs(a - r) < 0.005 ? r.toLocaleString("en-US") : a.toFixed(2));
 }
 function cls(v) { return v > 0 ? "pos" : (v < 0 ? "neg" : ""); }
 function fmtTime(iso) { return iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") : "—"; }
