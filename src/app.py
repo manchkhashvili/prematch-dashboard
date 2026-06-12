@@ -43,7 +43,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src import bets, capital
+from src import bets, capital, ticks
 from src.anomalies import find_ladder_anomalies
 from src.consistency import find_consistency_flags
 from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities
@@ -354,6 +354,15 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
                 _state[sport]["pin"]["count"] = len(odds)
             log.info("pinnacle %s: %d Odds rows in %.1fs", sport, len(odds), dt)
 
+            # Change-only tick history (charts) — see src/ticks.py.
+            try:
+                await asyncio.to_thread(
+                    ticks.get_store().record_cycle, "pin", sport,
+                    ticks.rows_from_odds(odds), dur_ms=int(dt * 1000),
+                )
+            except Exception as e:
+                log.warning("tick store write failed (pin %s): %s", sport, e)
+
             # Snapshot every open bet for THIS sport. Other sports' pollers
             # do the same for their bets — each Pin cycle gives all-sport
             # bets a row, just staggered by sport poll timing.
@@ -371,6 +380,13 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
             log.exception("pinnacle %s fetch failed", sport)
             async with _state_lock:
                 _state[sport]["pin"]["error"] = str(e)[:200]
+            try:
+                await asyncio.to_thread(
+                    ticks.get_store().record_cycle, "pin", sport, [],
+                    ok=False, error=str(e)[:200],
+                )
+            except Exception:
+                pass
         await asyncio.sleep(PINNACLE_POLL_SEC)
 
 
@@ -618,6 +634,15 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
             log.info("crystalbet %s (%s): %d Odds rows in %.1fs",
                      sport, src_label, len(odds), dt)
 
+            # Change-only tick history (charts) — see src/ticks.py.
+            try:
+                await asyncio.to_thread(
+                    ticks.get_store().record_cycle, "cb", sport,
+                    ticks.rows_from_odds(odds), dur_ms=int(dt * 1000),
+                )
+            except Exception as e:
+                log.warning("tick store write failed (cb %s): %s", sport, e)
+
             # Per-cycle unmatched diagnostic, only when Pin has data.
             pin_odds = _state[sport]["pin"]["odds"]
             if pin_odds:
@@ -630,6 +655,13 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
             log.exception("crystalbet %s fetch failed", sport)
             async with _state_lock:
                 _state[sport]["cb"]["error"] = str(e)[:200]
+            try:
+                await asyncio.to_thread(
+                    ticks.get_store().record_cycle, "cb", sport, [],
+                    ok=False, error=str(e)[:200],
+                )
+            except Exception:
+                pass
         await asyncio.sleep(CRYSTALBET_POLL_SEC)
 
 
@@ -1549,6 +1581,40 @@ async def api_delete_bet(bet_id: int) -> dict:
     return {"deleted": bet_id}
 
 
+# ── Odds history charts (src/ticks.py) ────────────────────────────────────────
+@app.get("/api/chart")
+async def api_chart(
+    sport: str = Query(...),
+    market_type: str = Query(...),
+    period: str = Query("FT"),
+    cb_src: str | None = Query(None, description="CB raw event id"),
+    pin_src: str | None = Query(None, description="Pinnacle matchup id"),
+    line: float | None = Query(None),
+    team_side: str | None = Query(None),
+    submarket: str | None = Query(None),
+    hours: float = Query(24.0, gt=0, le=24 * 14),
+) -> dict:
+    """Tick series for one market on BOTH books — feeds the matches-page chart.
+    Selections map to step lines; a NULL tick means the market vanished."""
+    store = ticks.get_store()
+    since = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)) \
+        .isoformat(timespec="seconds")
+    mtype = f"{submarket}_{market_type}" if submarket else market_type
+    out: dict = {"since": since, "cb": {}, "pin": {}}
+    for book, src in (("cb", cb_src), ("pin", pin_src)):
+        if not src:
+            continue
+        eid = store.event_id(book, sport, src)
+        if eid is None:
+            continue
+        series = await asyncio.to_thread(
+            store.series, eid, mtype, period, line, team_side, since,
+        )
+        if series:
+            out[book] = series
+    return out
+
+
 # ── Capital / PnL tracker (src/capital.py) ────────────────────────────────────
 @app.get("/api/capital")
 async def api_capital() -> dict:
@@ -1731,6 +1797,8 @@ def _build_match_row(home: str, away: str, cb_rows: list[Odds],
 
     row: dict = {
         "cb_event_id": anchor.raw_event_id,
+        # Pinnacle matchup id — the chart drawer needs both books' source ids.
+        "pin_event_id": match.pin[0].raw_event_id if (match and match.pin) else None,
         "start_time": anchor.start_time.isoformat() if anchor.start_time else None,
         "sport": anchor.sport,
         "league": anchor.league,
