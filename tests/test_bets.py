@@ -210,9 +210,13 @@ def test_update_bet_note(clean_db):
 
 
 def test_update_bet_rejects_disallowed_field(clean_db):
+    # odds_taken/stake/market spec became editable 2026-06-12 (in-place bet
+    # editing); identity + placement-snapshot fields stay immutable.
     bid = _make_bet()
     with pytest.raises(ValueError, match="cannot modify"):
-        bets.update_bet(bid, odds_taken=99.0)
+        bets.update_bet(bid, placed_at="2020-01-01T00:00:00+00:00")
+    with pytest.raises(ValueError, match="cannot modify"):
+        bets.update_bet(bid, bankroll_at_time=1.0)
 
 
 def test_update_bet_pin_fair_closing(clean_db):
@@ -280,3 +284,60 @@ def test_open_bet_ids(clean_db):
     bets.settle_bet(b2, "won")
     ids = bets.open_bet_ids()
     assert set(ids) == {b1, b3}
+
+
+# ── Cash-out + in-place editing (2026-06-12) ──────────────────────────────────
+
+class TestCashout:
+    def test_cashout_requires_payout(self, clean_db):
+        bid = _make_bet()
+        with pytest.raises(ValueError, match="cashout needs"):
+            bets.settle_bet(bid, "cashout")
+
+    def test_cashout_settles_with_given_payout(self, clean_db):
+        bid = _make_bet()
+        assert bets.settle_bet(bid, "cashout", payout=72.50)
+        b = bets.get_bet(bid)
+        assert b["status"] == "cashout"
+        assert b["payout"] == 72.50
+        assert b["settled_at"] is not None
+
+    def test_cashout_listed_as_settled(self, clean_db):
+        bid = _make_bet()
+        bets.settle_bet(bid, "cashout", payout=10)
+        assert [b["id"] for b in bets.list_bets(status="settled")] == [bid]
+        assert bets.list_bets(status="open") == []
+
+
+class TestEditBet:
+    def test_stake_and_odds_editable(self, clean_db):
+        bid = _make_bet()
+        assert bets.update_bet(bid, stake=100.0, odds_taken=2.05)
+        b = bets.get_bet(bid)
+        assert b["stake"] == 100.0 and b["odds_taken"] == 2.05
+
+    def test_rounding_a_stake_after_settlement(self, clean_db):
+        # The motivating case: stake logged as 100.01 (old step bug), bet
+        # already settled — round both stake and payout in place.
+        bid = _make_bet(stake=100.01)
+        bets.settle_bet(bid, "won")           # payout 100.01 * odds
+        assert bets.update_bet(bid, stake=100.0, payout=190.0)
+        b = bets.get_bet(bid)
+        assert b["stake"] == 100.0 and b["payout"] == 190.0
+
+    def test_edit_validation(self, clean_db):
+        bid = _make_bet()
+        with pytest.raises(ValueError):
+            bets.update_bet(bid, stake=0)
+        with pytest.raises(ValueError):
+            bets.update_bet(bid, odds_taken=1.0)
+        with pytest.raises(ValueError):
+            bets.update_bet(bid, book="bogus")
+
+    def test_account_and_market_editable(self, clean_db):
+        bid = _make_bet()
+        assert bets.update_bet(bid, account_id=7, market_type="spread",
+                               line=-3.5, side="away", match_label="X vs Y")
+        b = bets.get_bet(bid)
+        assert (b["account_id"], b["market_type"], b["line"], b["side"]) \
+            == (7, "spread", -3.5, "away")

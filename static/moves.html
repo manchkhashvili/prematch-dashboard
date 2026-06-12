@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Top Moves — Prematch Dashboard</title>
   <link rel="stylesheet" href="/style.css?v=20260527e" />
+  <style>
+    /* "already bet on this market" — same visual as the arbs page */
+    tr.has-bet { background: var(--accent-highlight); }
+    tr.has-bet:hover { background: var(--accent-highlight); filter: brightness(1.1); }
+    tr.has-bet td:first-child { border-left: 3px solid var(--accent); padding-left: 9px; }
+  </style>
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
   <!-- Phase 3.12: cross-page alert poller. -->
@@ -179,13 +185,45 @@ async function pollStatus() {
   } catch (e) { /* swallow */ }
 }
 
+// ── "already logged a bet on this" flag (same idea as arbs.html) ───────────
+// Moves are Pinnacle-side rows with no cb_event_id, so the key is the
+// LABEL-based tuple. The moves Log prefill writes match_label as
+// "Home vs Away", while move rows carry "Home — Away" — normLabel folds
+// both to one form, so bets logged from this page always re-flag here.
+// (Bets logged from the arbs page use CB team names, which often differ
+// from Pinnacle's — those may not match; that's expected.)
+let loggedBetKeys = new Set();
+
+function normLabel(s) {
+  return (s || "").replace(" — ", " vs ").trim().toLowerCase();
+}
+function moveBetKey(o) {
+  return [
+    normLabel(o.match_label),
+    o.market_type || "moneyline",
+    o.period || "FT",
+    o.line == null ? "" : o.line,
+    o.side || "",
+    o.submarket || "",
+    o.team_side || "",
+  ].join("|");
+}
+async function refreshLoggedBets() {
+  try {
+    const r = await fetch("/api/bets?status=all");
+    if (!r.ok) return;
+    loggedBetKeys = new Set((await r.json()).map(moveBetKey));
+  } catch (e) { /* not fatal */ }
+}
+
 async function fetchAndRender() {
   const minMove = parseFloat(minMoveInput.value || "2");
   const url = (mode === "cumulative")
     ? "/api/moves/cumulative?min_move=" + minMove
     : "/api/moves?min_move=" + minMove;
   try {
-    cache = await (await fetch(url)).json();
+    const [res] = await Promise.all([fetch(url), refreshLoggedBets()]);
+    cache = await res.json();
     render();
   } catch (e) {
     document.getElementById("moves-body").innerHTML =
@@ -239,7 +277,8 @@ function render() {
 
   if (mode === "cumulative") {
     body.innerHTML = cache.map(m => `
-      <tr>
+      <tr class="${loggedBetKeys.has(moveBetKey(m)) ? 'has-bet' : ''}"
+          ${loggedBetKeys.has(moveBetKey(m)) ? 'title="You already have a bet logged on this market"' : ''}>
         <td class="mono dim">${fmtTime(m.first_seen)}</td>
         <td class="mono dim">${fmtTime(m.start_time)}</td>
         <td class="dim">${m.sport}</td>
@@ -259,7 +298,8 @@ function render() {
 
   // Per-cycle mode
   body.innerHTML = cache.map(m => `
-    <tr>
+    <tr class="${loggedBetKeys.has(moveBetKey(m)) ? 'has-bet' : ''}"
+        ${loggedBetKeys.has(moveBetKey(m)) ? 'title="You already have a bet logged on this market"' : ''}>
       <td class="mono dim">${fmtTime(m.recorded_at)}</td>
       <td class="mono dim">${fmtTime(m.start_time)}</td>
       <td class="dim">${m.sport}</td>

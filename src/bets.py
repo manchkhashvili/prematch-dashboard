@@ -92,7 +92,9 @@ def _resolve_db_path(path: Path | None) -> Path:
         return Path(env)
     return DEFAULT_DB_PATH
 
-VALID_STATUSES = ("open", "won", "lost", "pushed", "void")
+# "cashout" (2026-06-12): settled early at a book-offered amount — payout is
+# whatever the book paid, supplied by the user (no formula).
+VALID_STATUSES = ("open", "won", "lost", "pushed", "void", "cashout")
 VALID_BOOKS = ("cb", "pin", "other")
 
 _conn: sqlite3.Connection | None = None
@@ -294,10 +296,18 @@ def list_bets(status: str | None = None) -> list[dict]:
 
 
 def update_bet(bet_id: int, **fields: Any) -> bool:
-    """Partial update — only the provided fields are set. Returns True if a row changed."""
+    """Partial update — only the provided fields are set. Returns True if a row changed.
+
+    2026-06-12: the editable set now covers the bet itself (stake, odds,
+    market spec, account, …) so data-entry mistakes — e.g. the 100.01 stakes
+    from the old stake-step bug — can be corrected in place instead of
+    deleting and re-logging. Same validation rules as create_bet.
+    """
     allowed = {
         "note", "pin_fair_closing", "status", "settled_at", "payout",
         "cb_event_id", "start_time",
+        "sport", "match_label", "period", "market_type", "line", "side",
+        "submarket", "team_side", "book", "account_id", "odds_taken", "stake",
     }
     bad = [k for k in fields if k not in allowed]
     if bad:
@@ -306,6 +316,12 @@ def update_bet(bet_id: int, **fields: Any) -> bool:
         return False
     if "status" in fields and fields["status"] not in VALID_STATUSES:
         raise ValueError(f"status must be one of {VALID_STATUSES}; got {fields['status']!r}")
+    if "book" in fields and fields["book"] not in VALID_BOOKS:
+        raise ValueError(f"book must be one of {VALID_BOOKS}; got {fields['book']!r}")
+    if fields.get("odds_taken") is not None and float(fields["odds_taken"]) <= 1.0:
+        raise ValueError(f"odds_taken must be > 1.0; got {fields['odds_taken']}")
+    if fields.get("stake") is not None and float(fields["stake"]) <= 0:
+        raise ValueError(f"stake must be > 0; got {fields['stake']}")
     sets = ", ".join(f"{k} = :{k}" for k in fields)
     fields["id"] = bet_id
     conn = _require_conn()
@@ -319,20 +335,25 @@ def settle_bet(
     outcome: str,
     payout: float | None = None,
 ) -> bool:
-    """Mark a bet won/lost/pushed/void. If payout not given, computes from outcome:
-        won    → stake × odds_taken
-        lost   → 0
-        pushed → stake
-        void   → stake
+    """Mark a bet won/lost/pushed/void/cashout. If payout not given, computes:
+        won     → stake × odds_taken
+        lost    → 0
+        pushed  → stake
+        void    → stake
+        cashout → no formula — the amount the book paid is REQUIRED
     Returns True if the bet existed and was updated.
     """
-    if outcome not in ("won", "lost", "pushed", "void"):
-        raise ValueError(f"settle outcome must be won|lost|pushed|void; got {outcome!r}")
+    if outcome not in ("won", "lost", "pushed", "void", "cashout"):
+        raise ValueError(
+            f"settle outcome must be won|lost|pushed|void|cashout; got {outcome!r}"
+        )
     bet = get_bet(bet_id)
     if not bet:
         return False
     if bet["status"] != "open":
         raise ValueError(f"bet {bet_id} already settled as {bet['status']}")
+    if outcome == "cashout" and payout is None:
+        raise ValueError("cashout needs the amount the book paid (payout)")
     if payout is None:
         stake = bet["stake"]
         odds = bet["odds_taken"]
