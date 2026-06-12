@@ -31,6 +31,7 @@ import asyncio
 import csv
 import logging
 import os
+import sqlite3
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -42,7 +43,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src import bets
+from src import bets, capital
 from src.anomalies import find_ladder_anomalies
 from src.consistency import find_consistency_flags
 from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities
@@ -949,6 +950,7 @@ def _attach_pin_to_anomalies(
 async def lifespan(app: FastAPI):
     # Init the bets SQLite DB once at boot. Idempotent — safe across restarts.
     bets.init_db()
+    capital.ensure_seed_accounts()
 
     # Restore caches from disk (per sport). First cycle warm-up if loaded.
     loaded = cache_persistence.load_all(SPORT_NAMES)
@@ -1478,6 +1480,104 @@ async def api_delete_bet(bet_id: int) -> dict:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"bet {bet_id} not found")
     return {"deleted": bet_id}
+
+
+# ── Capital / PnL tracker (src/capital.py) ────────────────────────────────────
+@app.get("/api/capital")
+async def api_capital() -> dict:
+    """Per-account balances + totals + cumulative settled-PnL curve."""
+    return capital.capital_summary()
+
+
+@app.post("/api/capital/accounts")
+async def api_add_account(payload: dict) -> dict:
+    from fastapi import HTTPException
+    try:
+        aid = capital.add_account(
+            payload.get("name", ""), payload.get("book_tag") or None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="account name already exists")
+    return {"id": aid}
+
+
+@app.patch("/api/capital/accounts/{account_id}")
+async def api_patch_account(account_id: int, payload: dict) -> dict:
+    from fastapi import HTTPException
+    try:
+        if payload.get("unarchive"):
+            ok = capital.unarchive_account(account_id)
+        else:
+            ok = capital.rename_account(account_id, payload.get("name", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="account name already exists")
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"account {account_id} not found")
+    return {"ok": True}
+
+
+@app.delete("/api/capital/accounts/{account_id}")
+async def api_delete_account(account_id: int) -> dict:
+    from fastapi import HTTPException
+    try:
+        result = capital.delete_account(account_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"result": result}
+
+
+@app.post("/api/capital/ledger")
+async def api_add_ledger(payload: dict) -> dict:
+    """One money movement. Body: {account_id, kind, amount, note?, ts?} or a
+    transfer: {transfer: true, from_id, to_id, amount, note?}."""
+    from fastapi import HTTPException
+    try:
+        if payload.get("transfer"):
+            out_id, in_id = capital.transfer(
+                int(payload["from_id"]), int(payload["to_id"]),
+                float(payload["amount"]), payload.get("note"),
+            )
+            return {"ids": [out_id, in_id]}
+        eid = capital.add_entry(
+            int(payload["account_id"]), payload.get("kind", ""),
+            float(payload["amount"]), payload.get("note"), payload.get("ts"),
+        )
+        return {"id": eid}
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/capital/ledger")
+async def api_list_ledger(account_id: int | None = Query(None)) -> list[dict]:
+    return capital.list_entries(account_id)
+
+
+@app.delete("/api/capital/ledger/{entry_id}")
+async def api_delete_ledger(entry_id: int) -> dict:
+    from fastapi import HTTPException
+    if not capital.delete_entry(entry_id):
+        raise HTTPException(status_code=404, detail=f"ledger entry {entry_id} not found")
+    return {"deleted": entry_id}
+
+
+@app.get("/api/capital/export/{what}.csv")
+async def api_capital_export(what: str):
+    from fastapi import HTTPException
+    from fastapi.responses import PlainTextResponse
+    try:
+        text = capital.export_csv(what)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return PlainTextResponse(
+        text, media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{what}.csv"'},
+    )
 
 
 # ── View builders ─────────────────────────────────────────────────────────────

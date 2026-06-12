@@ -175,7 +175,37 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(bet_id, recorded_at)
         );
         CREATE INDEX IF NOT EXISTS idx_history_bet ON bet_odds_history(bet_id);
+
+        -- Capital tracker (src/capital.py): where the bankroll lives.
+        -- accounts = places money sits (a book, the bank, cash). book_tag
+        -- optionally links an account to the bets.book value so legacy bets
+        -- (placed before bets.account_id existed) attribute automatically.
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            book_tag TEXT,
+            created_at TEXT NOT NULL,
+            archived INTEGER NOT NULL DEFAULT 0
+        );
+        -- ledger = signed money movements that are NOT bet results:
+        -- opening (starting capital), deposit, withdraw, transfer (paired
+        -- rows), adjustment (manual correction / bonus). Bet PnL is computed
+        -- from the bets table, never duplicated here.
+        CREATE TABLE IF NOT EXISTS ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            kind TEXT NOT NULL,
+            amount REAL NOT NULL,
+            note TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger(account_id);
     """)
+    # Migration: bets.account_id (nullable) — which account a bet's stake/payout
+    # flows through. NULL = legacy row, attributed via accounts.book_tag.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(bets)")}
+    if "account_id" not in cols:
+        conn.execute("ALTER TABLE bets ADD COLUMN account_id INTEGER")
 
 
 def _require_conn() -> sqlite3.Connection:
@@ -194,7 +224,7 @@ _BET_INSERT_FIELDS = (
     "placed_at", "sport", "cb_event_id", "match_label", "period", "market_type",
     "line", "side", "submarket", "team_side", "book", "odds_taken", "stake",
     "bankroll_at_time", "pin_fair_at_placement", "cb_fair_at_placement",
-    "edge_at_placement_pct", "status", "note", "start_time",
+    "edge_at_placement_pct", "status", "note", "start_time", "account_id",
 )
 
 

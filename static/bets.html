@@ -163,6 +163,54 @@
     .status-lost   { color: var(--bad); border-color: var(--bad); background: var(--bad-bg-soft); }
     .status-pushed { color: var(--text-dim); border-color: var(--text-dim); }
     .status-void   { color: var(--text-faint); border-color: var(--text-faint); }
+
+    /* ── Capital / PnL section ── */
+    .capital {
+      margin: 12px 18px 0;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+    }
+    .cap-head {
+      display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    }
+    .cap-head h2 { font-size: 13px; margin: 0; }
+    .cap-head .exports { margin-left: auto; font-size: 11px; }
+    .cap-head .exports a { color: var(--text-dim); margin-left: 10px; }
+    .cap-head .exports a:hover { color: var(--accent); }
+    .cap-cards {
+      display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px;
+    }
+    .cap-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+      padding: 8px 14px; min-width: 110px;
+    }
+    .cap-card .v { font-family: var(--mono); font-size: 16px; font-weight: 600; }
+    .cap-card .k { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+    .cap-card.curve { display: flex; align-items: center; padding: 4px 10px; }
+    .pos { color: var(--good); } .neg { color: var(--bad); }
+    table.cap-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    table.cap-table th { text-align: left; color: var(--text-dim); font-weight: 500;
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    table.cap-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    table.cap-table td.num, table.cap-table th.num { text-align: right; font-family: var(--mono); }
+    .cap-table .arch { opacity: 0.45; }
+    details.cap-manage { margin-top: 8px; font-size: 12px; }
+    details.cap-manage summary { cursor: pointer; color: var(--text-dim); user-select: none; font-size: 11px; }
+    .cap-forms { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 10px; }
+    .cap-forms form {
+      display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap;
+      border: 1px dashed var(--border); border-radius: 5px; padding: 8px 10px;
+    }
+    .cap-forms label { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--text-dim); }
+    .cap-forms input, .cap-forms select {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 3px; padding: 4px 6px; font-family: var(--mono); font-size: 11px;
+    }
+    .cap-forms .btn { padding: 5px 10px; font-size: 10px; }
+    .ledger-list { margin-top: 8px; max-height: 220px; overflow-y: auto; }
   </style>
 </head>
 <body>
@@ -178,6 +226,76 @@
       <a href="/unmatched.html">Unmatched</a>
     </nav>
   </header>
+
+  <!-- ── Capital / PnL tracker ────────────────────────────────────────── -->
+  <section class="capital" id="capital">
+    <div class="cap-head">
+      <h2>Capital &amp; PnL</h2>
+      <a href="/pnl.html" style="font-size:11px">read-only view ↗</a>
+      <span class="exports">export:
+        <a href="/api/capital/export/summary.csv">summary.csv</a>
+        <a href="/api/capital/export/ledger.csv">ledger.csv</a>
+        <a href="/api/capital/export/bets.csv">bets.csv</a>
+      </span>
+    </div>
+    <div class="cap-cards" id="cap-cards"><span class="dim">loading…</span></div>
+    <table class="cap-table">
+      <thead>
+        <tr>
+          <th>Account</th><th>Tag</th>
+          <th class="num">Opening</th><th class="num">Ledger net</th>
+          <th class="num" title="Σ payout − stake over settled bets in this account">Bet PnL</th>
+          <th class="num" title="Stakes currently at risk (deducted from balance)">Open stakes</th>
+          <th class="num">Balance</th><th class="num">Bets</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="cap-body"></tbody>
+    </table>
+    <details class="cap-manage" id="cap-manage">
+      <summary>manage accounts &amp; money (add account · deposit/withdraw · transfer · ledger)</summary>
+      <div class="cap-forms">
+        <form id="acct-form">
+          <label>New account name <input name="name" required placeholder="e.g. 1xbet" /></label>
+          <label>Auto-link bets from
+            <select name="book_tag">
+              <option value="">— none —</option>
+              <option value="cb">CrystalBet bets</option>
+              <option value="pin">Pinnacle bets</option>
+              <option value="other">'other' bets</option>
+            </select>
+          </label>
+          <button class="btn" type="submit">Add account</button>
+        </form>
+        <form id="ledger-form">
+          <label>Account <select name="account_id" id="ledger-account" required></select></label>
+          <label>Kind
+            <select name="kind">
+              <option value="deposit">deposit</option>
+              <option value="withdraw">withdraw</option>
+              <option value="opening">opening (starting capital)</option>
+              <option value="adjustment">adjustment (±)</option>
+            </select>
+          </label>
+          <label>Amount <input name="amount" type="number" step="0.01" required /></label>
+          <label>Note <input name="note" placeholder="optional" /></label>
+          <button class="btn" type="submit">Add entry</button>
+        </form>
+        <form id="transfer-form">
+          <label>From <select name="from_id" id="transfer-from" required></select></label>
+          <label>To <select name="to_id" id="transfer-to" required></select></label>
+          <label>Amount <input name="amount" type="number" step="0.01" min="0.01" required /></label>
+          <button class="btn" type="submit">Transfer</button>
+        </form>
+      </div>
+      <span class="form-error" id="cap-error"></span>
+      <div class="ledger-list">
+        <table class="cap-table">
+          <thead><tr><th>When</th><th>Account</th><th>Kind</th><th class="num">Amount</th><th>Note</th><th></th></tr></thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
 
   <!-- ── New bet form ─────────────────────────────────────────────────── -->
   <details class="new-bet" id="new-bet-details">
@@ -230,6 +348,9 @@
           <option value="pin">Pinnacle</option>
           <option value="other">other</option>
         </select>
+      </label>
+      <label>Account (balance the stake flows through)
+        <select name="account_id" id="bet-account"></select>
       </label>
       <label>Odds taken (decimal)
         <input name="odds_taken" type="number" step="0.01" min="1.01" required />
@@ -326,6 +447,8 @@ function readFormToPayload(form) {
       else o[k] = n;
     }
   }
+  if (o.account_id) o.account_id = parseInt(o.account_id, 10);
+  else delete o.account_id;
   return o;
 }
 
@@ -347,6 +470,7 @@ document.getElementById("bet-form").addEventListener("submit", async (e) => {
     e.target.reset();
     document.getElementById("new-bet-details").open = false;
     fetchAndRender();
+    loadCapital();
   } catch (err) {
     formError.textContent = "Network error: " + err.message;
   }
@@ -495,6 +619,7 @@ async function fetchAndRender() {
           await fetch(`/api/bets/${id}`, { method: "DELETE" });
         }
         fetchAndRender();
+        loadCapital();
       });
     });
   } catch (e) {
@@ -502,9 +627,210 @@ async function fetchAndRender() {
   }
 }
 
+// ── Capital / PnL tracker ──────────────────────────────────────────────────
+const capError = document.getElementById("cap-error");
+let betAccountTouched = false;  // user picked an account manually this session
+let capAccounts = [];
+
+function fmtMoney(v) {
+  if (v === null || v === undefined) return "—";
+  const sign = v < 0 ? "−" : "";
+  return sign + "$" + Math.abs(v).toFixed(2);
+}
+function moneyClass(v) { return v > 0 ? "pos" : (v < 0 ? "neg" : ""); }
+
+function pnlCurveSVG(curve, width = 220, height = 44) {
+  const pts = curve.map(c => c.pnl);
+  if (pts.length < 2) return `<span class="dim" style="font-size:10px">PnL curve appears after 2+ settled bets</span>`;
+  const mn = Math.min(0, ...pts), mx = Math.max(0, ...pts);
+  const rng = mx - mn || 1;
+  const stepX = width / (pts.length - 1);
+  const y = p => (height - 4 - ((p - mn) / rng) * (height - 8)).toFixed(1);
+  const path = pts.map((p, i) => (i ? "L" : "M") + (i * stepX).toFixed(1) + "," + y(p)).join(" ");
+  const last = pts[pts.length - 1];
+  const color = last > 0 ? "var(--good)" : (last < 0 ? "var(--bad)" : "var(--text-dim)");
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" title="cumulative settled PnL">
+    <line x1="0" x2="${width}" y1="${y(0)}" y2="${y(0)}" stroke="var(--border)" stroke-width="1" />
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" />
+  </svg>`;
+}
+
+function fillAccountSelect(sel, accounts, { allowEmpty = false } = {}) {
+  const prev = sel.value;
+  sel.innerHTML = (allowEmpty ? `<option value="">— auto (by book) —</option>` : "")
+    + accounts.filter(a => !a.archived && a.id !== null)
+        .map(a => `<option value="${a.id}">${a.name}</option>`).join("");
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
+function syncBetAccountToBook() {
+  if (betAccountTouched) return;
+  const book = document.querySelector('#bet-form select[name="book"]').value;
+  const match = capAccounts.find(a => a.book_tag === book && !a.archived);
+  const sel = document.getElementById("bet-account");
+  if (match) sel.value = String(match.id);
+}
+
+async function loadCapital() {
+  try {
+    const [capR, ledR] = await Promise.all([
+      fetch("/api/capital"), fetch("/api/capital/ledger"),
+    ]);
+    const cap = await capR.json();
+    const ledger = await ledR.json();
+    capAccounts = cap.accounts;
+    const t = cap.totals;
+
+    document.getElementById("cap-cards").innerHTML = `
+      <div class="cap-card"><div class="v">${fmtMoney(t.equity)}</div><div class="k">Equity</div></div>
+      <div class="cap-card"><div class="v">${fmtMoney(t.starting_capital)}</div><div class="k">Starting capital</div></div>
+      <div class="cap-card"><div class="v ${moneyClass(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
+      <div class="cap-card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
+      <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes">Yield</div></div>
+      <div class="cap-card curve">${pnlCurveSVG(cap.pnl_curve)}</div>
+    `;
+
+    document.getElementById("cap-body").innerHTML = cap.accounts.map(a => {
+      const actions = a.id === null ? "" : a.archived
+        ? `<button class="settle-btn" data-cap="unarchive" data-id="${a.id}">unarchive</button>`
+        : `<button class="settle-btn" data-cap="rename" data-id="${a.id}" data-name="${a.name}">✎</button>
+           <button class="settle-btn del" data-cap="delete" data-id="${a.id}" title="delete (archives if it has history)">×</button>`;
+      return `<tr class="${a.archived ? "arch" : ""}">
+        <td>${a.name}${a.archived ? ' <span class="dim">(archived)</span>' : ""}</td>
+        <td class="dim mono">${a.book_tag || ""}</td>
+        <td class="num">${fmtMoney(a.opening)}</td>
+        <td class="num">${fmtMoney(a.ledger_net)}</td>
+        <td class="num ${moneyClass(a.bet_pnl)}">${fmtMoney(a.bet_pnl)}</td>
+        <td class="num">${fmtMoney(a.open_stake)}</td>
+        <td class="num"><b>${fmtMoney(a.balance)}</b></td>
+        <td class="num dim">${a.n_bets}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join("");
+
+    document.getElementById("ledger-body").innerHTML = ledger.slice(0, 60).map(e => `
+      <tr>
+        <td class="mono dim">${fmtTime(e.ts)}</td>
+        <td>${e.account_name}</td>
+        <td class="dim">${e.kind}</td>
+        <td class="num ${moneyClass(e.amount)}">${fmtMoney(e.amount)}</td>
+        <td class="dim">${e.note || ""}</td>
+        <td><button class="settle-btn del" data-cap="del-entry" data-id="${e.id}" title="delete entry">×</button></td>
+      </tr>`).join("") || `<tr><td colspan="6" class="empty">no ledger entries yet — add your starting capital with an "opening" entry</td></tr>`;
+
+    fillAccountSelect(document.getElementById("bet-account"), cap.accounts, { allowEmpty: true });
+    fillAccountSelect(document.getElementById("ledger-account"), cap.accounts);
+    fillAccountSelect(document.getElementById("transfer-from"), cap.accounts);
+    fillAccountSelect(document.getElementById("transfer-to"), cap.accounts);
+    syncBetAccountToBook();
+
+    // Convenience: prefill the bet form's bankroll with current equity.
+    const bk = document.querySelector('#bet-form input[name="bankroll_at_time"]');
+    if (bk && !bk.dataset.touched && t.equity > 0) bk.value = t.equity.toFixed(0);
+
+    // Account row actions.
+    document.querySelectorAll("#cap-body button[data-cap]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        const act = btn.dataset.cap;
+        capError.textContent = "";
+        if (act === "rename") {
+          const name = prompt("New account name:", btn.dataset.name);
+          if (!name) return;
+          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { name });
+        } else if (act === "delete") {
+          if (!confirm("Delete this account? (It archives instead if it has bets or ledger history.)")) return;
+          await capFetch(`/api/capital/accounts/${id}`, "DELETE");
+        } else if (act === "unarchive") {
+          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { unarchive: true });
+        }
+        loadCapital();
+      });
+    });
+    document.querySelectorAll("#ledger-body button[data-cap='del-entry']").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Delete this ledger entry?")) return;
+        await capFetch(`/api/capital/ledger/${btn.dataset.id}`, "DELETE");
+        loadCapital();
+      });
+    });
+  } catch (e) {
+    document.getElementById("cap-cards").innerHTML =
+      `<span class="dim">capital tracker unavailable: ${e.message}</span>`;
+  }
+}
+
+async function capFetch(url, method, body) {
+  const r = await fetch(url, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) {
+    const txt = await r.text();
+    capError.textContent = "Error: " + txt.slice(0, 200);
+    throw new Error(txt);
+  }
+  return r.json();
+}
+
+document.getElementById("acct-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  capError.textContent = "";
+  const fd = new FormData(e.target);
+  try {
+    await capFetch("/api/capital/accounts", "POST", {
+      name: fd.get("name"), book_tag: fd.get("book_tag") || null,
+    });
+    e.target.reset();
+    loadCapital();
+  } catch (_) {}
+});
+
+document.getElementById("ledger-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  capError.textContent = "";
+  const fd = new FormData(e.target);
+  try {
+    await capFetch("/api/capital/ledger", "POST", {
+      account_id: parseInt(fd.get("account_id"), 10),
+      kind: fd.get("kind"),
+      amount: parseFloat(fd.get("amount")),
+      note: fd.get("note") || null,
+    });
+    e.target.reset();
+    loadCapital();
+  } catch (_) {}
+});
+
+document.getElementById("transfer-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  capError.textContent = "";
+  const fd = new FormData(e.target);
+  try {
+    await capFetch("/api/capital/ledger", "POST", {
+      transfer: true,
+      from_id: parseInt(fd.get("from_id"), 10),
+      to_id: parseInt(fd.get("to_id"), 10),
+      amount: parseFloat(fd.get("amount")),
+    });
+    e.target.reset();
+    loadCapital();
+  } catch (_) {}
+});
+
+document.getElementById("bet-account").addEventListener("change", () => {
+  betAccountTouched = true;
+});
+document.querySelector('#bet-form select[name="book"]').addEventListener("change", syncBetAccountToBook);
+document.querySelector('#bet-form input[name="bankroll_at_time"]').addEventListener(
+  "input", (e) => { e.target.dataset.touched = "1"; });
+
 prefillFromQuery();
 fetchAndRender();
+loadCapital();
 setInterval(fetchAndRender, POLL_MS);
+setInterval(loadCapital, POLL_MS);
 </script>
 </body>
 </html>
