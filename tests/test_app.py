@@ -190,3 +190,37 @@ class TestLastExpandedAt:
                       {"home": 1.30, "away": 4.20})
         row = _build_match_row("Hawks", "Lakers", [cb_ml], match=None)
         assert row["last_expanded_at"] is None
+
+
+# ── consistency-flag first_seen carry-over (2026-06-12) ───────────────────────
+from src.app import _merge_flag_first_seen  # noqa: E402
+
+
+def _flag(kind="htft_fair", eid="E1", outcome="1/1", detail="x", **over):
+    f = {"kind": kind, "cb_event_id": eid, "periods": "HT/FT",
+         "outcome": outcome, "detail": detail, "severity": 5.0}
+    f.update(over)
+    return f
+
+
+def test_first_seen_set_on_new_flag():
+    out = _merge_flag_first_seen([_flag()], [], "2026-06-12T10:00:00+00:00")
+    assert out[0]["first_seen"] == "2026-06-12T10:00:00+00:00"
+
+
+def test_first_seen_carries_across_scans_even_when_detail_changes():
+    scan1 = _merge_flag_first_seen([_flag(detail="@3.4")], [],
+                                   "2026-06-12T10:00:00+00:00")
+    # next scan: same finding, repriced (different detail/severity)
+    scan2 = _merge_flag_first_seen([_flag(detail="@3.6", severity=8.0)],
+                                   scan1, "2026-06-12T10:30:00+00:00")
+    assert scan2[0]["first_seen"] == "2026-06-12T10:00:00+00:00"
+
+
+def test_first_seen_resets_for_different_outcome_or_event():
+    scan1 = _merge_flag_first_seen([_flag(outcome="1/1")], [],
+                                   "2026-06-12T10:00:00+00:00")
+    scan2 = _merge_flag_first_seen(
+        [_flag(outcome="2/2"), _flag(eid="E2")],
+        scan1, "2026-06-12T10:30:00+00:00")
+    assert all(f["first_seen"] == "2026-06-12T10:30:00+00:00" for f in scan2)
