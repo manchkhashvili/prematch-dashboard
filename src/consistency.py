@@ -25,6 +25,19 @@ Checks (all per game, CB-only):
   3. total_additivity   — period totals don't sum to their parent (H1+H2 vs FT;
                           Q1+Q2 vs H1; Q3+Q4 vs H2; Q1..Q4 vs FT).
   4. quarter_ml_extreme — a quarter's win prob is FURTHER from 0.50 than FT's.
+  5. htft_combo         — the Halftime/Fulltime 1/1 (and 2/2) price violates a
+                          bound implied by its own legs (the H1 and FT 1x2
+                          moneylines, regulation time):
+                          * dominance: P(1/1) <= min(P(H1=1), P(FT=1)), so
+                            odds(1/1) must be >= each leg's odds. A combo
+                            SHORTER than its own leg is logically impossible.
+                          * correlation: leading at half and winning are
+                            positively correlated, so P(1/1) >= P(H1=1)*P(FT=1)
+                            and odds(1/1) must be <= odds(H1 1) * odds(FT 1).
+                            A combo LONGER than the independent product is
+                            priced too generously (the +EV direction). The raw
+                            product carries both legs' vig, which only widens
+                            the margin a true violation has to clear.
 """
 from __future__ import annotations
 
@@ -41,6 +54,8 @@ ML_SPREAD_GAP_PP = 5.0     # ml vs spread win-prob gap (clean game: <=0.5pp)
 TOTAL_ADD_PTS = 5.0        # period totals vs parent sum (clean game: ~0.5pt)
 DECISIVE_PROB = 0.06       # |P-0.5| past this = a "decisive" favourite (~1.8/2.05)
 EXTREME_PP = 6.0           # quarter |P-0.5| exceeding FT's by this many pp
+HTFT_GAP_PCT = 2.0         # htft combo bound violations smaller than this % are
+                           # ignored (rounding / odds-step noise on either side)
 
 
 @dataclass(frozen=True)
@@ -121,7 +136,10 @@ def _build_period_view(period_odds: dict[str, list[Odds]]) -> _PeriodView:
     if ml:
         for o in ml:
             s = o.selections
-            if "home" in s and "away" in s:
+            # 2-way rows only: the permissive classifier also captures
+            # regulation 1x2 (3-way, has "draw") as htft_combo legs —
+            # devig_2way on those would misread P(home).
+            if "home" in s and "away" in s and "draw" not in s:
                 v.ml_phome = _devig_home(s["home"], s["away"])
                 if v.ml_phome is not None:
                     break
@@ -169,6 +187,7 @@ def find_consistency_flags(
     total_add_pts: float = TOTAL_ADD_PTS,
     decisive_prob: float = DECISIVE_PROB,
     extreme_pp: float = EXTREME_PP,
+    htft_gap_pct: float = HTFT_GAP_PCT,
 ) -> list[ConsistencyFlag]:
     """Find CB-internal contradictions across markets/periods. See module docs."""
     # Group: event_id -> period -> market_type -> [Odds]
@@ -248,5 +267,59 @@ def find_consistency_flags(
                            f"FT {ft.ml_phome*100:.0f}% (a short period should be closer "
                            f"to 50%)", q_dev - ft_dev)
 
+        # 5. HT/FT combo vs its own legs (1/1 and 2/2; raw odds, see module doc)
+        combo = _first_htft(periods)
+        if combo:
+            h1_1x2 = _first_1x2(periods.get("H1", {}))
+            ft_1x2 = _first_1x2(periods.get("FT", {}))
+            if h1_1x2 and ft_1x2:
+                for combo_key, leg_side, who in (
+                    ("1/1", "home", "home"), ("2/2", "away", "away"),
+                ):
+                    c = combo.get(combo_key)
+                    l_h1 = h1_1x2.get(leg_side)
+                    l_ft = ft_1x2.get(leg_side)
+                    if c is None or l_h1 is None or l_ft is None:
+                        continue
+                    # dominance: combo can't be SHORTER than either leg
+                    max_leg = max(l_h1, l_ft)
+                    short_pct = (max_leg - c) / c * 100.0
+                    if short_pct >= htft_gap_pct:
+                        mk("htft_combo", "H1+FT",
+                           f"HT/FT {combo_key} @{c:g} is shorter than its own "
+                           f"{who} leg (H1 @{l_h1:g} / FT @{l_ft:g}) — the combo "
+                           f"can never be more likely than one leg alone "
+                           f"(off by {short_pct:.0f}%)", short_pct)
+                        continue
+                    # correlation: combo can't beat the independent product
+                    prod = l_h1 * l_ft
+                    long_pct = (c - prod) / prod * 100.0
+                    if long_pct >= htft_gap_pct:
+                        mk("htft_combo", "H1+FT",
+                           f"HT/FT {combo_key} @{c:g} exceeds H1 {who} @{l_h1:g} "
+                           f"× FT {who} @{l_ft:g} = {prod:.2f} — legs are "
+                           f"positively correlated so the combo should be "
+                           f"SHORTER than the product, not {long_pct:.0f}% "
+                           f"longer (too generous)", long_pct)
+
     flags.sort(key=lambda f: f.severity, reverse=True)
     return flags
+
+
+def _first_htft(periods: dict[str, dict[str, list[Odds]]]) -> Optional[dict[str, float]]:
+    """Selections of the first htft row on the event (label -> odds)."""
+    for rows in (periods.get("FT", {}).get("htft", []),):
+        for o in rows:
+            if o.selections:
+                return o.selections
+    return None
+
+
+def _first_1x2(period_mkts: dict[str, list[Odds]]) -> Optional[dict[str, float]]:
+    """Selections of the first REGULATION 3-way moneyline (has a draw price)
+    in one period's markets — the legs HT/FT settles against."""
+    for o in period_mkts.get("moneyline", []):
+        s = o.selections
+        if "draw" in s and "home" in s and "away" in s:
+            return s
+    return None

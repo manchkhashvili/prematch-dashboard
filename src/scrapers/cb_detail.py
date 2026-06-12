@@ -158,6 +158,33 @@ def _parse_ml_3way(snatches) -> Optional[dict[str, float]]:
     return sels if {"home", "draw", "away"} <= sels.keys() else None
 
 
+_RE_HTFT_LABEL = re.compile(r"^([12Xx])\s*/\s*([12Xx])$")
+
+
+def _parse_htft(snatches) -> Optional[dict[str, float]]:
+    """
+    Parse the 9-way Halftime/Fulltime combo: labels "1/1", "1/X", ..., "2/2"
+    (half result / full-time result). Returns {label: odds} with labels
+    normalized to uppercase-X form. Suspended (<=1.0) selections are dropped
+    by _safe_float; we only require the corner outcomes the consistency check
+    needs ("1/1" or "2/2") to be present.
+    """
+    sels: dict[str, float] = {}
+    for snatch in snatches:
+        pair = _bt_pair(snatch)
+        if pair is None:
+            continue
+        label, odds_text = pair
+        m = _RE_HTFT_LABEL.match(label.strip())
+        if not m:
+            continue
+        odds = _safe_float(odds_text)
+        if odds is None:
+            continue
+        sels[f"{m.group(1).upper()}/{m.group(2).upper()}"] = odds
+    return sels if ("1/1" in sels or "2/2" in sels) else None
+
+
 def _parse_spread(snatches) -> list[tuple[float, dict[str, float]]]:
     """
     Parse alt-line spread. Returns list of (home_line, {"home": d, "away": d})
@@ -313,6 +340,26 @@ def parse_detail_page(
                 home=home, away=away,
                 sport_name=sport_name,
                 market_type="moneyline", period=cls.period,
+                selections=sels, line=None,
+                fetched_at=fetched_at, event_id=event_id,
+                league=league, start_time=start_time,
+                submarket=cls.submarket, team_side=None,
+                section=title,
+            )
+            if odds is not None:
+                ranked.append((cls.variant_rank, odds))
+
+        elif cls.market_type == "htft":
+            # 9-way Halftime/Fulltime combo — one row, selections keyed by
+            # combo label ("1/1" ... "2/2"). period is always FT (the market
+            # spans the whole game); line None.
+            sels = _parse_htft(snatches)
+            if sels is None:
+                continue
+            odds = _build_odds(
+                home=home, away=away,
+                sport_name=sport_name,
+                market_type="htft", period="FT",
                 selections=sels, line=None,
                 fetched_at=fetched_at, event_id=event_id,
                 league=league, start_time=start_time,
