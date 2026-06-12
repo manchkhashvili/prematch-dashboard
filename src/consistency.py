@@ -25,6 +25,21 @@ Checks (all per game, CB-only):
   3. total_additivity   — period totals don't sum to their parent (H1+H2 vs FT;
                           Q1+Q2 vs H1; Q3+Q4 vs H2; Q1..Q4 vs FT).
   4. quarter_ml_extreme — a quarter's win prob is FURTHER from 0.50 than FT's.
+  6. htft_fair          — model-based fair pricing of EVERY HT/FT outcome via
+                          a bivariate normal on the (halftime, full-game)
+                          margins (src/htft_model.py — joint probability, not
+                          a product of marginals). mu comes from CB's own
+                          devigged handicap ladder (or ML), sigma per league,
+                          rho ~ 0.70. Two signals per outcome:
+                          * EDGE — CB's posted price exceeds model fair even
+                            before vig (cb >= fair * 1.03): +EV candidate.
+                            Soft books template a near-constant HT/FT
+                            multiplier while the true one varies (~1.27
+                            favorite-1/1 ... ~1.49 dog-2/2), so lopsided
+                            lines are the structural sweet spots.
+                          * SHAPE — the devigged CB probability disagrees
+                            with the model by >= 1.5x on a meaningful
+                            outcome: the market's internal shape is off.
   5. htft_combo         — the Halftime/Fulltime 1/1 (and 2/2) price violates a
                           bound implied by its own legs (the H1 and FT 1x2
                           moneylines, regulation time):
@@ -45,6 +60,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional
 
+from src import htft_model
 from src.models import Odds
 from src.vig import devig_2way  # returns FAIR PROBABILITIES (p_home, p_away)
 
@@ -56,6 +72,14 @@ DECISIVE_PROB = 0.06       # |P-0.5| past this = a "decisive" favourite (~1.8/2.
 EXTREME_PP = 6.0           # quarter |P-0.5| exceeding FT's by this many pp
 HTFT_GAP_PCT = 2.0         # htft combo bound violations smaller than this % are
                            # ignored (rounding / odds-step noise on either side)
+HTFT_FAIR_EDGE_PCT = 3.0   # flag when CB's POSTED price beats model fair by
+                           # this much — already net of vig, so a real edge;
+                           # 3% clears the model's sigma/rho noise (~+-2-3%)
+HTFT_SHAPE_RATIO = 1.5     # flag when devigged CB prob vs model prob differs
+                           # by this factor on a meaningful outcome
+HTFT_FAIR_MAX_ODDS = 20.0  # ignore outcomes the model prices longer than this
+                           # (X-row longshots: tiny probs, model error explodes)
+HTFT_SHAPE_MIN_PROB = 0.05  # shape check only on outcomes the model gives >=5%
 
 
 @dataclass(frozen=True)
@@ -302,8 +326,86 @@ def find_consistency_flags(
                            f"SHORTER than the product, not {long_pct:.0f}% "
                            f"longer (too generous)", long_pct)
 
+        # 6. HT/FT vs the bivariate-normal fair model (basketball only —
+        #    sigma/rho are calibrated to basketball margins)
+        if combo and m.sport == "basketball":
+            for kind, periods_label, detail, severity in _htft_fair_signals(
+                combo, views, m.league,
+            ):
+                mk(kind, periods_label, detail, severity)
+
     flags.sort(key=lambda f: f.severity, reverse=True)
     return flags
+
+
+def _htft_fair_signals(
+    combo: dict[str, float],
+    views: dict[str, "_PeriodView"],
+    league: Optional[str],
+) -> list[tuple[str, str, str, float]]:
+    """Model-based HT/FT signals for one event (check 6 — see module doc)."""
+    ft = views.get("FT")
+    if ft is None:
+        return []
+    sigma = htft_model.sigma_for_league(league)
+
+    # mu: devigged handicap ladder center first (no sigma involved), devigged
+    # moneyline second. Both already vig-free — required, or mu inherits
+    # the book's overround.
+    mu: Optional[float] = None
+    if ft.spread_center is not None:
+        mu = -ft.spread_center
+    elif ft.ml_phome is not None:
+        mu = htft_model.mu_from_moneyline(ft.ml_phome, sigma)
+    if mu is None:
+        return []
+    h1 = views.get("H1")
+    mu1 = -h1.spread_center if (h1 and h1.spread_center is not None) else None
+
+    nine = htft_model.detect_nine_outcome(combo)
+    fair = htft_model.htft_fair_probs(
+        mu, mu1, sigma=sigma, rho=htft_model.RHO, nine_outcome=nine,
+    )
+
+    # Devig the posted 9-way (or 6-way) proportionally for the shape check.
+    inv = {k: 1.0 / v for k, v in combo.items() if v and v > 1.0}
+    overround = sum(inv.values())
+    shape = (nine and len(inv) >= 7) or (not nine and len(inv) >= 5)
+
+    out: list[tuple[str, str, str, float]] = []
+    params = (f"mu={mu:+.1f}" + (f", mu1={mu1:+.1f}" if mu1 is not None else "")
+              + f", sigma={sigma:g}, rho={htft_model.RHO:g}, "
+              + ("9" if nine else "6") + "-outcome")
+    for label, p_fair in fair.items():
+        cb = combo.get(label)
+        if cb is None or p_fair <= 0:
+            continue
+        fair_odds = 1.0 / p_fair
+        if fair_odds > HTFT_FAIR_MAX_ODDS:
+            continue
+        # EDGE: posted price beats model fair (already net of vig).
+        edge_pct = (cb / fair_odds - 1.0) * 100.0
+        if edge_pct >= HTFT_FAIR_EDGE_PCT:
+            out.append((
+                "htft_fair", "HT/FT",
+                f"HT/FT {label} @{cb:g} vs model fair {fair_odds:.2f} "
+                f"(+{edge_pct:.0f}% over fair, before their vig — possible "
+                f"+EV; {params})", round(edge_pct, 2),
+            ))
+            continue
+        # SHAPE: devigged prob disagrees with the model by a big factor.
+        if shape and overround > 0 and p_fair >= HTFT_SHAPE_MIN_PROB:
+            p_cb = inv[label] / overround
+            ratio = p_cb / p_fair
+            if ratio >= HTFT_SHAPE_RATIO or ratio <= 1.0 / HTFT_SHAPE_RATIO:
+                off_pct = abs(ratio - 1.0) * 100.0
+                out.append((
+                    "htft_fair", "HT/FT",
+                    f"HT/FT {label} devigs to {p_cb*100:.0f}% but the model "
+                    f"says {p_fair*100:.0f}% (x{ratio:.2f}) — market shape "
+                    f"off vs model ({params})", round(off_pct, 2),
+                ))
+    return out
 
 
 def _first_htft(periods: dict[str, dict[str, list[Odds]]]) -> Optional[dict[str, float]]:

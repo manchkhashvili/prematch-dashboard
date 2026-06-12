@@ -155,3 +155,66 @@ def test_3way_legs_do_not_corrupt_2way_ml_checks():
                sec="Full Time Result(1X2)"),
             _o("moneyline", "Q1", {"home": 1.85, "away": 1.95})]
     assert find_consistency_flags(rows) == []
+
+
+# ── htft_fair: model-based HT/FT pricing (check 6) ────────────────────────────
+# Even game fixture: spread ladder centered at 0 → mu=0; sigma defaults to 10
+# (league "L" is unknown). Model fair 1/1 ≈ 2.86 at rho=0.70, 9-outcome.
+
+def _even_game_rows(htft_prices):
+    return [
+        _o("spread", "FT", {"home": 1.95, "away": 1.85}, line=-1.0, sec="AH"),
+        _o("spread", "FT", {"home": 1.85, "away": 1.95}, line=1.0, sec="AH"),
+        _o("htft", "FT", htft_prices, sec="Halftime/Fulltime"),
+    ]
+
+
+def _fair_9(scale=1.0):
+    from src.htft_model import htft_fair_probs
+    fair = htft_fair_probs(0.0, sigma=10, rho=0.70, nine_outcome=True)
+    return {k: round(scale / v, 2) for k, v in fair.items()}
+
+
+def test_htft_fair_edge_flagged_when_posted_beats_model():
+    prices = _fair_9(scale=0.85)          # typical vigged board, no edges...
+    prices["1/1"] = round(1 / 0.30, 2)    # ...except 1/1 priced way too long
+    flags = [f for f in find_consistency_flags(_even_game_rows(prices))
+             if f.kind == "htft_fair"]
+    assert flags, "expected an edge flag on the overpriced 1/1"
+    assert "1/1" in flags[0].detail and "+EV" in flags[0].detail
+
+
+def test_htft_fair_quiet_on_normally_vigged_board():
+    # all outcomes at fair * 0.85 — vig present, shape consistent → no flags
+    flags = [f for f in find_consistency_flags(_even_game_rows(_fair_9(0.85)))
+             if f.kind == "htft_fair"]
+    assert flags == []
+
+
+def test_htft_fair_shape_flag_on_distorted_outcome():
+    from src.htft_model import htft_fair_probs
+    fair = htft_fair_probs(0.0, sigma=10, rho=0.70, nine_outcome=True)
+    prices = {}
+    for k, p in fair.items():
+        # 2/2 carries twice its fair probability (shorter price), the rest
+        # rebalanced longer — overall vig stays modest so only SHAPE is off.
+        q = p * 2.0 if k == "2/2" else p * 0.92
+        prices[k] = round(1 / q, 2)
+    flags = [f for f in find_consistency_flags(_even_game_rows(prices))
+             if f.kind == "htft_fair"]
+    assert any("2/2" in f.detail and "shape" in f.detail for f in flags)
+
+
+def test_htft_fair_ignores_longshot_outcomes():
+    # X/X fair ~ hundreds — outside HTFT_FAIR_MAX_ODDS, never flagged even
+    # when priced absurdly.
+    prices = _fair_9(scale=0.85)
+    prices["X/X"] = 13.0   # insanely short for a ~0.3% outcome
+    flags = [f for f in find_consistency_flags(_even_game_rows(prices))
+             if f.kind == "htft_fair" and "X/X" in f.detail]
+    assert flags == []
+
+
+def test_htft_fair_skipped_without_mu_source():
+    rows = [_o("htft", "FT", _fair_9(0.85), sec="Halftime/Fulltime")]
+    assert not any(f.kind == "htft_fair" for f in find_consistency_flags(rows))
