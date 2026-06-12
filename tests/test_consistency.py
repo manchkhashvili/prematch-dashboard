@@ -96,3 +96,62 @@ def test_flags_sorted_by_severity_desc():
                _o("moneyline", "H1", {"home": 2.60, "away": 1.50})])
     sev = [f.severity for f in find_consistency_flags(rows)]
     assert sev == sorted(sev, reverse=True)
+
+
+# ── htft_combo: HT/FT 1/1 & 2/2 vs their own legs ─────────────────────────────
+# Legs are the REGULATION 3-way 1x2 moneylines (have a "draw" price).
+
+def _htft_fixture(combo_11, combo_22, h1=(1.60, 15.0, 2.30), ft=(1.50, 15.2, 2.65)):
+    return [
+        _o("moneyline", "H1", {"home": h1[0], "draw": h1[1], "away": h1[2]}, sec="1st half - 1x2"),
+        _o("moneyline", "FT", {"home": ft[0], "draw": ft[1], "away": ft[2]}, sec="Full Time Result(1X2)"),
+        _o("htft", "FT", {"1/1": combo_11, "1/X": 26.0, "1/2": 7.40,
+                          "X/1": 33.3, "X/X": 100.0, "X/2": 52.0,
+                          "2/1": 5.30, "2/X": 27.8, "2/2": combo_22},
+           sec="Halftime/Fulltime"),
+    ]
+
+
+def test_htft_healthy_combo_does_not_flag():
+    # Live-captured shape (SAS/NYK 2026-06-12): 1/1=1.80 between max-leg 1.60
+    # and product 1.60*1.50=2.40; 2/2=3.35 between 2.65 and 6.10.
+    rows = _htft_fixture(combo_11=1.80, combo_22=3.35)
+    assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
+
+
+def test_htft_combo_shorter_than_leg_flagged():
+    # 1/1 @ 1.40 while the H1 home leg alone is 1.60 — logically impossible.
+    rows = _htft_fixture(combo_11=1.40, combo_22=3.35)
+    flags = [f for f in find_consistency_flags(rows) if f.kind == "htft_combo"]
+    assert flags and "1/1" in flags[0].detail and "shorter" in flags[0].detail
+
+
+def test_htft_combo_longer_than_independent_product_flagged():
+    # 2/2 @ 8.00 vs product 2.30*2.65=6.10 — too generous even if legs were
+    # independent (they're positively correlated, so it should be SHORTER).
+    rows = _htft_fixture(combo_11=1.80, combo_22=8.00)
+    flags = [f for f in find_consistency_flags(rows) if f.kind == "htft_combo"]
+    assert flags and "2/2" in flags[0].detail and "generous" in flags[0].detail
+
+
+def test_htft_small_violation_within_tolerance_not_flagged():
+    # 1% past the product bound stays under the 2% gate (odds-step noise).
+    rows = _htft_fixture(combo_11=1.80, combo_22=6.16)  # product = 6.0950
+    assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
+
+
+def test_htft_missing_legs_skips_check():
+    rows = [_o("htft", "FT", {"1/1": 1.40, "2/2": 3.35}, sec="Halftime/Fulltime"),
+            _o("moneyline", "FT", {"home": 1.45, "away": 2.45})]  # 2-way, not a leg
+    assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
+
+
+def test_3way_legs_do_not_corrupt_2way_ml_checks():
+    # A 3-way 1x2 row next to the 2-way ML must not feed devig_2way(home, away)
+    # — P(home) from 1.50/2.65 ignoring the draw would be wrong and could
+    # fabricate favourite_flip / quarter_ml_extreme flags.
+    rows = [_o("moneyline", "FT", {"home": 1.90, "away": 1.90}),
+            _o("moneyline", "FT", {"home": 1.50, "draw": 15.2, "away": 2.65},
+               sec="Full Time Result(1X2)"),
+            _o("moneyline", "Q1", {"home": 1.85, "away": 1.95})]
+    assert find_consistency_flags(rows) == []

@@ -473,3 +473,89 @@ class TestEdgeCases:
         # Should get BOTH the FT ML (left column) AND H1 ML (right column).
         periods = {o.period for o in odds}
         assert periods == {"FT", "H1"}
+
+
+# ── HT/FT combo capture (permissive / anomaly path only) ──────────────────────
+class TestHtftCapture:
+    def _parse_sample_permissive(self):
+        if not SAMPLE.exists():
+            pytest.skip(f"no captured detail page at {SAMPLE}")
+        return parse_detail_page(
+            SAMPLE.read_text(encoding="utf-8"),
+            event_id="3026864120", home="Cleveland Cavaliers",
+            away="New York Knicks", league="L", start_time=NOW, fetched_at=NOW,
+            sport_name="basketball",
+            classify=basketball.classify_market_title_permissive,
+            per_section=True,
+        )
+
+    def test_strict_classifier_still_skips_htft(self):
+        odds = _parse_sample()
+        assert not any(o.market_type == "htft" for o in odds)
+
+    def test_permissive_captures_htft_row_from_real_page(self):
+        odds = self._parse_sample_permissive()
+        htft = [o for o in odds if o.market_type == "htft"]
+        assert len(htft) == 1
+        sels = htft[0].selections
+        assert "1/1" in sels and "2/2" in sels
+        assert all(v > 1.0 for v in sels.values())
+
+    def test_permissive_captures_regulation_1x2_legs(self):
+        odds = self._parse_sample_permissive()
+        legs = [o for o in odds if o.market_type == "moneyline"
+                and "draw" in o.selections]
+        periods = {o.period for o in legs}
+        assert "FT" in periods and "H1" in periods
+
+    def test_synthetic_htft_table_parses_labels(self):
+        cells = "".join(
+            f'<div class="sport_more_bt DetailSnatch">'
+            f'<div class="sport_more_bt1">{lbl}</div>'
+            f'<div class="sport_more_bt2">{odds}</div></div>'
+            for lbl, odds in [("1/1", "1.80"), ("1/X", "26.0"), ("1/2", "7.40"),
+                              ("X/1", "33.3"), ("X/X", "1.00"), ("x/2", "52.0"),
+                              ("2/1", "5.30"), ("2/X", "27.8"), ("2/2", "3.35")]
+        )
+        html = (f'<table class="game-details"><tr>'
+                f'<td class="sport_more_td1">Halftime/Fulltime</td>'
+                f'<td class="sport_more_td2"><div class="sport_more_td_div">'
+                f'{cells}</div></td></tr></table>')
+        odds = parse_detail_page(
+            html, event_id="e", home="A", away="B", league=None,
+            start_time=None, fetched_at=NOW, sport_name="basketball",
+            classify=basketball.classify_market_title_permissive,
+        )
+        assert len(odds) == 1 and odds[0].market_type == "htft"
+        sels = odds[0].selections
+        assert sels["1/1"] == 1.80 and sels["2/2"] == 3.35
+        assert "X/X" not in sels          # 1.00 = suspended, dropped
+        assert sels["X/2"] == 52.0        # lowercase x normalized
+
+
+class TestPermissiveClassifierHtftRules:
+    def test_htft_title_classified(self):
+        cls = basketball.classify_market_title_permissive("Halftime/Fulltime ")
+        assert cls is not None and cls.market_type == "htft"
+
+    def test_htft_combo_variants_not_classified_as_htft(self):
+        for t in ("Halftime/Fulltime and Total",
+                  "Halftime  / Fulltime Correct Score***",
+                  "Halftime/Fulltime and Exact Goals"):
+            cls = basketball.classify_market_title_permissive(t)
+            assert cls is None or cls.market_type != "htft", t
+
+    def test_plain_1x2_titles_become_3way_moneylines(self):
+        for title, per in (("Full Time Result(1X2)*", "FT"),
+                           ("1st half - 1x2", "H1"),
+                           ("2nd Quarter - 1x2*", "Q2")):
+            cls = basketball.classify_market_title_permissive(title)
+            assert cls is not None and cls.market_type == "moneyline" \
+                and cls.n_way == 3 and cls.period == per, title
+
+    def test_3way_handicap_still_skipped(self):
+        assert basketball.classify_market_title_permissive("Handicap(1X2)*") is None
+
+    def test_strict_classifier_unchanged_for_1x2(self):
+        assert basketball.classify_market_title("Full Time Result(1X2)*") is None
+        assert basketball.classify_market_title("Halftime/Fulltime") is None

@@ -52,10 +52,15 @@ def test_permissive_still_skips_prop_and_3way_noise():
         "player total points (OT) Harden, James/18.5",
         "Any Team Total Maximum Consecutive Points",
         "Highest scoring quarter - total",
-        "Full Time Result (1x2)",
         "Odd/Even",
     ]:
         assert PERM(title) is None, title
+    # Plain 1x2 results are NO LONGER noise on the permissive path: they're
+    # captured as 3-way regulation moneylines — the legs of the htft_combo
+    # consistency check. (Strict path still skips them.)
+    c = PERM("Full Time Result (1x2)")
+    assert c is not None and c.market_type == "moneyline" and c.n_way == 3
+    assert STRICT("Full Time Result (1x2)") is None
 
 
 def test_derive_period_handles_dotted_quarter():

@@ -560,6 +560,14 @@ def _derive_period(norm: str) -> str:
     return "FT"
 
 
+_RE_HTFT_TITLE = re.compile(r"^halftime\s*/\s*fulltime$")
+# Plain N-way result markets phrased with "1x2": "Full Time Result(1X2)",
+# "1st half - 1x2", "2nd Quarter - 1x2", ... Excludes the 3-way HANDICAP
+# ("Handicap(1X2)") and any combo ("... & 1x2", "... and 1st half total").
+_RE_PLAIN_1X2 = re.compile(r"1x2")
+_RE_1X2_EXCLUDE = re.compile(r"handicap|&|\band\b|correct|total")
+
+
 def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
     """Permissive 2-way ladder classifier for the anomaly scanner (see the
     block comment above). Returns spread/total for any non-skipped
@@ -567,6 +575,21 @@ def classify_market_title_permissive(title: str) -> Optional[MarketClassificatio
     if not title:
         return None
     norm = _normalize_title(title)
+
+    # Anomaly-scan extras, matched BEFORE the skip list (which excludes both
+    # on purpose for the strict/+EV path):
+    #   - the 9-way Halftime/Fulltime combo — input to the htft_combo
+    #     consistency check (1/1 and 2/2 vs their own legs);
+    #   - plain 1x2 result markets — the REGULATION-time 3-way moneylines that
+    #     are those legs (HT/FT is settled on regulation, so the bounds must
+    #     use regulation legs, not the incl-OT 2-way winner).
+    if _RE_HTFT_TITLE.fullmatch(norm):
+        return MarketClassification(market_type="htft", period="FT")
+    if _RE_PLAIN_1X2.search(norm) and not _RE_1X2_EXCLUDE.search(norm):
+        return MarketClassification(
+            market_type="moneyline", period=_derive_period(norm), n_way=3,
+        )
+
     for pat in _SKIP_PATTERNS:
         if pat.search(norm):
             return None
