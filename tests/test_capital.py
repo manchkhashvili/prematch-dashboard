@@ -286,3 +286,47 @@ def test_existing_db_gains_capital_tables_on_init(clean_db, tmp_path):
     assert len(capital.list_accounts()) == 4
     cols = {r[1] for r in bets._require_conn().execute("PRAGMA table_info(bets)")}
     assert "account_id" in cols
+
+
+# ── ledger editing + cashout flow (2026-06-12) ────────────────────────────────
+
+def test_update_entry_keeps_kind_sign(clean_db):
+    aid = capital.add_account("Bank")
+    e_dep = capital.add_entry(aid, "deposit", 100.01)
+    e_wd = capital.add_entry(aid, "withdraw", 50.01)
+    assert capital.update_entry(e_dep, amount=100)     # rounding the typo
+    assert capital.update_entry(e_wd, amount=-50)      # sign ignored, kind wins
+    amounts = {e["id"]: e["amount"] for e in capital.list_entries(aid)}
+    assert amounts[e_dep] == 100.0
+    assert amounts[e_wd] == -50.0
+
+
+def test_update_entry_transfer_keeps_direction(clean_db):
+    a = capital.add_account("Bank")
+    b = capital.add_account("CB", "cb")
+    out_id, in_id = capital.transfer(a, b, 300.01)
+    assert capital.update_entry(out_id, amount=300)
+    assert capital.update_entry(in_id, amount=300)
+    entries = {e["id"]: e["amount"] for e in capital.list_entries()}
+    assert entries[out_id] == -300.0 and entries[in_id] == 300.0
+
+
+def test_update_entry_note_and_missing(clean_db):
+    aid = capital.add_account("Bank")
+    eid = capital.add_entry(aid, "deposit", 10)
+    assert capital.update_entry(eid, note="fixed")
+    assert capital.list_entries(aid)[0]["note"] == "fixed"
+    assert not capital.update_entry(999, amount=5)
+    with pytest.raises(ValueError):
+        capital.update_entry(eid, amount=0)
+
+
+def test_cashout_pnl_flows_into_balance(clean_db):
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "opening", 200)
+    bid = _bet(account_id=cb, stake=50, odds_taken=3.0)
+    bets.settle_bet(bid, "cashout", payout=120)   # cashed out before the end
+    s = capital.capital_summary()
+    assert s["totals"]["settled_pnl"] == 70.0     # 120 − 50
+    assert s["totals"]["equity"] == 270.0
+    assert s["pnl_curve"][-1]["pnl"] == 70.0

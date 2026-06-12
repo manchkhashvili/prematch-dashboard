@@ -242,6 +242,50 @@ def delete_entry(entry_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def update_entry(
+    entry_id: int,
+    amount: Optional[float] = None,
+    note: Optional[str] = None,
+    ts: Optional[str] = None,
+) -> bool:
+    """Edit a ledger entry in place (fix typos / round amounts without
+    deleting history). The amount keeps the row's kind semantics:
+    opening/deposit stay positive, withdraw stays negative, transfer keeps
+    its original direction; adjustment takes the sign as typed."""
+    conn = _require_conn()
+    with _conn_lock:
+        row = conn.execute(
+            "SELECT kind, amount FROM ledger WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        sets, params = [], []
+        if amount is not None:
+            amount = float(amount)
+            if amount == 0:
+                raise ValueError("amount must be non-zero")
+            kind = row["kind"]
+            if kind in ("opening", "deposit"):
+                amount = abs(amount)
+            elif kind == "withdraw":
+                amount = -abs(amount)
+            elif kind == "transfer":
+                amount = abs(amount) * (1 if row["amount"] >= 0 else -1)
+            sets.append("amount = ?")
+            params.append(amount)
+        if note is not None:
+            sets.append("note = ?")
+            params.append(note)
+        if ts is not None:
+            sets.append("ts = ?")
+            params.append(ts)
+        if not sets:
+            return False
+        params.append(entry_id)
+        conn.execute(f"UPDATE ledger SET {', '.join(sets)} WHERE id = ?", params)
+        return True
+
+
 # ── Balances / summary ────────────────────────────────────────────────────────
 
 def _attribute(bet: dict, tag_to_id: dict[str, int]) -> Optional[int]:

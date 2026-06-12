@@ -1521,6 +1521,14 @@ async def api_update_bet(bet_id: int, payload: dict) -> dict:
         if not ok:
             raise HTTPException(status_code=404, detail=f"bet {bet_id} not found")
     else:
+        # Account moved → keep the derived book tag in sync (same rule as create).
+        if payload.get("account_id") is not None and "book" not in payload:
+            acct = next(
+                (a for a in capital.list_accounts()
+                 if a["id"] == payload["account_id"]), None,
+            )
+            if acct is not None:
+                payload["book"] = acct.get("book_tag") or "other"
         try:
             ok = bets.update_bet(bet_id, **payload)
         except ValueError as e:
@@ -1623,6 +1631,24 @@ async def api_delete_ledger(entry_id: int) -> dict:
     if not capital.delete_entry(entry_id):
         raise HTTPException(status_code=404, detail=f"ledger entry {entry_id} not found")
     return {"deleted": entry_id}
+
+
+@app.patch("/api/capital/ledger/{entry_id}")
+async def api_update_ledger(entry_id: int, payload: dict) -> dict:
+    """Edit a ledger entry's amount/note/ts in place."""
+    from fastapi import HTTPException
+    try:
+        ok = capital.update_entry(
+            entry_id,
+            amount=payload.get("amount"),
+            note=payload.get("note"),
+            ts=payload.get("ts"),
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"ledger entry {entry_id} not found")
+    return {"ok": True}
 
 
 @app.get("/api/capital/export/{what}.csv")
