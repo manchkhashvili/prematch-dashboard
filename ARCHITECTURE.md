@@ -72,6 +72,39 @@ The per-game expansion is the slowest path (~3s/game for soccer with all
 alt-lines). `SPORTS=basketball:list` short-circuits this entire step — list
 view only, no alt-lines, no H1 markets, but ~30s/cycle instead of minutes.
 
+#### Browser-free transport (`src/scrapers/cb_http.py`, `CB_TRANSPORT=http`)
+
+The Playwright layer above is only a TRANSPORT — it produces two HTML
+artifacts (the list-view page, the per-game detail table) that the parsers
+consume. `cb_http.py` produces the same two artifacts over plain HTTP
+ASP.NET postbacks (curl_cffi, no Chromium), ported from the prematch_v2
+research (`../prematch_v2/docs/crystalbet.md`):
+
+- One warmed session per sport (GET → English full-postback →
+  `DoSportTypePostBack`), mirroring the one-context-per-sport rule.
+- List refresh = ONE `SelectAllChampionats:<sport_id>` postback (~1 s for
+  the full board vs ~30-50 s of browser waits). Re-selects all
+  championships every cycle, so new leagues appear automatically.
+- Detail = `ExpandDetail:<game_id>` postback (~0.3-0.5 s vs ~3-15 s); the
+  table rides in the RepeaterChampionat updatePanel. CollapseDetail is
+  posted after parsing to keep the server-side view small.
+- Two ASP.NET quirks matter: hidden inputs rendered inside panels must be
+  re-scanned and merged into the next POST's field set (a browser
+  form-serializes the live DOM; the hiddenField delta segments alone are
+  NOT enough), and __VIEWSTATE must be refreshed from each delta.
+- **normalize_html()** re-serializes every returned panel through html5lib
+  before parsers see it. CB's raw markup is heavily unclosed (515 `<td>`
+  opens vs 259 closes measured live); browsers repair it during HTML5 tree
+  construction and `page.content()` returned the repaired form. html5lib
+  applies the same WHATWG algorithm, so parsers receive browser-equivalent
+  HTML. (lxml's recovery diverges — do not substitute it.)
+
+Parsing, change cache, detail cache, and fallbacks are shared between the
+two transports; the dispatch lives in `_refresh_list_html_for_sport` and
+`_expand_game` in crystalbet.py. Parity was verified live with
+`scripts/cb_parity_check.py` (A/B/A: playwright → http → playwright per
+game; structural = http disagrees with both pw captures).
+
 ### Pinnacle (`src/scrapers/pinnacle.py`)
 
 Pinnacle exposes a `guest.api.arcadia.pinnacle.com/0.1` JSON API. No
