@@ -710,6 +710,7 @@ async def _compute_anomalies() -> bool:
     fair prices + moves stay live between hourly scans. Returns True if the CB
     scrape produced odds (lets the loop retry sooner on a cold start)."""
     global _recent_anomalies, _anomaly_cb_odds
+    global _recent_consistency, _anomaly_coverage, _anomaly_watchlist
     global _anomalies_computed_at, _anomalies_cb_fetched_at, _anomalies_error
     try:
         if CB_USE_SAVED:
@@ -729,11 +730,13 @@ async def _compute_anomalies() -> bool:
 
     anoms = find_ladder_anomalies(cb_odds, markets=ANOMALY_MARKETS, min_pct=0.0)
     rows = [_anomaly_base_row(a) for a in anoms]
-    flags = [_consistency_to_dict(f) for f in find_consistency_flags(cb_odds)]
     coverage = _coverage_stats(cb_odds)
     watchlist = {r["cb_event_id"] for r in rows if r["cb_event_id"]}
     ts = datetime.now(tz=timezone.utc)
-    global _recent_consistency, _anomaly_coverage, _anomaly_watchlist
+    flags = _merge_flag_first_seen(
+        [_consistency_to_dict(f) for f in find_consistency_flags(cb_odds)],
+        _recent_consistency, ts.isoformat(),
+    )
     async with _state_lock:
         _anomaly_cb_odds = cb_odds
         _recent_anomalies = rows
@@ -776,8 +779,27 @@ def _consistency_to_dict(f) -> dict:
         "cb_event_id": f.event_id,
         "start_time": f.start_time.isoformat() if f.start_time else None,
         "kind": f.kind, "periods": f.periods, "detail": f.detail,
-        "severity": f.severity,
+        "severity": f.severity, "outcome": f.outcome,
     }
+
+
+def _merge_flag_first_seen(
+    new_flags: list[dict], prev_flags: list[dict], scan_ts_iso: str,
+) -> list[dict]:
+    """Carry first_seen across scans so a flag shows how long the finding has
+    been live, not when the latest scan ran. Identity = (kind, event, periods,
+    outcome) — `detail` carries live odds and would reset on every reprice."""
+    prev = {
+        f.get("flag_key"): f.get("first_seen")
+        for f in prev_flags if f.get("flag_key")
+    }
+    for f in new_flags:
+        f["flag_key"] = "|".join([
+            str(f.get("kind")), str(f.get("cb_event_id")),
+            str(f.get("periods")), str(f.get("outcome") or ""),
+        ])
+        f["first_seen"] = prev.get(f["flag_key"]) or scan_ts_iso
+    return new_flags
 
 
 # Append-only scan history — one row per anomaly / flag PER scan (scan_ts column),

@@ -127,17 +127,37 @@ def test_htft_combo_shorter_than_leg_flagged():
 
 
 def test_htft_combo_longer_than_independent_product_flagged():
-    # 2/2 @ 8.00 vs product 2.30*2.65=6.10 — too generous even if legs were
+    # 1/1 @ 2.70 vs product 1.60*1.50=2.40 — too generous even if legs were
     # independent (they're positively correlated, so it should be SHORTER).
-    rows = _htft_fixture(combo_11=1.80, combo_22=8.00)
+    # Priced inside the bettable range so the odds gate doesn't suppress it.
+    rows = _htft_fixture(combo_11=2.70, combo_22=3.35)
     flags = [f for f in find_consistency_flags(rows) if f.kind == "htft_combo"]
-    assert flags and "2/2" in flags[0].detail and "generous" in flags[0].detail
+    assert flags and "1/1" in flags[0].detail and "generous" in flags[0].detail
+    assert flags[0].outcome == "1/1"
 
 
 def test_htft_small_violation_within_tolerance_not_flagged():
-    # 1% past the product bound stays under the 2% gate (odds-step noise).
-    rows = _htft_fixture(combo_11=1.80, combo_22=6.16)  # product = 6.0950
+    # ~1.7% past the product bound (2.44 vs 2.40) stays under the 2% gate.
+    rows = _htft_fixture(combo_11=2.44, combo_22=3.35)
     assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
+
+
+def test_htft_odds_range_gate_suppresses_out_of_range_flags():
+    # 2/2 @ 8.00 violates the product bound (6.10) but sits above the 4.5
+    # bettable cap → suppressed. 1/1 @ 1.10 violates dominance (legs 1.60)
+    # but sits below the 1.15 floor → suppressed.
+    rows = _htft_fixture(combo_11=1.10, combo_22=8.00)
+    assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
+
+
+def test_htft_fair_odds_range_gate():
+    # An outcome priced above 4.5 never emits a fair-model flag, however
+    # large the model disagreement.
+    prices = _fair_9(scale=0.85)
+    prices["1/1"] = 5.2   # way over model fair (~2.86) AND over the 4.5 cap
+    flags = [f for f in find_consistency_flags(_even_game_rows(prices))
+             if f.kind == "htft_fair" and "1/1" in f.detail]
+    assert flags == []
 
 
 def test_htft_missing_legs_skips_check():

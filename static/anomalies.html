@@ -87,6 +87,7 @@
     <table id="consistency">
       <thead>
         <tr>
+          <th title="When this finding FIRST appeared (persists across scans while it keeps firing)">First seen</th>
           <th>Match</th>
           <th>League</th>
           <th>Check</th>
@@ -96,7 +97,7 @@
         </tr>
       </thead>
       <tbody id="cons-body">
-        <tr><td colspan="6" class="empty">loading…</td></tr>
+        <tr><td colspan="7" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -223,13 +224,14 @@ function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-
 function renderConsistency(flags) {
   const body = document.getElementById("cons-body");
   if (!meta.enabled) {
-    body.innerHTML = `<tr><td colspan="6" class="empty">scanner off</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="7" class="empty">scanner off</td></tr>`; return;
   }
   if (!flags.length) {
-    body.innerHTML = `<tr><td colspan="6" class="empty">no consistency flags</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="7" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
     <tr>
+      <td class="mono dim">${fmtTime(f.first_seen)}</td>
       <td>${f.match_label}</td>
       <td class="dim">${f.league || ""}</td>
       <td>${KIND_LABEL[f.kind] || f.kind}</td>
