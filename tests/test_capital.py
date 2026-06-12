@@ -229,11 +229,50 @@ def test_export_csv_shapes(clean_db):
 
     bets_csv = capital.export_csv("bets")
     lines = bets_csv.splitlines()
-    assert lines[0].endswith(",pnl")
+    header = lines[0].split(",")
+    assert header[-1] == "pnl"
+    assert "account" in header and "start_time" in header
     assert lines[1].endswith(",100.0")  # won 100 stake at 2.0 → +100 pnl
+    # the account column carries the NAME, not the cb/pin tag or numeric id
+    assert ",CB," in lines[1]
 
     with pytest.raises(ValueError):
         capital.export_csv("nope")
+
+
+def test_export_bets_csv_resolves_legacy_book_to_account_name(clean_db):
+    capital.add_account("CrystalBet", "cb")
+    _bet()  # legacy-style: book='cb', no account_id
+    lines = capital.export_csv("bets").splitlines()
+    assert ",CrystalBet," in lines[1]
+
+
+# ── bet-create derivation (merged Book/Account picker, 2026-06-12) ────────────
+
+def _api_payload(**over):
+    p = dict(sport="basketball", match_label="X vs Y", period="FT",
+             market_type="moneyline", side="home", odds_taken=2.0, stake=25)
+    p.update(over)
+    return p
+
+
+def test_api_create_bet_derives_book_and_bankroll(clean_db):
+    import asyncio
+    from src import app as appmod
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "opening", 300)
+    b = asyncio.run(appmod.api_create_bet(_api_payload(account_id=cb)))
+    assert b["book"] == "cb"            # derived from the account's tag
+    assert b["bankroll_at_time"] == 300.0  # equity stamped automatically
+    assert b["account_id"] == cb
+
+
+def test_api_create_bet_untagged_account_books_as_other(clean_db):
+    import asyncio
+    from src import app as appmod
+    bank = capital.add_account("Bank")
+    b = asyncio.run(appmod.api_create_bet(_api_payload(account_id=bank)))
+    assert b["book"] == "other"
 
 
 def test_existing_db_gains_capital_tables_on_init(clean_db, tmp_path):

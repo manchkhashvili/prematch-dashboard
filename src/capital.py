@@ -378,13 +378,24 @@ def export_csv(what: str) -> str:
              for e in list_entries()],
         )
     if what == "bets":
-        cols = ["id", "placed_at", "sport", "match_label", "period", "market_type",
-                "line", "side", "book", "account_id", "odds_taken", "stake",
-                "status", "settled_at", "payout", "edge_at_placement_pct", "note"]
-        return _csv(cols + ["pnl"], [
-            [b.get(c) for c in cols]
-            + [round(b["payout"] - b["stake"], 2)
-               if b["status"] != "open" and b["payout"] is not None else ""]
-            for b in _bets.list_bets()
-        ])
+        accounts = list_accounts()
+        by_id = {a["id"]: a["name"] for a in accounts}
+        tag_to_id = {a["book_tag"]: a["id"] for a in accounts
+                     if a["book_tag"] and not a["archived"]}
+        cols = ["id", "placed_at", "start_time", "sport", "match_label",
+                "period", "market_type", "line", "side", "odds_taken",
+                "stake", "status", "settled_at", "payout",
+                "edge_at_placement_pct", "note"]
+        rows = []
+        for b in _bets.list_bets():
+            acct_id = _attribute(b, tag_to_id)
+            account = by_id.get(acct_id) or b.get("book") or ""
+            pnl = (round(b["payout"] - b["stake"], 2)
+                   if b["status"] != "open" and b["payout"] is not None else "")
+            row = [b.get(c) for c in cols]
+            row.insert(cols.index("side") + 1, account)  # account after side
+            rows.append(row + [pnl])
+        headers = cols[:cols.index("side") + 1] + ["account"] \
+            + cols[cols.index("side") + 1:] + ["pnl"]
+        return _csv(headers, rows)
     raise ValueError(f"unknown export {what!r} — use summary|ledger|bets")
