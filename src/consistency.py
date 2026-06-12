@@ -80,6 +80,11 @@ HTFT_SHAPE_RATIO = 1.5     # flag when devigged CB prob vs model prob differs
 HTFT_FAIR_MAX_ODDS = 20.0  # ignore outcomes the model prices longer than this
                            # (X-row longshots: tiny probs, model error explodes)
 HTFT_SHAPE_MIN_PROB = 0.05  # shape check only on outcomes the model gives >=5%
+# Bettable-range gate (owner 2026-06-12): HT/FT flags only fire when CB's
+# POSTED price sits inside this range — shorter than 1.15 isn't worth betting,
+# longer than 4.5 is longshot territory where flags were noise.
+HTFT_ODDS_MIN = 1.15
+HTFT_ODDS_MAX = 4.5
 
 
 @dataclass(frozen=True)
@@ -90,10 +95,14 @@ class ConsistencyFlag:
     away: str
     start_time: Optional[datetime]
     event_id: Optional[str]
-    kind: str           # ml_vs_spread | favourite_flip | total_additivity | quarter_ml_extreme
+    kind: str           # ml_vs_spread | favourite_flip | total_additivity | quarter_ml_extreme | htft_*
     periods: str        # which period(s) involved, e.g. "FT" or "H1 vs FT"
     detail: str         # human-readable description
     severity: float     # bigger = weirder (pp or points); used for sort/filter
+    # HT/FT checks: the outcome label ("1/1", "2/2", ...). Gives the flag a
+    # stable identity across scans even though `detail` carries live odds —
+    # app.py keys first_seen carry-over on (kind, event, periods, outcome).
+    outcome: Optional[str] = None
 
     @property
     def match_label(self) -> str:
@@ -229,12 +238,12 @@ def find_consistency_flags(
         m = meta[eid]
         views = {per: _build_period_view(mkts) for per, mkts in periods.items()}
 
-        def mk(kind, per_label, detail, severity):
+        def mk(kind, per_label, detail, severity, outcome=None):
             flags.append(ConsistencyFlag(
                 sport="basketball", league=m.league, home=m.home, away=m.away,
                 start_time=m.start_time, event_id=eid,
                 kind=kind, periods=per_label, detail=detail,
-                severity=round(severity, 2),
+                severity=round(severity, 2), outcome=outcome,
             ))
 
         # 1. ML vs spread win-prob (per period)
@@ -305,6 +314,8 @@ def find_consistency_flags(
                     l_ft = ft_1x2.get(leg_side)
                     if c is None or l_h1 is None or l_ft is None:
                         continue
+                    if not HTFT_ODDS_MIN <= c <= HTFT_ODDS_MAX:
+                        continue  # outside the bettable range — not actionable
                     # dominance: combo can't be SHORTER than either leg
                     max_leg = max(l_h1, l_ft)
                     short_pct = (max_leg - c) / c * 100.0
@@ -313,7 +324,8 @@ def find_consistency_flags(
                            f"HT/FT {combo_key} @{c:g} is shorter than its own "
                            f"{who} leg (H1 @{l_h1:g} / FT @{l_ft:g}) — the combo "
                            f"can never be more likely than one leg alone "
-                           f"(off by {short_pct:.0f}%)", short_pct)
+                           f"(off by {short_pct:.0f}%)", short_pct,
+                           outcome=combo_key)
                         continue
                     # correlation: combo can't beat the independent product
                     prod = l_h1 * l_ft
@@ -324,15 +336,16 @@ def find_consistency_flags(
                            f"× FT {who} @{l_ft:g} = {prod:.2f} — legs are "
                            f"positively correlated so the combo should be "
                            f"SHORTER than the product, not {long_pct:.0f}% "
-                           f"longer (too generous)", long_pct)
+                           f"longer (too generous)", long_pct,
+                           outcome=combo_key)
 
         # 6. HT/FT vs the bivariate-normal fair model (basketball only —
         #    sigma/rho are calibrated to basketball margins)
         if combo and m.sport == "basketball":
-            for kind, periods_label, detail, severity in _htft_fair_signals(
+            for kind, periods_label, detail, severity, outcome in _htft_fair_signals(
                 combo, views, m.league,
             ):
-                mk(kind, periods_label, detail, severity)
+                mk(kind, periods_label, detail, severity, outcome=outcome)
 
     flags.sort(key=lambda f: f.severity, reverse=True)
     return flags
@@ -342,7 +355,7 @@ def _htft_fair_signals(
     combo: dict[str, float],
     views: dict[str, "_PeriodView"],
     league: Optional[str],
-) -> list[tuple[str, str, str, float]]:
+) -> list[tuple[str, str, str, float, str]]:
     """Model-based HT/FT signals for one event (check 6 — see module doc)."""
     ft = views.get("FT")
     if ft is None:
@@ -372,7 +385,7 @@ def _htft_fair_signals(
     overround = sum(inv.values())
     shape = (nine and len(inv) >= 7) or (not nine and len(inv) >= 5)
 
-    out: list[tuple[str, str, str, float]] = []
+    out: list[tuple[str, str, str, float, str]] = []
     params = (f"mu={mu:+.1f}" + (f", mu1={mu1:+.1f}" if mu1 is not None else "")
               + f", sigma={sigma:g}, rho={htft_model.RHO:g}, "
               + ("9" if nine else "6") + "-outcome")
@@ -380,6 +393,8 @@ def _htft_fair_signals(
         cb = combo.get(label)
         if cb is None or p_fair <= 0:
             continue
+        if not HTFT_ODDS_MIN <= cb <= HTFT_ODDS_MAX:
+            continue  # outside the bettable range — not actionable
         fair_odds = 1.0 / p_fair
         if fair_odds > HTFT_FAIR_MAX_ODDS:
             continue
@@ -390,7 +405,7 @@ def _htft_fair_signals(
                 "htft_fair", "HT/FT",
                 f"HT/FT {label} @{cb:g} vs model fair {fair_odds:.2f} "
                 f"(+{edge_pct:.0f}% over fair, before their vig — possible "
-                f"+EV; {params})", round(edge_pct, 2),
+                f"+EV; {params})", round(edge_pct, 2), label,
             ))
             continue
         # SHAPE: devigged prob disagrees with the model by a big factor.
@@ -403,7 +418,7 @@ def _htft_fair_signals(
                     "htft_fair", "HT/FT",
                     f"HT/FT {label} devigs to {p_cb*100:.0f}% but the model "
                     f"says {p_fair*100:.0f}% (x{ratio:.2f}) — market shape "
-                    f"off vs model ({params})", round(off_pct, 2),
+                    f"off vs model ({params})", round(off_pct, 2), label,
                 ))
     return out
 
