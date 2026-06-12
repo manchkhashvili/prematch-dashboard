@@ -76,6 +76,11 @@ class Odds:
     # period — never interleave into a single ladder. Ignored by edge/matcher
     # and not persisted (cache_persistence lists fields explicitly).
     section: str | None = None
+    # Pinnacle only: the book's maxRiskStake limit for this market (from the
+    # market entry's `limits` array). High limits = market Pinnacle trusts its
+    # price on; also caps how much an arb partner-leg can take. None on CB rows
+    # and on Pinnacle entries that ship no limits.
+    max_stake: float | None = None
 
     def __post_init__(self) -> None:
         # Sanity: all decimal odds must be > 1.0. CB renders 1.0 for suspended
@@ -128,3 +133,4 @@ class Opportunity:
     submarket: str | None = None      # corners | None
     team_side: str | None = None      # home | away | None (team_total)
     league: str | None = None         # CB league name — for the arbs League column
+    pin_max_stake: float | None = None  # Pinnacle maxRiskStake for the matched market

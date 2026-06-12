@@ -45,7 +45,7 @@ from typing import NamedTuple
 from rapidfuzz import fuzz
 
 from src.models import Odds
-from src.normalize import normalize_team, normalize_tennis_name
+from src.normalize import has_youth_tag, normalize_team, normalize_tennis_name
 
 log = logging.getLogger(__name__)
 
@@ -142,11 +142,20 @@ def match_with_diagnostics(
             score = (score_h + score_a) / 2.0
             scored.append((score, cb_key, pin_key))
 
+    # Hard youth guard (v2 finding #3): a U16–U23 side must never pair with a
+    # senior side — fuzzy scoring can't be trusted here because
+    # token_set_ratio scores "nws spirit u20" vs "nws spirit" at 100 (subset).
+    # Compared per side, on the RAW names. Unmatched diagnostics below stay
+    # unguarded on purpose so the curation log still shows the near-miss.
+    cb_youth = {k: (has_youth_tag(k[0]), has_youth_tag(k[1])) for k in cb_events}
+    pin_youth = {k: (has_youth_tag(k[0]), has_youth_tag(k[1])) for k in pin_events}
+
     # Apply tiered accept + global sorted-by-score greedy assignment.
     candidates = sorted(
         (
             c for c in scored
-            if _accept(
+            if cb_youth[c[1]] == pin_youth[c[2]]
+            and _accept(
                 c[0],
                 cb_events[c[1]][0].start_time,
                 pin_events[c[2]][0].start_time,

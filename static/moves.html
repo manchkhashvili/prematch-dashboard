@@ -67,11 +67,12 @@
           <th id="th-odds" class="num" title="Posted Pinnacle odds: previous cycle → now → no-vig fair price now">Odds was → now → fair</th>
           <th id="th-fair" class="num">Fair % was → now</th>
           <th id="th-delta" class="num">Δ pp</th>
+          <th class="num" title="Pinnacle's maxRiskStake limit on this market — high limits mean Pinnacle trusts its price">Pin max</th>
           <th title="Log a bet on this move's side (prefills Pinnacle odds — switch book/odds in the form if betting CB)"></th>
         </tr>
       </thead>
       <tbody id="moves-body">
-        <tr><td colspan="11" class="empty">loading…</td></tr>
+        <tr><td colspan="12" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -188,7 +189,7 @@ async function fetchAndRender() {
     render();
   } catch (e) {
     document.getElementById("moves-body").innerHTML =
-      `<tr><td colspan="11" class="empty">error loading moves</td></tr>`;
+      `<tr><td colspan="12" class="empty">error loading moves</td></tr>`;
   }
 }
 
@@ -232,7 +233,7 @@ function render() {
   document.getElementById("row-count").textContent =
     `${cache.length} move${cache.length === 1 ? "" : "s"} (${windowLabel})`;
   if (cache.length === 0) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">no moves above threshold in the ${windowLabel}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="empty">no moves above threshold in the ${windowLabel}</td></tr>`;
     return;
   }
 
@@ -249,6 +250,7 @@ function render() {
         <td class="num mono">${fmtNum(m.first_odds)} → ${fmtNum(m.last_odds)} → <span class="edge-pos">${fmtNum(m.fair_now_odds)}</span></td>
         <td class="num mono">${fmtNum(m.first_prob_pct, 1)}% → ${fmtNum(m.last_prob_pct, 1)}%</td>
         <td class="num ${deltaClass(m.net_pp)}">${fmtSignedPp(m.net_pp)}</td>
+        <td class="num dim">—</td>
         <td><a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
       </tr>
     `).join("");
@@ -267,7 +269,8 @@ function render() {
       <td><b>${m.side}</b></td>
       <td class="num mono">${fmtNum(m.old_odds)} → ${fmtNum(m.new_odds)} → <span class="edge-pos">${fmtNum(m.fair_now_odds)}</span></td>
       <td class="num mono">${fmtNum(m.old_prob_pct, 1)}% → ${fmtNum(m.new_prob_pct, 1)}%</td>
-      <td class="num ${deltaClass(m.delta_pp)}">+${m.delta_pp.toFixed(2)}</td>
+      <td class="num ${deltaClass(m.delta_pp)}" title="${m.window_sec != null ? 'shift accumulated over ' + Math.max(1, Math.round(m.window_sec / 60)) + ' min' : ''}">+${m.delta_pp.toFixed(2)}${m.window_sec != null && m.window_sec > 90 ? `<span class="dim" style="font-size:10px"> /${Math.round(m.window_sec / 60)}m</span>` : ''}</td>
+      <td class="num dim">${m.max_stake != null ? "$" + Math.round(m.max_stake) : "—"}</td>
       <td><a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
     </tr>
   `).join("");

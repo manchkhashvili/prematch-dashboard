@@ -39,8 +39,22 @@ _DROP_TOKENS = frozenset({
     "fc", "bc", "bk", "sk", "sc", "ac", "kk", "nk",
     "club", "clubs", "basketball", "basket", "basquet",
     "baloncesto", "pallacanestro", "csk",
-    "u18", "u20", "u23",
+    # u18/u20/u23 used to be dropped here — removed 2026-06-12 (v2 finding #3):
+    # dropping them let "NWS Spirit U20" fuzzy-match the senior "NWS Spirit"
+    # at score 100 (token_set_ratio scores subsets at 100). The tokens now
+    # stay in the normalized form AND the matcher applies the hard
+    # has_youth_tag guard below.
 })
+
+# Youth/age-group markers (U16..U23, with or without a dash/space). Checked on
+# the RAW name — a youth side must never match a senior side, whatever the
+# fuzzy score says.
+_YOUTH_TAG = re.compile(r"(?i)\bu[- ]?(1[6-9]|2[0-3])\b")
+
+
+def has_youth_tag(name: str) -> bool:
+    """True if the team name carries a youth/age-group marker (U16–U23)."""
+    return bool(_YOUTH_TAG.search(name or ""))
 
 _WHITESPACE = re.compile(r"\s+")
 _NON_ALNUM = re.compile(r"[^a-z0-9 ]")

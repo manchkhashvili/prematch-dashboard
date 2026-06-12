@@ -29,6 +29,7 @@ from src.matcher import (  # noqa: E402
     SCORE_TIGHT,
     TIME_LOOSE_SECONDS,
     TIME_TIGHT_SECONDS,
+    match_events,
     match_with_diagnostics,
 )
 from src.models import Odds  # noqa: E402
@@ -320,3 +321,48 @@ class TestAliasHotReload:
         assert normalize.normalize_team("Phoenix") == "phoenix mercury"
         assert normalize.normalize_team("PHOENIX") == "phoenix mercury"
         assert normalize.normalize_team("phoenix") == "phoenix mercury"
+
+
+# ── Youth-tag hard guard (v2 finding #3, 2026-06-12) ──────────────────────────
+class TestYouthGuard:
+    def _o(self, source, home, away, start=None):
+        from datetime import datetime, timezone
+        return Odds(
+            source=source, sport="basketball", home=home, away=away,
+            market_type="moneyline", period="FT",
+            selections={"home": 1.9, "away": 1.9},
+            fetched_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+            start_time=start or datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
+        )
+
+    def test_youth_side_never_matches_senior_side(self):
+        # token_set_ratio("nws spirit u20", "nws spirit") == 100 (subset) —
+        # without the guard this matched a U20 fixture to the senior match.
+        cb = [self._o("crystalbet", "NWS Spirit U20", "Sutherland Sharks U20")]
+        pin = [self._o("pinnacle", "NWS Spirit", "Sutherland Sharks")]
+        assert match_events(cb, pin) == []
+
+    def test_youth_vs_youth_still_matches(self):
+        cb = [self._o("crystalbet", "NWS Spirit U20", "Sutherland Sharks U20")]
+        pin = [self._o("pinnacle", "NWS Spirit U-20", "Sutherland Sharks U20")]
+        m = match_events(cb, pin)
+        assert len(m) == 1
+
+    def test_senior_vs_senior_unchanged(self):
+        cb = [self._o("crystalbet", "NWS Spirit", "Sutherland Sharks")]
+        pin = [self._o("pinnacle", "NWS Spirit", "Sutherland Sharks")]
+        assert len(match_events(cb, pin)) == 1
+
+    def test_guard_is_per_side(self):
+        # Youth marker on one side only must also block the pair.
+        cb = [self._o("crystalbet", "NWS Spirit U20", "Sutherland Sharks")]
+        pin = [self._o("pinnacle", "NWS Spirit", "Sutherland Sharks")]
+        assert match_events(cb, pin) == []
+
+    def test_u21_and_dash_forms_detected(self):
+        from src.normalize import has_youth_tag
+        assert has_youth_tag("Spain U21")
+        assert has_youth_tag("Spain U-19")
+        assert has_youth_tag("spain u 17")
+        assert not has_youth_tag("Utah Jazz")          # 'U' alone not a tag
+        assert not has_youth_tag("Union 99ers")         # number not in 16-23

@@ -1,8 +1,10 @@
 """
 Tests for the Pinnacle steam / top-moves detector (Phase 5.1).
 
-The detector lives in src/app.py: _compute_pin_moves diffs consecutive
-Pinnacle poll cycles and stores the rising-side moves in _recent_moves.
+The detector lives in src/app.py: _compute_pin_moves measures each market
+against a CHANGE-ANCHORED baseline (the snapshot where it last moved, or was
+first seen — see TestChangeAnchoredDetection) and stores the rising-side
+moves in _recent_moves.
 """
 from __future__ import annotations
 
@@ -247,3 +249,62 @@ class TestMoveMarketLabel:
     def test_total_label_includes_line(self):
         o = _total("A", "B", 220.5, 1.9, 1.9)
         assert app._move_market_label(o) == "total FT +220.5"
+
+
+class TestChangeAnchoredDetection:
+    """2026-06-12: moves are measured against the snapshot where the market
+    LAST moved (or was first seen), not just the previous poll cycle — a
+    creeping line surfaces the moment its cumulative shift crosses the
+    threshold, with the time window it took (Pinnacle is poll-only; this is
+    the closest thing to 'record moves when they happen')."""
+
+    def test_creeping_drift_accumulates_and_fires(self):
+        # Three sub-threshold steps (~1pp each) — old per-cycle logic never
+        # fired; change-anchored fires once the cumulative shift is >= 2pp.
+        app._compute_pin_moves("basketball", [_ml("A", "B", 2.00, 2.00)])
+        app._compute_pin_moves("basketball", [_ml("A", "B", 1.96, 2.04)])
+        assert app._recent_moves["basketball"] == []
+        app._compute_pin_moves("basketball", [_ml("A", "B", 1.92, 2.08)])
+        moves = app._recent_moves["basketball"]
+        assert len(moves) == 1
+        m = moves[0]
+        assert m["side"] == "home"
+        assert m["old_odds"] == 2.00        # baseline = first sighting, not prev cycle
+        assert m["new_odds"] == 1.92
+        assert m["delta_pp"] >= 2.0
+        assert m["window_sec"] is not None and m["window_sec"] >= 0
+
+    def test_baseline_reanchors_after_fire(self):
+        app._compute_pin_moves("basketball", [_ml("A", "B", 2.00, 2.00)])
+        app._compute_pin_moves("basketball", [_ml("A", "B", 1.70, 2.40)])  # fires
+        assert len(app._recent_moves["basketball"]) == 1
+        # Same prices again — re-anchored baseline means no repeat move.
+        app._compute_pin_moves("basketball", [_ml("A", "B", 1.70, 2.40)])
+        assert len(app._recent_moves["basketball"]) == 1
+
+    def test_oscillation_around_baseline_never_fires(self):
+        app._compute_pin_moves("basketball", [_ml("A", "B", 2.00, 2.00)])
+        app._compute_pin_moves("basketball", [_ml("A", "B", 1.96, 2.04)])
+        app._compute_pin_moves("basketball", [_ml("A", "B", 2.04, 1.96)])
+        app._compute_pin_moves("basketball", [_ml("A", "B", 2.00, 2.00)])
+        assert app._recent_moves["basketball"] == []
+
+    def test_market_missing_one_cycle_keeps_anchor(self):
+        app._compute_pin_moves("basketball", [_ml("A", "B", 2.00, 2.00, eid="m1")])
+        # m1 vanishes for a cycle (suspension flicker) ...
+        app._compute_pin_moves("basketball", [_ml("C", "D", 1.9, 1.9, eid="m2")])
+        # ... and returns moved: the original anchor must still be there.
+        app._compute_pin_moves("basketball", [_ml("A", "B", 1.70, 2.40, eid="m1")])
+        moves = [m for m in app._recent_moves["basketball"] if m["match_label"] == "A — B"]
+        assert len(moves) == 1
+        assert moves[0]["old_odds"] == 2.00
+
+    def test_move_carries_max_stake(self):
+        rich = _ml("A", "B", 2.0, 2.0)
+        rich.max_stake = 750.0
+        app._compute_pin_moves("basketball", [rich])
+        moved = _ml("A", "B", 1.70, 2.40)
+        moved.max_stake = 900.0
+        app._compute_pin_moves("basketball", [moved])
+        m = app._recent_moves["basketball"][0]
+        assert m["max_stake"] == 900.0     # the CURRENT limit, not the baseline's

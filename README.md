@@ -99,7 +99,7 @@ SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboa
 |----------------------------|---------------|--------------|
 | `SPORTS`                   | all-full      | Per-sport mode: `sport:mode` comma-separated. Modes: `full` (CB+Pin+detail), `list` (CB list-view only, no alt-lines), `off`. Example: `SPORTS=basketball:full,soccer:list`. |
 | `PINNACLE_POLL_SEC`        | 60            | Pinnacle poll cadence per sport. |
-| `CRYSTALBET_POLL_SEC`      | 180           | CrystalBet poll cadence per sport. |
+| `CRYSTALBET_POLL_SEC`      | 60            | CrystalBet poll cadence per sport (was 180 in the Playwright era; a browser-free list cycle is ~1-2s). |
 | `CB_TRANSPORT`             | playwright    | CB byte-mover: `playwright` (browser) or `http` (browser-free ASP.NET postbacks via curl_cffi — same data, ~10× faster detail, no Chromium; parity-verified, see `scripts/cb_parity_check.py`). |
 | `CB_HEADLESS`              | 1             | `1` = headless Chromium, `0` = headed (useful for debugging selectors). Playwright transport only. |
 | `CB_USE_SAVED`             | 0             | `1` = parse saved HTML instead of scraping. Dev mode. |

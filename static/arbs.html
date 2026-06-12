@@ -66,11 +66,12 @@
           <th class="num">Edge%</th>
           <th>Kind</th>
           <th class="num">Kelly</th>
+          <th class="num" title="Pinnacle's maxRiskStake limit on the matched market — high limits mean Pinnacle trusts its price (sharper reference); also caps the ARB partner leg">Pin max</th>
           <th title="Open the bet tracker with this opportunity prefilled"></th>
         </tr>
       </thead>
       <tbody id="opps-body">
-        <tr><td colspan="12" class="empty">loading…</td></tr>
+        <tr><td colspan="13" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -265,7 +266,7 @@ async function fetchAndRender() {
     // page, polls independently, persists seen-set in localStorage.
   } catch (e) {
     document.getElementById("opps-body").innerHTML =
-      `<tr><td colspan="12" class="empty">error loading opportunities</td></tr>`;
+      `<tr><td colspan="13" class="empty">error loading opportunities</td></tr>`;
   }
 }
 
@@ -274,7 +275,7 @@ function render() {
   document.getElementById("row-count").textContent =
     `${cache.length} row${cache.length === 1 ? "" : "s"}`;
   if (cache.length === 0) {
-    body.innerHTML = `<tr><td colspan="12" class="empty">no opportunities at current threshold</td></tr>`;
+    body.innerHTML = `<tr><td colspan="13" class="empty">no opportunities at current threshold</td></tr>`;
     return;
   }
   body.innerHTML = cache.map(o => {
@@ -331,6 +332,7 @@ function render() {
         <td class="num ${pctClass(o.edge_pct)}">${fmtPct(o.edge_pct)}</td>
         <td><span class="kind ${o.kind === '+EV' ? 'kind-ev' : 'kind-arb'}">${o.kind}</span></td>
         <td class="num">${o.kelly_stake ? o.kelly_stake.toFixed(0) : "—"}</td>
+        <td class="num dim">${o.pin_max_stake != null ? "$" + Math.round(o.pin_max_stake) : "—"}</td>
         <td style="white-space:nowrap; text-align:right;">
           <a class="log-bet-link" href="/bets.html?${prefill}" title="Log this bet">Log</a>
           <button class="row-flag-btn${isHighlighted ? ' active' : ''}"

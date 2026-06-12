@@ -257,3 +257,16 @@ class TestFindPinMatch:
         pin_other = _odds("pinnacle", "spread", {"home": 1.91, "away": 1.91},
                           line=-3.0, event_id="pin-other")
         assert _find_pin_match(cb_sp, [pin_other, pin_exact]) is pin_exact
+
+
+# ── Pinnacle max-stake passthrough (2026-06-12) ───────────────────────────────
+def test_opportunity_carries_pin_max_stake():
+    cb = _odds("crystalbet", "moneyline", {"home": 2.40, "away": 1.55})
+    pin = _odds("pinnacle", "moneyline", {"home": 1.90, "away": 1.95})
+    pin.max_stake = 525.0
+    opps = compute_opportunities([MatchedEvent(cb=[cb], pin=[pin],
+                                               home="Hawks", away="Lakers",
+                                               score=100.0)],
+                                 min_edge_pct=1.0)
+    assert opps, "expected at least one opportunity from a 2.40 vs ~1.9 fair gap"
+    assert all(o.pin_max_stake == 525.0 for o in opps)
