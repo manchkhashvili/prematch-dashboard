@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PnL — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527c" />
+  <script src="/theme.js?v=20260527"></script>
+  <style>
+    /* Read-only, shareable capital/PnL view. No edit controls on purpose —
+       safe to leave open on a second screen or share over the network. */
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 18px 40px; }
+    .cards { display: flex; gap: 14px; flex-wrap: wrap; margin: 20px 0; }
+    .card {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px 18px; min-width: 130px;
+    }
+    .card .v { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+    .card .k { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+    .pos { color: var(--good); } .neg { color: var(--bad); }
+    .chart {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 18px; margin-bottom: 20px;
+    }
+    .chart h2, .panel h2 { font-size: 12px; margin: 0 0 10px; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.06em; }
+    .panel { background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 18px; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; color: var(--text-dim); font-weight: 500; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 8px;
+      border-bottom: 1px solid var(--border); }
+    td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+    td.num, th.num { text-align: right; font-family: var(--mono); }
+    .arch { opacity: 0.45; }
+    .updated { font-size: 11px; color: var(--text-faint); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PnL &amp; Capital <span class="updated" id="updated"></span></h1>
+    <nav><a href="/bets.html">full bets page →</a></nav>
+  </header>
+  <div class="wrap">
+    <div class="cards" id="cards"><span class="dim">loading…</span></div>
+    <div class="chart">
+      <h2>Cumulative settled PnL</h2>
+      <div id="curve"></div>
+    </div>
+    <div class="panel">
+      <h2>Accounts</h2>
+      <table>
+        <thead><tr>
+          <th>Account</th><th class="num">Opening</th><th class="num">Ledger net</th>
+          <th class="num">Bet PnL</th><th class="num">Open stakes</th>
+          <th class="num">Balance</th><th class="num">Bets</th>
+        </tr></thead>
+        <tbody id="accounts"></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>Recent settled bets</h2>
+      <table>
+        <thead><tr>
+          <th>Settled</th><th>Match</th><th>Market / Side</th>
+          <th class="num">Odds</th><th class="num">Stake</th>
+          <th class="num">PnL</th><th>Result</th>
+        </tr></thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+"use strict";
+const POLL_MS = 30_000;
+
+function fmtMoney(v) {
+  if (v === null || v === undefined) return "—";
+  return (v < 0 ? "−" : "") + "$" + Math.abs(v).toFixed(2);
+}
+function cls(v) { return v > 0 ? "pos" : (v < 0 ? "neg" : ""); }
+function fmtTime(iso) { return iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") : "—"; }
+
+function curveSVG(curve, width = 900, height = 160) {
+  const pts = curve.map(c => c.pnl);
+  if (pts.length < 2) return `<span class="dim">curve appears after 2+ settled bets</span>`;
+  const mn = Math.min(0, ...pts), mx = Math.max(0, ...pts);
+  const rng = mx - mn || 1;
+  const stepX = width / (pts.length - 1);
+  const y = p => (height - 8 - ((p - mn) / rng) * (height - 16)).toFixed(1);
+  const path = pts.map((p, i) => (i ? "L" : "M") + (i * stepX).toFixed(1) + "," + y(p)).join(" ");
+  const last = pts[pts.length - 1];
+  const color = last > 0 ? "var(--good)" : (last < 0 ? "var(--bad)" : "var(--text-dim)");
+  return `<svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+    <line x1="0" x2="${width}" y1="${y(0)}" y2="${y(0)}" stroke="var(--border)" />
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" />
+  </svg>`;
+}
+
+async function refresh() {
+  try {
+    const [capR, betsR] = await Promise.all([
+      fetch("/api/capital"), fetch("/api/bets?status=settled"),
+    ]);
+    const cap = await capR.json();
+    const settled = await betsR.json();
+    const t = cap.totals;
+
+    document.getElementById("cards").innerHTML = `
+      <div class="card"><div class="v">${fmtMoney(t.equity)}</div><div class="k">Equity</div></div>
+      <div class="card"><div class="v">${fmtMoney(t.starting_capital)}</div><div class="k">Starting capital</div></div>
+      <div class="card"><div class="v ${cls(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
+      <div class="card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
+      <div class="card"><div class="v ${cls(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k">Yield</div></div>
+      <div class="card"><div class="v ${cls(t.growth_pct)}">${t.growth_pct == null ? "—" : (t.growth_pct >= 0 ? "+" : "") + t.growth_pct.toFixed(1) + "%"}</div><div class="k">Growth vs start</div></div>
+    `;
+    document.getElementById("curve").innerHTML = curveSVG(cap.pnl_curve);
+
+    document.getElementById("accounts").innerHTML = cap.accounts.map(a => `
+      <tr class="${a.archived ? "arch" : ""}">
+        <td>${a.name}${a.archived ? ' <span class="dim">(archived)</span>' : ""}</td>
+        <td class="num">${fmtMoney(a.opening)}</td>
+        <td class="num">${fmtMoney(a.ledger_net)}</td>
+        <td class="num ${cls(a.bet_pnl)}">${fmtMoney(a.bet_pnl)}</td>
+        <td class="num">${fmtMoney(a.open_stake)}</td>
+        <td class="num"><b>${fmtMoney(a.balance)}</b></td>
+        <td class="num dim">${a.n_bets}</td>
+      </tr>`).join("");
+
+    document.getElementById("recent").innerHTML = settled.slice(0, 25).map(b => {
+      const pnl = (b.payout ?? 0) - b.stake;
+      const line = (b.line === null || b.line === undefined) ? "" : ` ${b.line > 0 ? "+" : ""}${b.line}`;
+      return `<tr>
+        <td class="mono dim">${fmtTime(b.settled_at)}</td>
+        <td>${b.match_label}</td>
+        <td class="dim">${b.market_type}${line} (${b.period}) · <b>${b.side}</b></td>
+        <td class="num">${b.odds_taken.toFixed(2)}</td>
+        <td class="num">${fmtMoney(b.stake)}</td>
+        <td class="num ${cls(pnl)}">${fmtMoney(pnl)}</td>
+        <td class="dim">${b.status}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="7" class="empty">no settled bets yet</td></tr>`;
+
+    document.getElementById("updated").textContent =
+      "updated " + new Date().toLocaleTimeString() + " · refreshes every 30s";
+  } catch (e) {
+    document.getElementById("cards").innerHTML = `<span class="dim">error: ${e.message}</span>`;
+  }
+}
+
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>
