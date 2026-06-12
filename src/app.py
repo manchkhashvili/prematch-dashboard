@@ -1461,7 +1461,23 @@ async def api_create_bet(payload: dict) -> dict:
     Auto-snapshots cb_fair_at_placement, pin_fair_at_placement, and
     edge_at_placement_pct from current _state at the time of the call.
     Caller can override by including those fields explicitly in payload.
+
+    The UI sends only account_id (the merged Book/Account picker, 2026-06-12):
+    `book` is derived from the account's book_tag, and `bankroll_at_time` is
+    stamped from current capital equity instead of being typed by hand.
     """
+    if payload.get("account_id") is not None and not payload.get("book"):
+        acct = next(
+            (a for a in capital.list_accounts()
+             if a["id"] == payload["account_id"]), None,
+        )
+        payload["book"] = (acct or {}).get("book_tag") or "other"
+    if payload.get("bankroll_at_time") is None:
+        try:
+            payload["bankroll_at_time"] = capital.capital_summary()["totals"]["equity"]
+        except Exception as e:
+            log.warning("equity lookup failed at bet creation: %s", e)
+            payload["bankroll_at_time"] = 0.0
     # Compute current cb/pin if caller didn't provide them, using a synthetic
     # bet dict so we can reuse _current_odds_for_bet.
     if "pin_fair_at_placement" not in payload or "cb_fair_at_placement" not in payload:

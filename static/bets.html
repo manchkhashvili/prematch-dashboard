@@ -342,31 +342,21 @@
           <option value="under">under</option>
         </select>
       </label>
-      <label>Book
-        <select name="book" required>
-          <option value="cb">CrystalBet</option>
-          <option value="pin">Pinnacle</option>
-          <option value="other">other</option>
-        </select>
-      </label>
-      <label>Account (balance the stake flows through)
-        <select name="account_id" id="bet-account"></select>
+      <label>Book / account (stake flows through its balance)
+        <select name="account_id" id="bet-account" required></select>
       </label>
       <label>Odds taken (decimal)
         <input name="odds_taken" type="number" step="0.01" min="1.01" required />
       </label>
       <label>Stake ($)
-        <input name="stake" type="number" step="1" min="0.01" required value="20" />
-      </label>
-      <label>Bankroll at time ($)
-        <input name="bankroll_at_time" type="number" step="50" min="0" required value="500" />
-      </label>
-      <label>CB event id (optional)
-        <input name="cb_event_id" type="text" placeholder="leave blank for off-platform" />
+        <input name="stake" type="number" step="0.01" min="0.01" required value="20" />
       </label>
       <label>Kickoff (optional, ISO)
         <input name="start_time" type="text" placeholder="2026-05-28T15:00:00+00:00" />
       </label>
+      <!-- carried by the arbs/moves "Log" prefill links; not user-edited -->
+      <input name="cb_event_id" type="hidden" />
+      <input name="book" type="hidden" />
       <label class="full-row">Note
         <input name="note" type="text" placeholder="optional comment" />
       </label>
@@ -394,7 +384,7 @@
           <th>Sport</th>
           <th>Match</th>
           <th>Market / Side</th>
-          <th>Book</th>
+          <th>Account</th>
           <th class="num" title="Decimal odds taken at placement">Odds</th>
           <th class="num">Stake</th>
           <th class="num" title="Current CB decimal odds for this market+side">CB now</th>
@@ -440,7 +430,7 @@ function readFormToPayload(form) {
     o[k] = v;
   }
   // Type coercion: numbers
-  for (const k of ["line","odds_taken","stake","bankroll_at_time"]) {
+  for (const k of ["line","odds_taken","stake"]) {
     if (k in o) {
       const n = parseFloat(o[k]);
       if (isNaN(n)) delete o[k];
@@ -449,6 +439,9 @@ function readFormToPayload(form) {
   }
   if (o.account_id) o.account_id = parseInt(o.account_id, 10);
   else delete o.account_id;
+  // book + bankroll_at_time are derived server-side (account's book_tag,
+  // current equity) — only forward book if a prefill link supplied it.
+  if (!o.book) delete o.book;
   return o;
 }
 
@@ -589,7 +582,7 @@ async function fetchAndRender() {
           <td class="dim">${b.sport}</td>
           <td>${b.match_label}</td>
           <td><span class="dim">${market}</span> · <b>${b.side}</b></td>
-          <td class="dim">${b.book}</td>
+          <td class="dim">${accountName(b)}</td>
           <td class="num">${fmtNum(b.odds_taken)}</td>
           <td class="num">$${b.stake.toFixed(0)}</td>
           <td class="num">${fmtNum(b.cb_odds_now)}</td>
@@ -629,8 +622,15 @@ async function fetchAndRender() {
 
 // ── Capital / PnL tracker ──────────────────────────────────────────────────
 const capError = document.getElementById("cap-error");
-let betAccountTouched = false;  // user picked an account manually this session
 let capAccounts = [];
+
+function accountName(b) {
+  const a = capAccounts.find(x => x.id === b.account_id);
+  if (a) return a.name;
+  // legacy rows (no account_id): resolve via the book tag's account
+  const tagged = capAccounts.find(x => x.book_tag === b.book && !x.archived);
+  return tagged ? tagged.name : (b.book || "—");
+}
 
 function fmtMoney(v) {
   if (v === null || v === undefined) return "—";
@@ -663,12 +663,13 @@ function fillAccountSelect(sel, accounts, { allowEmpty = false } = {}) {
   if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
 }
 
-function syncBetAccountToBook() {
-  if (betAccountTouched) return;
-  const book = document.querySelector('#bet-form select[name="book"]').value;
-  const match = capAccounts.find(a => a.book_tag === book && !a.archived);
+function defaultBetAccount() {
+  // First population: default the merged Book/Account picker to the
+  // CrystalBet-tagged account (that's where bets are placed).
   const sel = document.getElementById("bet-account");
-  if (match) sel.value = String(match.id);
+  if (sel.dataset.defaulted) return;
+  const cb = capAccounts.find(a => a.book_tag === "cb" && !a.archived);
+  if (cb) { sel.value = String(cb.id); sel.dataset.defaulted = "1"; }
 }
 
 async function loadCapital() {
@@ -683,12 +684,24 @@ async function loadCapital() {
 
     document.getElementById("cap-cards").innerHTML = `
       <div class="cap-card"><div class="v">${fmtMoney(t.equity)}</div><div class="k">Equity</div></div>
-      <div class="cap-card"><div class="v">${fmtMoney(t.starting_capital)}</div><div class="k">Starting capital</div></div>
+      <div class="cap-card" id="card-starting" style="cursor:pointer"
+           title="Click to set starting capital (adds an 'opening' entry to an account)">
+        <div class="v">${fmtMoney(t.starting_capital)}</div>
+        <div class="k">Starting capital ✎${t.starting_capital ? "" : " — click to set"}</div>
+      </div>
       <div class="cap-card"><div class="v ${moneyClass(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
       <div class="cap-card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
       <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes">Yield</div></div>
       <div class="cap-card curve">${pnlCurveSVG(cap.pnl_curve)}</div>
     `;
+    document.getElementById("card-starting").addEventListener("click", () => {
+      const det = document.getElementById("cap-manage");
+      det.open = true;
+      const form = document.getElementById("ledger-form");
+      form.elements.kind.value = "opening";
+      det.scrollIntoView({ behavior: "smooth", block: "center" });
+      form.elements.amount.focus();
+    });
 
     document.getElementById("cap-body").innerHTML = cap.accounts.map(a => {
       const actions = a.id === null ? "" : a.archived
@@ -718,15 +731,11 @@ async function loadCapital() {
         <td><button class="settle-btn del" data-cap="del-entry" data-id="${e.id}" title="delete entry">×</button></td>
       </tr>`).join("") || `<tr><td colspan="6" class="empty">no ledger entries yet — add your starting capital with an "opening" entry</td></tr>`;
 
-    fillAccountSelect(document.getElementById("bet-account"), cap.accounts, { allowEmpty: true });
+    fillAccountSelect(document.getElementById("bet-account"), cap.accounts);
     fillAccountSelect(document.getElementById("ledger-account"), cap.accounts);
     fillAccountSelect(document.getElementById("transfer-from"), cap.accounts);
     fillAccountSelect(document.getElementById("transfer-to"), cap.accounts);
-    syncBetAccountToBook();
-
-    // Convenience: prefill the bet form's bankroll with current equity.
-    const bk = document.querySelector('#bet-form input[name="bankroll_at_time"]');
-    if (bk && !bk.dataset.touched && t.equity > 0) bk.value = t.equity.toFixed(0);
+    defaultBetAccount();
 
     // Account row actions.
     document.querySelectorAll("#cap-body button[data-cap]").forEach(btn => {
@@ -818,13 +827,6 @@ document.getElementById("transfer-form").addEventListener("submit", async (e) =>
     loadCapital();
   } catch (_) {}
 });
-
-document.getElementById("bet-account").addEventListener("change", () => {
-  betAccountTouched = true;
-});
-document.querySelector('#bet-form select[name="book"]').addEventListener("change", syncBetAccountToBook);
-document.querySelector('#bet-form input[name="bankroll_at_time"]').addEventListener(
-  "input", (e) => { e.target.dataset.touched = "1"; });
 
 prefillFromQuery();
 fetchAndRender();
