@@ -76,7 +76,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.models import Odds
-from src.scrapers import cb_detail, change_cache
+from src.scrapers import cb_detail, cb_http, change_cache
 from src.scrapers.sports import basketball, mma, soccer, tennis
 
 # Re-export basketball list-view parsers so existing imports still resolve.
@@ -99,6 +99,21 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
 )
+
+# CB_TRANSPORT env knob — which transport moves the bytes. Parsing is
+# identical either way (same list/detail HTML fed to the same parsers).
+#   "playwright" (default) — the original browser-driven path.
+#   "http"                 — browser-free ASP.NET postbacks via cb_http
+#                            (~0.3-0.5s/game detail vs ~3s, no Chromium).
+# Verified live + parity-checked 2026-06-12 (scripts/cb_parity_check.py).
+CB_TRANSPORT = os.environ.get("CB_TRANSPORT", "playwright").strip().lower()
+if CB_TRANSPORT not in ("playwright", "http"):
+    raise ValueError(
+        f"CB_TRANSPORT={CB_TRANSPORT!r} — must be 'playwright' or 'http'"
+    )
+_USE_HTTP_TRANSPORT = CB_TRANSPORT == "http"
+if _USE_HTTP_TRANSPORT:
+    log.info("CB_TRANSPORT=http — browser-free transport (no Playwright)")
 
 LEAGUE_SKIP = frozenset({"outright", "outrights"})
 
@@ -599,6 +614,7 @@ async def close_crystalbet() -> None:
     """Public teardown — call from app shutdown to free the singleton browser + all sport pages."""
     async with _browser_init_lock:
         await _close_browser_internal()
+    await cb_http.close_all()
     log.info("CB browser: closed cleanly")
 
 
@@ -858,6 +874,90 @@ async def _expand_and_parse_one(
     return odds
 
 
+async def _expand_and_parse_one_http(
+    game: _GameOnList, fetched_at: datetime, sport: Any,
+    classify: Any = None, ladder_mode: bool = False,
+) -> list[Odds]:
+    """HTTP-transport twin of _expand_and_parse_one — same parser, same
+    classification, same Odds. The ExpandDetail delta's updatePanel segments
+    contain the game's championship re-rendered with its table.game-details;
+    parse_detail_page(scope_to_event=True) scopes by data-id exactly like the
+    Playwright path's querySelector did.
+
+    Raises when no detail table came back at all (the transport-failure
+    signal, mirroring the Playwright wait_for_selector timeout) so the caller
+    marks expand_failed rather than list-only.
+    """
+    blob = await cb_http.expand_detail_html(sport.SPORT_ID, game.event_id)
+    if "game-details" not in blob:
+        raise RuntimeError(
+            f"ExpandDetail returned no detail table for {game.event_id} "
+            f"({len(blob):,}B of panels)"
+        )
+    return cb_detail.parse_detail_page(
+        blob,
+        event_id=game.event_id,
+        home=game.home, away=game.away,
+        league=game.league,
+        start_time=game.start_time,
+        fetched_at=fetched_at,
+        sport_name=sport.SPORT_NAME,
+        classify=classify or sport.classify_market_title,
+        scope_to_event=True,  # blob holds whole panels — scope by data-id
+        per_section=ladder_mode,
+    )
+
+
+async def _expand_game(
+    game: _GameOnList, fetched_at: datetime, sport: Any, page: Any,
+    classify: Any = None, ladder_mode: bool = False,
+) -> list[Odds]:
+    """Transport dispatch for one game's detail expansion."""
+    if _USE_HTTP_TRANSPORT:
+        return await _expand_and_parse_one_http(
+            game, fetched_at, sport, classify=classify, ladder_mode=ladder_mode,
+        )
+    return await _expand_and_parse_one(
+        game, fetched_at, sport, page, classify=classify, ladder_mode=ladder_mode,
+    )
+
+
+async def _refresh_list_html_for_sport(
+    sport_id: int, sport_name: str, *, headed: bool,
+) -> tuple[Any, str]:
+    """Fetch the list-view HTML via the configured transport, with the
+    standard reset-and-retry-once on failure. Returns (page, list_html);
+    page is None on the HTTP transport (expansion doesn't need it there).
+    """
+    if _USE_HTTP_TRANSPORT:
+        try:
+            return None, await cb_http.fetch_list_html(sport_id)
+        except Exception as e:
+            log.warning(
+                "CB http list fetch failed for %s (%s); re-warming session "
+                "and retrying once", sport_name, e,
+            )
+            cb_http.reset_session(sport_id)
+            return None, await cb_http.fetch_list_html(sport_id)
+
+    try:
+        page = await _ensure_page_for_sport(sport_id, headed=headed)
+        await _load_all_leagues_for_sport(page, sport_id)
+        list_html = await page.content()
+        _sport_cycle_counts[sport_id] = _sport_cycle_counts.get(sport_id, 0) + 1
+    except Exception as e:
+        log.warning(
+            "CB list-view fetch failed for %s (%s); resetting page and retrying once",
+            sport_name, e,
+        )
+        await _close_page_internal(sport_id)
+        page = await _ensure_page_for_sport(sport_id, headed=headed)
+        await _load_all_leagues_for_sport(page, sport_id)
+        list_html = await page.content()
+        _sport_cycle_counts[sport_id] = 1
+    return page, list_html
+
+
 # ── Public entry points ───────────────────────────────────────────────────────
 
 async def _fetch_for_sport(
@@ -880,22 +980,10 @@ async def _fetch_for_sport(
 
     sport_lock = _get_sport_lock(sport_id)
     async with sport_lock:
-        # ── 1. List view refresh ──
-        try:
-            page = await _ensure_page_for_sport(sport_id, headed=headed)
-            await _load_all_leagues_for_sport(page, sport_id)
-            list_html = await page.content()
-            _sport_cycle_counts[sport_id] = _sport_cycle_counts.get(sport_id, 0) + 1
-        except Exception as e:
-            log.warning(
-                "CB list-view fetch failed for %s (%s); resetting page and retrying once",
-                sport_name, e,
-            )
-            await _close_page_internal(sport_id)
-            page = await _ensure_page_for_sport(sport_id, headed=headed)
-            await _load_all_leagues_for_sport(page, sport_id)
-            list_html = await page.content()
-            _sport_cycle_counts[sport_id] = 1
+        # ── 1. List view refresh (transport-dispatched, retry-once inside) ──
+        page, list_html = await _refresh_list_html_for_sport(
+            sport_id, sport_name, headed=headed,
+        )
 
         # ── 2. Per-game extraction from list HTML ──
         games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
@@ -948,7 +1036,7 @@ async def _fetch_for_sport(
                         sport_name, i, len(games), n_ok, n_fail,
                     )
                 try:
-                    detail_odds = await _expand_and_parse_one(
+                    detail_odds = await _expand_game(
                         game, fetched_at, sport, page,
                         classify=classify_override, ladder_mode=True,
                     )
@@ -999,7 +1087,7 @@ async def _fetch_for_sport(
                 )
             if cache.needs_expansion(game.event_id, game.loadinfo):
                 try:
-                    detail_odds = await _expand_and_parse_one(
+                    detail_odds = await _expand_game(
                         game, fetched_at, sport, page,
                     )
                     if detail_odds:
@@ -1108,9 +1196,9 @@ async def fetch_crystalbet_basketball_games(
     fetched_at = datetime.now(tz=timezone.utc)
     sport_lock = _get_sport_lock(sport_id)
     async with sport_lock:
-        page = await _ensure_page_for_sport(sport_id, headed=headed)
-        await _load_all_leagues_for_sport(page, sport_id)
-        list_html = await page.content()
+        page, list_html = await _refresh_list_html_for_sport(
+            sport_id, sport.SPORT_NAME, headed=headed,
+        )
         games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
         targets = [g for g in games if g.event_id in wanted]
         log.info("CB basketball watch re-scan: %d/%d target games present",
@@ -1118,7 +1206,7 @@ async def fetch_crystalbet_basketball_games(
         out: list[Odds] = []
         for g in targets:
             try:
-                detail = await _expand_and_parse_one(
+                detail = await _expand_game(
                     g, fetched_at, sport, page,
                     classify=sport.classify_market_title_permissive,
                     ladder_mode=True,
