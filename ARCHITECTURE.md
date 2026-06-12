@@ -295,7 +295,8 @@ and the constants files. See `README.md` for the env-var table.
 
 - `PINNACLE_POLL_SEC` (default 60) — also dictates the bet-history snapshot
   resolution.
-- `CRYSTALBET_POLL_SEC` (default 180) — full-mode soccer is sensitive to
+- `CRYSTALBET_POLL_SEC` (default 60 since the browser-free transport;
+  was 180) — full-mode PLAYWRIGHT soccer is sensitive to
   this; reducing it below 120s puts noticeable load on the per-game
   detail expansion.
 - `LINE_MATCH_TOLERANCE` (`src/edge.py`, 0.01) — for matching CB and Pin

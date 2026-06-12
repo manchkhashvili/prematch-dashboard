@@ -519,7 +519,7 @@ def _build_odds_for_league(
             allowed_designations = allowed_designations | {"draw"}
 
         selections: dict[str, float] = {}
-        line: Optional[float] = None
+        points: dict[str, float] = {}
         all_sides_ok = True
         for p in prices:
             designation = (p.get("designation") or "").lower()
@@ -539,8 +539,17 @@ def _build_odds_for_league(
                 continue
             selections[designation] = dec
             pts = p.get("points")
-            if line is None and pts is not None:
-                line = float(pts)
+            if pts is not None:
+                points[designation] = float(pts)
+
+        # Line convention: ALWAYS the home side's points for spreads. Taking
+        # "first price with points" flipped the sign whenever Pinnacle listed
+        # the away price first (v2 finding #2, 2026-06-12) — a +1.5 became
+        # -1.5, silently mispairing against CB lines. Totals/team totals carry
+        # the same points on both sides, so over/under is sign-safe.
+        line: Optional[float] = points.get(
+            "home", points.get("over", points.get("under"))
+        )
 
         if not all_sides_ok:
             continue
@@ -565,6 +574,16 @@ def _build_odds_for_league(
                 continue
             # team_side guaranteed non-None by the early continue above.
 
+        # Pinnacle's own risk limit for this market (v2 finding: genuinely
+        # useful for "is this edge bet-sized worth it"; rides into the arbs
+        # and moves columns).
+        limits = mkt.get("limits") or []
+        max_stake = next(
+            (l.get("amount") for l in limits
+             if isinstance(l, dict) and l.get("type") == "maxRiskStake"),
+            None,
+        )
+
         try:
             out.append(Odds(
                 source="pinnacle",
@@ -581,6 +600,7 @@ def _build_odds_for_league(
                 raw_event_id=str(mid),
                 submarket=submarket,  # type: ignore[arg-type]
                 team_side=team_side,  # type: ignore[arg-type]
+                max_stake=max_stake,
             ))
         except ValueError as e:
             # Odds.__post_init__ rejected — should be unreachable given our

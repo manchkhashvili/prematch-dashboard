@@ -308,3 +308,42 @@ class TestLeagueBlocklist:
         assert is_skipped("NBA Outrights") is True
         assert is_skipped("USA NBA") is False
         assert is_skipped("Spain ACB") is False
+
+
+# ── Limits capture + spread line sign (v2 findings, 2026-06-12) ───────────────
+class TestLimitsAndLineSign:
+    def _by_id(self):
+        return {100: {"home": "Hawks", "away": "Lakers", "start_time": NOW}}
+
+    def test_max_stake_captured_from_limits(self):
+        mkt = _market(matchup_id=100, market_type="moneyline", period=0,
+                      prices=[{"designation": "home", "price": -110},
+                              {"designation": "away", "price": -110}])
+        mkt["limits"] = [{"amount": 400, "type": "maxRiskStake"},
+                         {"amount": 9999, "type": "other"}]
+        out = _build_odds_for_league([mkt], self._by_id(), "NBA")
+        assert len(out) == 1 and out[0].max_stake == 400
+
+    def test_no_limits_means_none(self):
+        mkt = _market(matchup_id=100, market_type="moneyline", period=0,
+                      prices=[{"designation": "home", "price": -110},
+                              {"designation": "away", "price": -110}])
+        out = _build_odds_for_league([mkt], self._by_id(), "NBA")
+        assert out[0].max_stake is None
+
+    def test_spread_line_is_homes_points_even_when_away_listed_first(self):
+        # v2 finding #2: taking points from the FIRST price flipped the sign
+        # whenever Pinnacle listed the away price first. home is +1.5 here.
+        mkt = _market(matchup_id=100, market_type="spread", period=0,
+                      prices=[{"designation": "away", "price": -120, "points": -1.5},
+                              {"designation": "home", "price": 100, "points": 1.5}])
+        out = _build_odds_for_league([mkt], self._by_id(), "NBA")
+        assert len(out) == 1
+        assert out[0].line == 1.5   # was -1.5 with the first-price bug
+
+    def test_total_line_unaffected_by_order(self):
+        mkt = _market(matchup_id=100, market_type="total", period=0,
+                      prices=[{"designation": "under", "price": -105, "points": 220.5},
+                              {"designation": "over", "price": -115, "points": 220.5}])
+        out = _build_odds_for_league([mkt], self._by_id(), "NBA")
+        assert out[0].line == 220.5

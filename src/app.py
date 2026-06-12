@@ -84,7 +84,10 @@ log = logging.getLogger(__name__)
 
 # ── Config (env-tunable) ──────────────────────────────────────────────────────
 PINNACLE_POLL_SEC = int(os.environ.get("PINNACLE_POLL_SEC", "60"))
-CRYSTALBET_POLL_SEC = int(os.environ.get("CRYSTALBET_POLL_SEC", "180"))
+# 60s default since the browser-free CB transport (2026-06-12) — a full
+# list-mode cycle is ~1-2s/sport over HTTP. Was 180s in the Playwright era;
+# override via env if running CB_TRANSPORT=playwright with full detail.
+CRYSTALBET_POLL_SEC = int(os.environ.get("CRYSTALBET_POLL_SEC", "60"))
 CB_HEADLESS = os.environ.get("CB_HEADLESS", "1") != "0"
 
 # When CB_USE_SAVED=1, skip live scraping for BOTH sports and parse the
@@ -423,12 +426,20 @@ def _move_market_label(o: Odds) -> str:
 
 
 def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
-    """Diff this cycle's Pinnacle no-vig fair probs against the previous cycle.
+    """Detect Pinnacle moves against CHANGE-ANCHORED baselines.
 
-    Stores the resulting move list in _recent_moves[sport] and updates
-    _pin_prev_fair[sport] for the next cycle. A "move" is a side whose fair
-    probability ROSE by >= _MOVE_MIN_PP points — that's the side money came
-    in on. The opposing side falls by construction; we don't double-report it.
+    A "move" is a side whose fair probability ROSE by >= _MOVE_MIN_PP points
+    since its BASELINE — the snapshot where this market last moved (or was
+    first seen) — not just since the previous poll cycle. Pinnacle's guest
+    API is poll-only (no push), so this is how "record moves when they
+    happen" translates: a creeping line (+0.8pp per cycle for three cycles)
+    surfaces as one move the moment its cumulative shift crosses the
+    threshold, with the actual time window it took (`window_sec`). Markets
+    that don't change never re-anchor and never emit. The opposing side
+    falls by construction; we don't double-report it.
+
+    Stores the move list in _recent_moves[sport] and the baselines in
+    _pin_prev_fair[sport].
     """
     # Build current fair-prob + posted-odds map keyed by market.
     current: dict[tuple, dict] = {}
@@ -446,6 +457,7 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
             "label": _move_market_label(o),
             "league": o.league,
             "start_time": o.start_time.isoformat() if o.start_time else None,
+            "max_stake": o.max_stake,
             # Structured market spec — drives the Log-bet prefill on moves.html.
             "market_type": o.market_type,
             "period": o.period,
@@ -454,28 +466,40 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
             "team_side": o.team_side,
         }
 
-    prev = _pin_prev_fair.get(sport, {})
-    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    baselines = _pin_prev_fair.get(sport, {})
+    now = datetime.now(tz=timezone.utc)
+    now_iso = now.isoformat()
     moves: list[dict] = []
+    new_baselines: dict = {}
 
     for key, cur in current.items():
-        old = prev.get(key)
-        if not old:
-            continue  # market unseen last cycle — no move to compute
+        base = baselines.get(key)
+        if not base:
+            # First sighting — anchor here, nothing to compare yet.
+            new_baselines[key] = {
+                "fair_prob": cur["fair_prob"], "odds": cur["odds"], "ts": now_iso,
+            }
+            continue
+        fired = False
         for side, new_prob in cur["fair_prob"].items():
-            old_prob = old["fair_prob"].get(side)
+            old_prob = base["fair_prob"].get(side)
             if old_prob is None:
                 continue
             delta_pp = (new_prob - old_prob) * 100.0
             if delta_pp < _MOVE_MIN_PP:
                 continue  # only surface the side that strengthened
+            fired = True
+            try:
+                window_sec = int((now - datetime.fromisoformat(base["ts"])).total_seconds())
+            except (ValueError, KeyError):
+                window_sec = None
             moves.append({
                 "sport": sport,
                 "match_label": f"{cur['home']} — {cur['away']}",
                 "market": cur["label"],
                 "league": cur.get("league"),
                 "side": side,
-                "old_odds": old["odds"].get(side),
+                "old_odds": base["odds"].get(side),
                 "new_odds": cur["odds"].get(side),
                 # No-vig fair DECIMAL odds at the current snapshot (1/fair_prob).
                 # Computed from the unrounded prob for precision. The gap
@@ -485,6 +509,8 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
                 "old_prob_pct": round(old_prob * 100.0, 2),
                 "new_prob_pct": round(new_prob * 100.0, 2),
                 "delta_pp": round(delta_pp, 2),
+                "window_sec": window_sec,
+                "max_stake": cur.get("max_stake"),
                 "start_time": cur["start_time"],
                 "recorded_at": now_iso,
                 # Structured spec for the Log-bet prefill (Phase 5.4).
@@ -494,11 +520,32 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
                 "submarket": cur["submarket"],
                 "team_side": cur["team_side"],
             })
+        if fired:
+            # Move emitted — re-anchor at the current snapshot so the next
+            # move measures from here.
+            new_baselines[key] = {
+                "fair_prob": cur["fair_prob"], "odds": cur["odds"], "ts": now_iso,
+            }
+        else:
+            # Below threshold — keep the anchor so slow drift accumulates.
+            new_baselines[key] = base
+
+    # Markets that vanished from this cycle (kickoff, suspension): keep their
+    # baseline for up to an hour so a transient gap doesn't reset the anchor.
+    cutoff_baseline = now - timedelta(seconds=_HOUR_WINDOW_SEC)
+    for key, base in baselines.items():
+        if key in new_baselines:
+            continue
+        try:
+            if datetime.fromisoformat(base["ts"]) >= cutoff_baseline:
+                new_baselines[key] = base
+        except (ValueError, KeyError):
+            continue
 
     # Phase 5.3: accumulate into a rolling window instead of overwriting.
     # Append this cycle's moves to whatever's still within the retention
     # window, then drop anything older than _MOVE_RETENTION_SEC.
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=_MOVE_RETENTION_SEC)
+    cutoff = now - timedelta(seconds=_MOVE_RETENTION_SEC)
     kept: list[dict] = []
     for m in _recent_moves.get(sport, []) + moves:
         try:
@@ -507,11 +554,7 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
         except (ValueError, KeyError):
             continue  # malformed timestamp — drop it
     _recent_moves[sport] = kept
-    # Persist current as previous for the next cycle (only the fields we diff).
-    _pin_prev_fair[sport] = {
-        k: {"fair_prob": v["fair_prob"], "odds": v["odds"]}
-        for k, v in current.items()
-    }
+    _pin_prev_fair[sport] = new_baselines
 
     # Phase 5.6: append this cycle's MONEYLINE fair/odds to the 1h series,
     # then prune. Used by the cumulative ("net over 1h") view.
@@ -1837,6 +1880,7 @@ def _opp_to_dict(o) -> dict:
         "submarket": o.submarket,
         "team_side": o.team_side,
         "league": o.league,
+        "pin_max_stake": o.pin_max_stake,
     }
 
 
