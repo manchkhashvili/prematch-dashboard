@@ -363,6 +363,7 @@ function render() {
     tr.addEventListener("click", (ev) => {
       if (ev.target.closest("a.log-bet-link")) return;
       if (ev.target.closest("button.row-flag-btn")) return;
+      if (ev.target.closest("button.chart-btn")) return;  // open chart, don't navigate
       window.location.href = `/matches.html#match-${eid}`;
     });
   });
