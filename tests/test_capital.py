@@ -195,6 +195,20 @@ def test_current_capital_applies_book_fee(clean_db):
     assert s["totals"]["withdrawal_fee_pct"] == 6.0
 
 
+def test_total_gross_is_starting_plus_pnl(clean_db):
+    # Total (gross) = starting + PnL, valuing open bets at stake = equity + open.
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "opening", 1000)
+    w = _bet(account_id=cb, stake=100, odds_taken=2.0); bets.settle_bet(w, "won")  # +100
+    _bet(account_id=cb, stake=200)               # open
+    t = capital.capital_summary()["totals"]
+    # starting 1000 + settled pnl 100 = 1100 (open stake is part of that)
+    assert t["total_gross"] == 1100.0
+    assert t["total_gross"] == round(t["equity"] + t["open_exposure"], 2)
+    # net applies 6% to the whole book total (1100): 1100 * 0.94
+    assert t["current_capital"] == pytest.approx(1034.0)
+
+
 def test_current_capital_includes_open_bet_stakes(clean_db):
     # current capital = (book balance + open bets) * 0.94 — the open stake is
     # still book money that the fee hits on withdrawal.
