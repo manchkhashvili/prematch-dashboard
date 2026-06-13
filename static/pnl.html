@@ -74,6 +74,7 @@
 <script>
 "use strict";
 const POLL_MS = 30_000;
+let pnlShowNet = false;  // Total card: false = gross (starting+pnl), true = net of withdrawal fee
 
 function fmtMoney(v) {
   if (v === null || v === undefined) return "—";
@@ -111,14 +112,23 @@ async function refresh() {
     const settled = await betsR.json();
     const t = cap.totals;
 
+    const totalVal = pnlShowNet ? t.current_capital : t.total_gross;
+    const totalLbl = pnlShowNet ? "Total − withdrawal" : "Total";
+    const totalTip = pnlShowNet
+      ? `Cash-out value: bank + (book balance + open bets) × ${(1 - (t.withdrawal_fee_pct ?? 6) / 100).toFixed(2)}. Click to show the gross total.`
+      : `All your money = starting capital + PnL (open bets at stake), before withdrawal fees. Click to show what you'd net after withdrawing from books (−${t.withdrawal_fee_pct ?? 6}%).`;
     document.getElementById("cards").innerHTML = `
-      <div class="card"><div class="v">${fmtMoney(t.current_capital)}</div><div class="k" title="Realistic cash-out value: bank balance + (book balance + open bets) × ${(1 - (t.withdrawal_fee_pct ?? 6) / 100).toFixed(2)}. Book money — free cash and stakes in open bets — loses ${t.withdrawal_fee_pct ?? 6}% gross on withdrawal; the bank is fee-free.">Current capital</div></div>
+      <div class="card" id="card-total" style="cursor:pointer" title="${totalTip}"><div class="v">${fmtMoney(totalVal)}</div><div class="k">${totalLbl} ⇄</div></div>
       <div class="card"><div class="v">${fmtMoney(t.starting_capital)}</div><div class="k">Starting capital</div></div>
       <div class="card"><div class="v ${cls(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
       <div class="card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
       <div class="card"><div class="v ${cls(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k">Yield</div></div>
       <div class="card"><div class="v ${cls(t.roi_pct ?? t.growth_pct)}">${(t.roi_pct ?? t.growth_pct) == null ? "—" : ((t.roi_pct ?? t.growth_pct) >= 0 ? "+" : "") + (t.roi_pct ?? t.growth_pct).toFixed(1) + "%"}</div><div class="k" title="settled PnL / starting capital">ROI</div></div>
     `;
+    document.getElementById("card-total").addEventListener("click", () => {
+      pnlShowNet = !pnlShowNet;
+      refresh();
+    });
     document.getElementById("curve").innerHTML = curveSVG(cap.pnl_curve);
 
     document.getElementById("accounts").innerHTML = cap.accounts.map(a => `

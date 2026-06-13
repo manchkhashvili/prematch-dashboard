@@ -772,6 +772,7 @@ function defaultBetAccount() {
 }
 
 let capWindowDays = "";  // "" = all-time; "7"/"30"/"90" = lookback days
+let capShowNet = false;  // Total card: false = gross (starting+pnl), true = net of withdrawal fee
 
 async function loadCapital() {
   try {
@@ -784,8 +785,14 @@ async function loadCapital() {
     capAccounts = cap.accounts;
     const t = cap.totals;
 
+    const totalNet = capShowNet;
+    const totalVal = totalNet ? t.current_capital : t.total_gross;
+    const totalLbl = totalNet ? `Total − withdrawal` : `Total`;
+    const totalTip = totalNet
+      ? `Cash-out value: bank balance + (book balance + open bets) × ${(1 - (t.withdrawal_fee_pct ?? 6) / 100).toFixed(2)}. Book money (free cash + open-bet stakes) loses ${t.withdrawal_fee_pct ?? 6}% gross on withdrawal; the bank is fee-free. Click to show the gross total.`
+      : `All your money = starting capital + PnL (open bets counted at stake), before any withdrawal fee. Click to show what you'd net after withdrawing from the books (−${t.withdrawal_fee_pct ?? 6}%).`;
     document.getElementById("cap-cards").innerHTML = `
-      <div class="cap-card"><div class="v">${fmtMoney(t.current_capital)}</div><div class="k" title="Realistic cash-out value: bank balance + (book balance + open bets) × ${(1 - (t.withdrawal_fee_pct ?? 6) / 100).toFixed(2)}. Book money — free cash and stakes tied up in open bets — loses ${t.withdrawal_fee_pct ?? 6}% gross on withdrawal; the bank is fee-free.">Current capital</div></div>
+      <div class="cap-card" id="card-total" style="cursor:pointer" title="${totalTip}"><div class="v">${fmtMoney(totalVal)}</div><div class="k">${totalLbl} ⇄</div></div>
       <div class="cap-card" id="card-starting" style="cursor:pointer"
            title="Click to set starting capital (adds an 'opening' entry to an account)">
         <div class="v">${fmtMoney(t.starting_capital)}</div>
@@ -798,6 +805,10 @@ async function loadCapital() {
       <div class="cap-card"><div class="v">${t.n_open ?? 0} <span style="color:var(--text-dim);font-size:12px">/ ${t.n_bets ?? 0}</span></div><div class="k" title="open / total bets">Bets open / total</div></div>
       <div class="cap-card curve">${pnlCurveSVG(cap.pnl_curve)}</div>
     `;
+    document.getElementById("card-total").addEventListener("click", () => {
+      capShowNet = !capShowNet;
+      loadCapital();
+    });
     document.getElementById("card-starting").addEventListener("click", () => {
       const det = document.getElementById("cap-manage");
       det.open = true;

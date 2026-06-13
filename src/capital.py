@@ -423,6 +423,9 @@ def capital_summary(since: Optional[str] = None) -> dict:
         "totals": {
             "starting_capital": round(starting, 2),
             "equity": round(equity, 2),
+            # Total = all money valuing open bets at stake = starting + PnL
+            # (gross, no withdrawal fee). current_capital nets the book fee.
+            "total_gross": round(equity + open_exposure, 2),
             "current_capital": round(current_capital, 2),
             "withdrawal_fee_pct": WITHDRAWAL_FEE_PCT,
             "settled_pnl": round(win_pnl, 2),
