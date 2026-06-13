@@ -180,28 +180,40 @@ def test_total_stake_and_open_stake_money(clean_db):
     assert s["totals"]["total_stake"] == 100.0
 
 
-def test_balance_after_withdraw_applies_book_fee(clean_db):
-    # Bank (no tag) is fee-free; books lose 6% gross on their positive balance.
+def test_current_capital_applies_book_fee(clean_db):
+    # Bank (no tag) is fee-free; books lose 6% gross on their balance.
     bank = capital.add_account("Bank")          # no book_tag
     cb = capital.add_account("CB", "cb")         # book → fee
     capital.add_entry(bank, "opening", 2000)
     capital.add_entry(cb, "opening", 1000)
     s = capital.capital_summary()
     accts = {a["name"]: a for a in s["accounts"]}
-    assert accts["Bank"]["withdrawable"] == 2000.0          # fee-free
-    assert accts["CB"]["withdrawable"] == pytest.approx(940.0)  # 1000 * 0.94
+    assert accts["Bank"]["current_value"] == 2000.0          # fee-free
+    assert accts["CB"]["current_value"] == pytest.approx(940.0)  # 1000 * 0.94
     assert s["totals"]["equity"] == 3000.0
-    assert s["totals"]["balance_after_withdraw"] == pytest.approx(2940.0)
+    assert s["totals"]["current_capital"] == pytest.approx(2940.0)
     assert s["totals"]["withdrawal_fee_pct"] == 6.0
 
 
-def test_balance_after_withdraw_no_fee_on_negative_book_balance(clean_db):
+def test_current_capital_includes_open_bet_stakes(clean_db):
+    # current capital = (book balance + open bets) * 0.94 — the open stake is
+    # still book money that the fee hits on withdrawal.
     cb = capital.add_account("CB", "cb")
-    capital.add_entry(cb, "adjustment", -50)     # negative balance
+    capital.add_entry(cb, "opening", 1000)
+    _bet(account_id=cb, stake=200)               # open → balance 800, open 200
     s = capital.capital_summary()
     acct = next(a for a in s["accounts"] if a["id"] == cb)
-    # can't withdraw a negative — no fee applied
-    assert acct["withdrawable"] == -50.0
+    assert acct["balance"] == 800.0
+    assert acct["current_value"] == pytest.approx(940.0)   # (800+200)*0.94
+    assert s["totals"]["current_capital"] == pytest.approx(940.0)
+
+
+def test_current_capital_no_fee_on_negative_total(clean_db):
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "adjustment", -50)     # negative, nothing to withdraw
+    s = capital.capital_summary()
+    acct = next(a for a in s["accounts"] if a["id"] == cb)
+    assert acct["current_value"] == -50.0
 
 
 def test_roi_vs_yield_distinct(clean_db):
