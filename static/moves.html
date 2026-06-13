@@ -15,6 +15,7 @@
   <script src="/theme.js?v=20260527"></script>
   <!-- Phase 3.12: cross-page alert poller. -->
   <script src="/alerts.js?v=20260601a" defer></script>
+  <script src="/chart.js?v=20260613" defer></script>
 </head>
 <body>
   <header>
@@ -265,6 +266,19 @@ function buildMovePrefillUrl(m) {
   return "/bets.html?" + p.toString();
 }
 
+// Pinnacle-side odds-history chart button for a move row (moves carry no CB
+// id; the chart shows the Pinnacle line that moved, opened on the moved side).
+function chartCellMove(m) {
+  if (!window.chartCtxRegister || !m.pin_event_id) return "";
+  const cid = chartCtxRegister({
+    sport: m.sport, pin_src: m.pin_event_id,
+    market_type: m.market_type, period: m.period, line: m.line,
+    team_side: m.team_side, submarket: m.submarket, selection: m.side,
+    title: m.match_label, sub: m.market,
+  });
+  return `<button class="chart-btn" data-cid="${cid}" title="Pinnacle odds history">📈</button> `;
+}
+
 function render() {
   const body = document.getElementById("moves-body");
   const windowLabel = (mode === "cumulative") ? "last 1h" : "last 10 min";
@@ -274,6 +288,7 @@ function render() {
     body.innerHTML = `<tr><td colspan="12" class="empty">no moves above threshold in the ${windowLabel}</td></tr>`;
     return;
   }
+  if (window.chartCtxReset) chartCtxReset();
 
   if (mode === "cumulative") {
     body.innerHTML = cache.map(m => `
@@ -290,7 +305,7 @@ function render() {
         <td class="num mono">${fmtNum(m.first_prob_pct, 1)}% → ${fmtNum(m.last_prob_pct, 1)}%</td>
         <td class="num ${deltaClass(m.net_pp)}">${fmtSignedPp(m.net_pp)}</td>
         <td class="num dim">—</td>
-        <td><a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
+        <td>${chartCellMove(m)}<a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
       </tr>
     `).join("");
     return;
@@ -311,7 +326,7 @@ function render() {
       <td class="num mono">${fmtNum(m.old_prob_pct, 1)}% → ${fmtNum(m.new_prob_pct, 1)}%</td>
       <td class="num ${deltaClass(m.delta_pp)}" title="${m.window_sec != null ? 'shift accumulated over ' + Math.max(1, Math.round(m.window_sec / 60)) + ' min' : ''}">+${m.delta_pp.toFixed(2)}${m.window_sec != null && m.window_sec > 90 ? `<span class="dim" style="font-size:10px"> /${Math.round(m.window_sec / 60)}m</span>` : ''}</td>
       <td class="num dim">${m.max_stake != null ? "$" + Math.round(m.max_stake) : "—"}</td>
-      <td><a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
+      <td>${chartCellMove(m)}<a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
     </tr>
   `).join("");
 }

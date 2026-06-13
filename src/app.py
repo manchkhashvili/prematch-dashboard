@@ -474,6 +474,7 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
             "league": o.league,
             "start_time": o.start_time.isoformat() if o.start_time else None,
             "max_stake": o.max_stake,
+            "pin_event_id": o.raw_event_id,  # for the odds-history chart
             # Structured market spec — drives the Log-bet prefill on moves.html.
             "market_type": o.market_type,
             "period": o.period,
@@ -527,6 +528,7 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
                 "delta_pp": round(delta_pp, 2),
                 "window_sec": window_sec,
                 "max_stake": cur.get("max_stake"),
+                "pin_event_id": cur.get("pin_event_id"),
                 "start_time": cur["start_time"],
                 "recorded_at": now_iso,
                 # Structured spec for the Log-bet prefill (Phase 5.4).
@@ -590,6 +592,7 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
                     "start_time": cur["start_time"], "market_type": cur["market_type"],
                     "period": cur["period"], "line": cur["line"],
                     "submarket": cur["submarket"], "team_side": cur["team_side"],
+                    "pin_event_id": cur.get("pin_event_id"),
                 },
                 "points": [],
             }
@@ -1362,6 +1365,7 @@ def _compute_cumulative_moves(sport: str, min_move: float) -> list[dict]:
             "first_seen": first_ts,
             "last_seen": last_ts,
             "start_time": meta["start_time"],
+            "pin_event_id": meta.get("pin_event_id"),
             # structured spec for the Log-bet prefill
             "market_type": meta["market_type"], "period": meta["period"],
             "line": meta["line"], "submarket": meta["submarket"],
@@ -1639,9 +1643,18 @@ async def api_chart(
 
 # ── Capital / PnL tracker (src/capital.py) ────────────────────────────────────
 @app.get("/api/capital")
-async def api_capital() -> dict:
-    """Per-account balances + totals + cumulative settled-PnL curve."""
-    return capital.capital_summary()
+async def api_capital(
+    days: int | None = Query(None, ge=1, le=3650,
+                             description="Performance lookback window (days); omit for all-time"),
+) -> dict:
+    """Per-account balances + totals + cumulative settled-PnL curve.
+    `days` windows the performance stats (settled PnL / yield / ROI / curve);
+    balances stay all-time."""
+    since = None
+    if days is not None:
+        since = (datetime.now(tz=timezone.utc) - timedelta(days=days)) \
+            .isoformat(timespec="seconds")
+    return capital.capital_summary(since=since)
 
 
 @app.post("/api/capital/accounts")
@@ -2013,6 +2026,7 @@ def _opp_to_dict(o) -> dict:
         "team_side": o.team_side,
         "league": o.league,
         "pin_max_stake": o.pin_max_stake,
+        "pin_event_id": o.pin_event_id,
     }
 
 

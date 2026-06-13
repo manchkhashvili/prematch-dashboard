@@ -295,9 +295,15 @@ def _attribute(bet: dict, tag_to_id: dict[str, int]) -> Optional[int]:
     return tag_to_id.get(bet.get("book"))
 
 
-def capital_summary() -> dict:
+def capital_summary(since: Optional[str] = None) -> dict:
     """Everything the capital UI needs in one call: per-account balances,
-    totals, and the cumulative settled-PnL curve."""
+    totals, and the cumulative settled-PnL curve.
+
+    `since` (ISO ts) is a time filter for PERFORMANCE only — settled PnL,
+    turnover, yield, ROI and the curve count only bets settled on/after it.
+    Balances, equity, open exposure and per-account columns stay all-time /
+    current (where the money is now doesn't depend on the lookback window).
+    """
     accounts = list_accounts()
     entries = list_entries()
     all_bets = _bets.list_bets()
@@ -311,7 +317,8 @@ def capital_summary() -> dict:
     def bucket(acct_id: Optional[int]) -> dict[str, float]:
         return per.setdefault(acct_id, {
             "opening": 0.0, "ledger_net": 0.0,
-            "bet_pnl": 0.0, "open_stake": 0.0, "n_bets": 0, "n_open": 0,
+            "bet_pnl": 0.0, "open_stake": 0.0, "total_stake": 0.0,
+            "n_bets": 0, "n_open": 0,
         })
 
     for e in entries:
@@ -320,12 +327,13 @@ def capital_summary() -> dict:
         if e["kind"] == "opening":
             b["opening"] += e["amount"]
 
-    settled_events: list[tuple[str, int, float]] = []
-    total_settled_stake = 0.0
+    # (settled_at, id, pnl, stake) — windowed perf is filtered from this.
+    settled_events: list[tuple[str, int, float, float]] = []
     total_bets = total_open = 0
     for bet in all_bets:
         b = bucket(_attribute(bet, tag_to_id))
         b["n_bets"] += 1
+        b["total_stake"] += bet["stake"]
         total_bets += 1
         if bet["status"] == "open":
             b["open_stake"] += bet["stake"]
@@ -333,11 +341,10 @@ def capital_summary() -> dict:
             total_open += 1
         elif bet["payout"] is not None:
             pnl = bet["payout"] - bet["stake"]
-            b["bet_pnl"] += pnl
-            total_settled_stake += bet["stake"]
+            b["bet_pnl"] += pnl     # all-time, drives the balance
             # bet id breaks same-second settled_at ties deterministically
             settled_events.append(
-                (bet["settled_at"] or bet["placed_at"], bet["id"], pnl)
+                (bet["settled_at"] or bet["placed_at"], bet["id"], pnl, bet["stake"])
             )
 
     rows = []
@@ -349,6 +356,7 @@ def capital_summary() -> dict:
             "ledger_net": round(b["ledger_net"], 2),
             "bet_pnl": round(b["bet_pnl"], 2),
             "open_stake": round(b["open_stake"], 2),
+            "total_stake": round(b["total_stake"], 2),
             "n_bets": int(b["n_bets"]),
             "n_open": int(b["n_open"]),
             "balance": round(b["ledger_net"] + b["bet_pnl"] - b["open_stake"], 2),
@@ -362,21 +370,28 @@ def capital_summary() -> dict:
             "ledger_net": round(un["ledger_net"], 2),
             "bet_pnl": round(un["bet_pnl"], 2),
             "open_stake": round(un["open_stake"], 2),
+            "total_stake": round(un["total_stake"], 2),
             "n_bets": int(un["n_bets"]),
             "n_open": int(un["n_open"]),
             "balance": round(un["ledger_net"] + un["bet_pnl"] - un["open_stake"], 2),
         })
 
     starting = sum(r["opening"] for r in rows)
-    settled_pnl = sum(r["bet_pnl"] for r in rows)
     open_exposure = sum(r["open_stake"] for r in rows)
+    total_stake_all = sum(r["total_stake"] for r in rows)
     equity = sum(r["balance"] for r in rows)
 
-    # Cumulative settled PnL over time — deposits/withdrawals deliberately
-    # excluded: the curve shows betting results, the balances show cash.
+    # Performance (windowed by `since`): settled PnL, turnover, yield, ROI and
+    # the curve count only bets settled in the window. Deposits/withdrawals are
+    # excluded from the curve — it shows betting results, balances show cash.
     settled_events.sort(key=lambda t: (t[0], t[1]))
     curve, acc = [], 0.0
-    for ts, _bid, pnl in settled_events:
+    win_pnl = win_turnover = 0.0
+    for ts, _bid, pnl, stake in settled_events:
+        if since is not None and ts < since:
+            continue
+        win_pnl += pnl
+        win_turnover += stake
         acc += pnl
         curve.append({"ts": ts, "pnl": round(acc, 2)})
 
@@ -385,16 +400,22 @@ def capital_summary() -> dict:
         "totals": {
             "starting_capital": round(starting, 2),
             "equity": round(equity, 2),
-            "settled_pnl": round(settled_pnl, 2),
+            "settled_pnl": round(win_pnl, 2),
             "open_exposure": round(open_exposure, 2),
-            # yield = pnl over total settled stakes (turnover), the standard
-            # bettor's ROI; growth = pnl relative to starting capital.
-            "yield_pct": round(settled_pnl / total_settled_stake * 100.0, 2)
-            if total_settled_stake else None,
-            "growth_pct": round(settled_pnl / starting * 100.0, 2)
+            "total_stake": round(total_stake_all, 2),
+            # yield = pnl / turnover (settled stakes in window); the standard
+            # betting yield. ROI = pnl / starting capital — return on the
+            # bankroll you put in (total, not per book).
+            "yield_pct": round(win_pnl / win_turnover * 100.0, 2)
+            if win_turnover else None,
+            "roi_pct": round(win_pnl / starting * 100.0, 2)
+            if starting else None,
+            # back-compat alias used by older pnl.html
+            "growth_pct": round(win_pnl / starting * 100.0, 2)
             if starting else None,
             "n_bets": total_bets,
             "n_open": total_open,
+            "since": since,
         },
         "pnl_curve": curve,
     }

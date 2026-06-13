@@ -9,6 +9,7 @@
   <script src="/theme.js?v=20260527"></script>
   <!-- Phase 3.12: cross-page alert poller. -->
   <script src="/alerts.js?v=20260601a" defer></script>
+  <script src="/chart.js?v=20260613" defer></script>
   <style>
     /* Page-local: the form and per-row sparkline are unique to this page. */
     details.new-bet {
@@ -97,6 +98,13 @@
       margin-left: 10px;
     }
 
+    /* minimal settled-bet row tints: green won, red lost, blue cashout */
+    tr.bet-row-won     td:first-child { box-shadow: inset 3px 0 0 var(--good); }
+    tr.bet-row-won     { background: color-mix(in srgb, var(--good) 7%, transparent); }
+    tr.bet-row-lost    td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+    tr.bet-row-lost    { background: color-mix(in srgb, var(--bad) 7%, transparent); }
+    tr.bet-row-cashout td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    tr.bet-row-cashout { background: color-mix(in srgb, var(--accent) 8%, transparent); }
     .bets-summary {
       padding: 10px 18px 4px;
       font-size: 12px;
@@ -171,6 +179,8 @@
     .cap-head .exports { margin-left: auto; font-size: 11px; }
     .cap-head .exports a { color: var(--text-dim); margin-left: 10px; }
     .cap-head .exports a:hover { color: var(--accent); }
+    .cap-window { display: inline-flex; gap: 4px; }
+    .cap-window .chip-btn { padding: 2px 8px; }
     .cap-cards {
       display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px;
     }
@@ -224,6 +234,12 @@
     <div class="cap-head">
       <h2>Capital &amp; PnL</h2>
       <a href="/pnl.html" style="font-size:11px">read-only view ↗</a>
+      <span class="cap-window" id="cap-window" title="Performance window (settled PnL, yield, ROI, curve). Balances stay all-time.">
+        <button class="chip-btn" data-days="7">7d</button>
+        <button class="chip-btn" data-days="30">30d</button>
+        <button class="chip-btn" data-days="90">90d</button>
+        <button class="chip-btn on" data-days="">All</button>
+      </span>
       <span class="exports">export:
         <a href="/api/capital/export/summary.csv">summary.csv</a>
         <a href="/api/capital/export/ledger.csv">ledger.csv</a>
@@ -234,11 +250,11 @@
     <table class="cap-table">
       <thead>
         <tr>
-          <th>Account</th><th>Tag</th>
+          <th>Account</th>
           <th class="num">Opening</th><th class="num">Ledger net</th>
           <th class="num" title="Σ payout − stake over settled bets in this account">Bet PnL</th>
-          <th class="num" title="Stakes currently at risk (deducted from balance)">Open stakes</th>
-          <th class="num">Balance</th><th class="num" title="open / total bets attributed to this account">Open / Total</th><th></th>
+          <th class="num" title="open stake / total staked through this account (money)">Open / Total staked</th>
+          <th class="num">Balance</th><th class="num" title="open / total bets attributed to this account">Bets</th><th></th>
         </tr>
       </thead>
       <tbody id="cap-body"></tbody>
@@ -575,6 +591,18 @@ async function fetchHistoryFor(betId) {
 // Outcome buttons — shown on BOTH open and settled rows. On a settled bet the
 // current result is highlighted; clicking another re-settles it (the amount is
 // recomputed, or asked for on cash-out). This is how you "edit the outcome".
+// CB odds-history chart button for a bet (charts the CB line it was taken on).
+function chartCellBet(b) {
+  if (!window.chartCtxRegister || !b.cb_event_id) return "";
+  const cid = chartCtxRegister({
+    sport: b.sport, cb_src: b.cb_event_id,
+    market_type: b.market_type, period: b.period, line: b.line,
+    team_side: b.team_side, submarket: b.submarket, selection: b.side,
+    title: b.match_label, sub: `${b.market_type} (${b.period})`,
+  });
+  return `<button class="chart-btn" data-cid="${cid}" title="CB odds history for this market">📈</button>`;
+}
+
 function outcomeBtns(b) {
   const on = o => b.status === o ? " active" : "";
   return `
@@ -607,6 +635,7 @@ async function fetchAndRender() {
     // Fetch history in parallel for sparklines.
     const histories = await Promise.all(bets.map(b => fetchHistoryFor(b.id)));
 
+    if (window.chartCtxReset) chartCtxReset();
     tbody.innerHTML = bets.map((b, i) => {
       const hist = histories[i] || [];
       const sparkSVG = makeSparkline(hist);
@@ -618,6 +647,7 @@ async function fetchAndRender() {
       const settle = (b.status === "open")
         ? `<div class="settle-cell">
              ${outcomeBtns(b)}
+             ${chartCellBet(b)}
              <button class="settle-btn"      data-action="edit"    data-id="${b.id}" title="Edit this bet (stake, odds, market, account…)">✎</button>
              <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
            </div>`
@@ -625,11 +655,12 @@ async function fetchAndRender() {
              <span class="row-count" style="margin:0">${fmtMoney(b.payout || 0)}</span>
              ${outcomeBtns(b)}
              <button class="settle-btn"      data-action="settle" data-outcome="open" data-id="${b.id}" title="Reopen (un-settle this bet)">↺</button>
+             ${chartCellBet(b)}
              <button class="settle-btn"      data-action="edit"    data-id="${b.id}" title="Edit this bet (stake, odds, payout…)">✎</button>
              <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
            </div>`;
       return `
-        <tr>
+        <tr class="bet-row-${b.status}">
           <td class="mono dim">${fmtTime(b.placed_at)}</td>
           <td class="mono dim">${fmtTime(b.start_time)}</td>
           <td class="dim">${b.sport}</td>
@@ -740,10 +771,13 @@ function defaultBetAccount() {
   if (cb) { sel.value = String(cb.id); sel.dataset.defaulted = "1"; }
 }
 
+let capWindowDays = "";  // "" = all-time; "7"/"30"/"90" = lookback days
+
 async function loadCapital() {
   try {
+    const capUrl = "/api/capital" + (capWindowDays ? `?days=${capWindowDays}` : "");
     const [capR, ledR] = await Promise.all([
-      fetch("/api/capital"), fetch("/api/capital/ledger"),
+      fetch(capUrl), fetch("/api/capital/ledger"),
     ]);
     const cap = await capR.json();
     const ledger = await ledR.json();
@@ -759,7 +793,8 @@ async function loadCapital() {
       </div>
       <div class="cap-card"><div class="v ${moneyClass(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
       <div class="cap-card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
-      <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes">Yield</div></div>
+      <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes (turnover)">Yield</div></div>
+      <div class="cap-card"><div class="v ${moneyClass(t.roi_pct)}">${t.roi_pct == null ? "—" : (t.roi_pct >= 0 ? "+" : "") + t.roi_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / starting capital — total return on the bankroll you put in">ROI</div></div>
       <div class="cap-card"><div class="v">${t.n_open ?? 0} <span style="color:var(--text-dim);font-size:12px">/ ${t.n_bets ?? 0}</span></div><div class="k" title="open / total bets">Bets open / total</div></div>
       <div class="cap-card curve">${pnlCurveSVG(cap.pnl_curve)}</div>
     `;
@@ -779,11 +814,10 @@ async function loadCapital() {
            <button class="settle-btn del" data-cap="delete" data-id="${a.id}" title="delete (archives if it has history)">×</button>`;
       return `<tr class="${a.archived ? "arch" : ""}">
         <td>${a.name}${a.archived ? ' <span class="dim">(archived)</span>' : ""}</td>
-        <td class="dim mono">${a.book_tag || ""}</td>
         <td class="num">${fmtMoney(a.opening)}</td>
         <td class="num">${fmtMoney(a.ledger_net)}</td>
         <td class="num ${moneyClass(a.bet_pnl)}">${fmtMoney(a.bet_pnl)}</td>
-        <td class="num">${fmtMoney(a.open_stake)}</td>
+        <td class="num dim">${a.open_stake > 0 ? `<b style="color:var(--text)">${fmtMoney(a.open_stake)}</b>` : fmtMoney(0)} / ${fmtMoney(a.total_stake || 0)}</td>
         <td class="num"><b>${fmtMoney(a.balance)}</b></td>
         <td class="num dim">${a.n_open > 0 ? `<b style="color:var(--text)">${a.n_open}</b> / ` : ""}${a.n_bets}</td>
         <td>${actions}</td>
@@ -915,6 +949,16 @@ document.getElementById("transfer-form").addEventListener("submit", async (e) =>
     e.target.reset();
     loadCapital();
   } catch (_) {}
+});
+
+// Capital performance-window chips (7d / 30d / 90d / All).
+document.getElementById("cap-window").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-days]");
+  if (!btn) return;
+  capWindowDays = btn.dataset.days;
+  document.querySelectorAll("#cap-window button").forEach(b => b.classList.remove("on"));
+  btn.classList.add("on");
+  loadCapital();
 });
 
 prefillFromQuery();
