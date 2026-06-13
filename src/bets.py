@@ -335,23 +335,28 @@ def settle_bet(
     outcome: str,
     payout: float | None = None,
 ) -> bool:
-    """Mark a bet won/lost/pushed/void/cashout. If payout not given, computes:
+    """Mark a bet won/lost/pushed/void/cashout, or revert it to open. If payout
+    not given, computes:
         won     → stake × odds_taken
         lost    → 0
         pushed  → stake
         void    → stake
         cashout → no formula — the amount the book paid is REQUIRED
+        open    → un-settle (clears payout + settled_at)
+    Re-settling an ALREADY-settled bet is allowed (2026-06-13): the outcome
+    is overwritten and payout recomputed — for fixing a mis-clicked result.
     Returns True if the bet existed and was updated.
     """
-    if outcome not in ("won", "lost", "pushed", "void", "cashout"):
+    if outcome not in ("won", "lost", "pushed", "void", "cashout", "open"):
         raise ValueError(
-            f"settle outcome must be won|lost|pushed|void|cashout; got {outcome!r}"
+            f"settle outcome must be won|lost|pushed|void|cashout|open; got {outcome!r}"
         )
     bet = get_bet(bet_id)
     if not bet:
         return False
-    if bet["status"] != "open":
-        raise ValueError(f"bet {bet_id} already settled as {bet['status']}")
+    if outcome == "open":
+        # revert to open: drop payout + settled_at so PnL/balance back it out
+        return update_bet(bet_id, status="open", payout=None, settled_at=None)
     if outcome == "cashout" and payout is None:
         raise ValueError("cashout needs the amount the book paid (payout)")
     if payout is None:

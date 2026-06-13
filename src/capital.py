@@ -311,7 +311,7 @@ def capital_summary() -> dict:
     def bucket(acct_id: Optional[int]) -> dict[str, float]:
         return per.setdefault(acct_id, {
             "opening": 0.0, "ledger_net": 0.0,
-            "bet_pnl": 0.0, "open_stake": 0.0, "n_bets": 0,
+            "bet_pnl": 0.0, "open_stake": 0.0, "n_bets": 0, "n_open": 0,
         })
 
     for e in entries:
@@ -322,11 +322,15 @@ def capital_summary() -> dict:
 
     settled_events: list[tuple[str, int, float]] = []
     total_settled_stake = 0.0
+    total_bets = total_open = 0
     for bet in all_bets:
         b = bucket(_attribute(bet, tag_to_id))
         b["n_bets"] += 1
+        total_bets += 1
         if bet["status"] == "open":
             b["open_stake"] += bet["stake"]
+            b["n_open"] += 1
+            total_open += 1
         elif bet["payout"] is not None:
             pnl = bet["payout"] - bet["stake"]
             b["bet_pnl"] += pnl
@@ -346,6 +350,7 @@ def capital_summary() -> dict:
             "bet_pnl": round(b["bet_pnl"], 2),
             "open_stake": round(b["open_stake"], 2),
             "n_bets": int(b["n_bets"]),
+            "n_open": int(b["n_open"]),
             "balance": round(b["ledger_net"] + b["bet_pnl"] - b["open_stake"], 2),
         })
     un = per.get(None)
@@ -358,6 +363,7 @@ def capital_summary() -> dict:
             "bet_pnl": round(un["bet_pnl"], 2),
             "open_stake": round(un["open_stake"], 2),
             "n_bets": int(un["n_bets"]),
+            "n_open": int(un["n_open"]),
             "balance": round(un["ledger_net"] + un["bet_pnl"] - un["open_stake"], 2),
         })
 
@@ -387,6 +393,8 @@ def capital_summary() -> dict:
             if total_settled_stake else None,
             "growth_pct": round(settled_pnl / starting * 100.0, 2)
             if starting else None,
+            "n_bets": total_bets,
+            "n_open": total_open,
         },
         "pnl_curve": curve,
     }
