@@ -105,6 +105,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                     submarket=cb.submarket, team_side=cb.team_side,
                     league=cb.league,
                     pin_max_stake=pin.max_stake,
+                    pin_event_id=pin.raw_event_id,
                 ))
 
         # ── ARB pass ────────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                 submarket=cb.submarket, team_side=cb.team_side,
                 league=cb.league,
                 pin_max_stake=pin.max_stake,
+                pin_event_id=pin.raw_event_id,
             ))
 
     return opps

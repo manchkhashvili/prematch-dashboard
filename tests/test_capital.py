@@ -169,6 +169,46 @@ def test_open_and_total_bet_counts(clean_db):
     assert s["totals"]["n_bets"] == 3 and s["totals"]["n_open"] == 2
 
 
+def test_total_stake_and_open_stake_money(clean_db):
+    cb = capital.add_account("CB", "cb")
+    w = _bet(account_id=cb, stake=40); bets.settle_bet(w, "won")
+    _bet(account_id=cb, stake=60)   # open
+    s = capital.capital_summary()
+    acct = next(a for a in s["accounts"] if a["id"] == cb)
+    assert acct["total_stake"] == 100.0   # 40 settled + 60 open
+    assert acct["open_stake"] == 60.0
+    assert s["totals"]["total_stake"] == 100.0
+
+
+def test_roi_vs_yield_distinct(clean_db):
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "opening", 1000)
+    w = _bet(account_id=cb, stake=100, odds_taken=2.0); bets.settle_bet(w, "won")  # +100
+    s = capital.capital_summary()
+    # yield = 100 / 100 turnover = 100%; roi = 100 / 1000 capital = 10%
+    assert s["totals"]["yield_pct"] == pytest.approx(100.0, abs=0.01)
+    assert s["totals"]["roi_pct"] == pytest.approx(10.0, abs=0.01)
+
+
+def test_time_window_filters_performance_not_balances(clean_db):
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "opening", 500)
+    old = _bet(account_id=cb, stake=100, odds_taken=2.0)
+    bets.settle_bet(old, "won")  # +100
+    bets.update_bet(old, settled_at="2020-01-01T00:00:00+00:00")  # ancient
+    recent = _bet(account_id=cb, stake=50, odds_taken=2.0)
+    bets.settle_bet(recent, "won")  # +50, settled now
+    full = capital.capital_summary()
+    windowed = capital.capital_summary(since="2026-01-01T00:00:00+00:00")
+    # all-time: both count; windowed: only the recent one
+    assert full["totals"]["settled_pnl"] == 150.0
+    assert windowed["totals"]["settled_pnl"] == 50.0
+    # balances stay all-time in BOTH (money is where it is now)
+    assert full["totals"]["equity"] == windowed["totals"]["equity"] == 650.0
+    # windowed curve has just the recent point
+    assert len(windowed["pnl_curve"]) == 1
+
+
 def test_legacy_bets_attribute_via_book_tag(clean_db):
     cb = capital.add_account("CB", "cb")
     bid = _bet()  # account_id NULL, book='cb'

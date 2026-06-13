@@ -134,3 +134,4 @@ class Opportunity:
     team_side: str | None = None      # home | away | None (team_total)
     league: str | None = None         # CB league name — for the arbs League column
     pin_max_stake: float | None = None  # Pinnacle maxRiskStake for the matched market
+    pin_event_id: str | None = None   # Pinnacle matchup id — for the odds-history chart

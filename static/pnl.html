@@ -117,7 +117,7 @@ async function refresh() {
       <div class="card"><div class="v ${cls(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
       <div class="card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
       <div class="card"><div class="v ${cls(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k">Yield</div></div>
-      <div class="card"><div class="v ${cls(t.growth_pct)}">${t.growth_pct == null ? "—" : (t.growth_pct >= 0 ? "+" : "") + t.growth_pct.toFixed(1) + "%"}</div><div class="k">Growth vs start</div></div>
+      <div class="card"><div class="v ${cls(t.roi_pct ?? t.growth_pct)}">${(t.roi_pct ?? t.growth_pct) == null ? "—" : ((t.roi_pct ?? t.growth_pct) >= 0 ? "+" : "") + (t.roi_pct ?? t.growth_pct).toFixed(1) + "%"}</div><div class="k" title="settled PnL / starting capital">ROI</div></div>
     `;
     document.getElementById("curve").innerHTML = curveSVG(cap.pnl_curve);
 
