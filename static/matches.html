@@ -346,6 +346,12 @@ function render() {
       <td class="expand-cell">
         ${statusBadge(r.markets_status)}
         ${freshnessBadge(r.last_expanded_at)}
+        <button class="chart-btn" data-cid="${registerChartCtx({
+          sport: r.sport, cb_src: r.cb_event_id, pin_src: r.pin_event_id,
+          market_type: 'moneyline', period: 'FT', line: null,
+          team_side: null, submarket: null,
+          title: `${r.home} — ${r.away}`, sub: 'Moneyline (FT)',
+        })}" title="Odds history chart — CB + Pinnacle moneyline over time">📈 chart</button>
         <a class="log-bet-link" title="Log a bet on this match — fill in market/side/odds in the form"
            href="${buildBetPrefillUrl(r)}">Log</a>
         <button class="expand-btn" data-eid="${r.cb_event_id}">+</button>

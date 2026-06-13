@@ -171,11 +171,23 @@ def test_settle_bet_rejects_unknown_outcome(clean_db):
         bets.settle_bet(bid, "garbage")
 
 
-def test_settle_bet_cannot_resettle(clean_db):
+def test_settle_bet_can_resettle_to_fix_outcome(clean_db):
+    # 2026-06-13: re-settling an already-settled bet is allowed (mis-click fix).
+    bid = _make_bet(stake=100, odds_taken=2.0)
+    bets.settle_bet(bid, "won")
+    assert bets.get_bet(bid)["payout"] == 200.0
+    bets.settle_bet(bid, "lost")        # change the result
+    b = bets.get_bet(bid)
+    assert b["status"] == "lost" and b["payout"] == 0.0
+
+
+def test_settle_bet_reopen_clears_settlement(clean_db):
     bid = _make_bet()
     bets.settle_bet(bid, "won")
-    with pytest.raises(ValueError, match="already settled"):
-        bets.settle_bet(bid, "lost")
+    assert bets.settle_bet(bid, "open")
+    b = bets.get_bet(bid)
+    assert b["status"] == "open"
+    assert b["payout"] is None and b["settled_at"] is None
 
 
 def test_settle_bet_returns_false_for_missing(clean_db):
