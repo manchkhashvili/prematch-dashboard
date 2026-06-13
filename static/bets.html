@@ -785,7 +785,8 @@ async function loadCapital() {
     const t = cap.totals;
 
     document.getElementById("cap-cards").innerHTML = `
-      <div class="cap-card"><div class="v">${fmtMoney(t.equity)}</div><div class="k">Equity</div></div>
+      <div class="cap-card"><div class="v">${fmtMoney(t.equity)}</div><div class="k" title="capital + PnL − stakes at risk">Balance</div></div>
+      <div class="cap-card"><div class="v">${fmtMoney(t.balance_after_withdraw)}</div><div class="k" title="what you'd hold if you withdrew the free balance from every book — books lose ${t.withdrawal_fee_pct ?? 6}% gross on withdrawal; the bank is fee-free">After withdrawals</div></div>
       <div class="cap-card" id="card-starting" style="cursor:pointer"
            title="Click to set starting capital (adds an 'opening' entry to an account)">
         <div class="v">${fmtMoney(t.starting_capital)}</div>

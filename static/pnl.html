@@ -112,7 +112,8 @@ async function refresh() {
     const t = cap.totals;
 
     document.getElementById("cards").innerHTML = `
-      <div class="card"><div class="v">${fmtMoney(t.equity)}</div><div class="k">Equity</div></div>
+      <div class="card"><div class="v">${fmtMoney(t.equity)}</div><div class="k" title="capital + PnL − stakes at risk">Balance</div></div>
+      <div class="card"><div class="v">${fmtMoney(t.balance_after_withdraw)}</div><div class="k" title="what you'd hold if you withdrew the free balance from every book — books lose ${t.withdrawal_fee_pct ?? 6}% gross on withdrawal; the bank is fee-free">After withdrawals</div></div>
       <div class="card"><div class="v">${fmtMoney(t.starting_capital)}</div><div class="k">Starting capital</div></div>
       <div class="card"><div class="v ${cls(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
       <div class="card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>

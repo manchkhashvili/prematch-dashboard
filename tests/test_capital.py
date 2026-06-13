@@ -180,6 +180,30 @@ def test_total_stake_and_open_stake_money(clean_db):
     assert s["totals"]["total_stake"] == 100.0
 
 
+def test_balance_after_withdraw_applies_book_fee(clean_db):
+    # Bank (no tag) is fee-free; books lose 6% gross on their positive balance.
+    bank = capital.add_account("Bank")          # no book_tag
+    cb = capital.add_account("CB", "cb")         # book → fee
+    capital.add_entry(bank, "opening", 2000)
+    capital.add_entry(cb, "opening", 1000)
+    s = capital.capital_summary()
+    accts = {a["name"]: a for a in s["accounts"]}
+    assert accts["Bank"]["withdrawable"] == 2000.0          # fee-free
+    assert accts["CB"]["withdrawable"] == pytest.approx(940.0)  # 1000 * 0.94
+    assert s["totals"]["equity"] == 3000.0
+    assert s["totals"]["balance_after_withdraw"] == pytest.approx(2940.0)
+    assert s["totals"]["withdrawal_fee_pct"] == 6.0
+
+
+def test_balance_after_withdraw_no_fee_on_negative_book_balance(clean_db):
+    cb = capital.add_account("CB", "cb")
+    capital.add_entry(cb, "adjustment", -50)     # negative balance
+    s = capital.capital_summary()
+    acct = next(a for a in s["accounts"] if a["id"] == cb)
+    # can't withdraw a negative — no fee applied
+    assert acct["withdrawable"] == -50.0
+
+
 def test_roi_vs_yield_distinct(clean_db):
     cb = capital.add_account("CB", "cb")
     capital.add_entry(cb, "opening", 1000)
