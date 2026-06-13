@@ -158,6 +158,17 @@ def test_balance_combines_ledger_and_bets(clean_db):
     assert s["totals"]["yield_pct"] == pytest.approx(33.33, abs=0.01)
 
 
+def test_open_and_total_bet_counts(clean_db):
+    cb = capital.add_account("CB", "cb")
+    w = _bet(account_id=cb); bets.settle_bet(w, "won")
+    _bet(account_id=cb)   # open
+    _bet(account_id=cb)   # open
+    s = capital.capital_summary()
+    acct = next(a for a in s["accounts"] if a["id"] == cb)
+    assert acct["n_bets"] == 3 and acct["n_open"] == 2
+    assert s["totals"]["n_bets"] == 3 and s["totals"]["n_open"] == 2
+
+
 def test_legacy_bets_attribute_via_book_tag(clean_db):
     cb = capital.add_account("CB", "cb")
     bid = _bet()  # account_id NULL, book='cb'
