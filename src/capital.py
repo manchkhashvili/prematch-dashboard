@@ -35,6 +35,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 from typing import Any, Optional
 
 from src import bets as _bets
@@ -43,6 +44,12 @@ from src.bets import _now_iso, _require_conn, _conn_lock  # shared DB conn/lock
 log = logging.getLogger(__name__)
 
 LEDGER_KINDS = ("opening", "deposit", "withdraw", "transfer", "adjustment")
+
+# Books charge a gross commission on withdrawals (the owner's books: ~6%).
+# Applied to BOOK accounts (those with a book_tag) when valuing "what you'd
+# actually have if you pulled the money out". The Bank (no tag) is fee-free —
+# it's already your own money. Override with WITHDRAWAL_FEE_PCT.
+WITHDRAWAL_FEE_PCT = float(os.environ.get("WITHDRAWAL_FEE_PCT", "6"))
 
 # Seeded once into an empty accounts table: covers the three bets.book values
 # (so every legacy bet attributes somewhere) + the bank. Rename/delete freely.
@@ -376,10 +383,23 @@ def capital_summary(since: Optional[str] = None) -> dict:
             "balance": round(un["ledger_net"] + un["bet_pnl"] - un["open_stake"], 2),
         })
 
+    # "Balance after withdrawals": what you'd actually hold if you pulled the
+    # free balance out of every book. Book accounts (book_tag set) lose the
+    # gross withdrawal fee on positive balances; the Bank / untagged accounts
+    # are fee-free. Negative balances can't be withdrawn, so no fee there.
+    fee = WITHDRAWAL_FEE_PCT / 100.0
+    for r in rows:
+        bal = r["balance"]
+        if r.get("book_tag") and bal > 0:
+            r["withdrawable"] = round(bal * (1.0 - fee), 2)
+        else:
+            r["withdrawable"] = round(bal, 2)
+
     starting = sum(r["opening"] for r in rows)
     open_exposure = sum(r["open_stake"] for r in rows)
     total_stake_all = sum(r["total_stake"] for r in rows)
     equity = sum(r["balance"] for r in rows)
+    balance_after_withdraw = sum(r["withdrawable"] for r in rows)
 
     # Performance (windowed by `since`): settled PnL, turnover, yield, ROI and
     # the curve count only bets settled in the window. Deposits/withdrawals are
@@ -400,6 +420,8 @@ def capital_summary(since: Optional[str] = None) -> dict:
         "totals": {
             "starting_capital": round(starting, 2),
             "equity": round(equity, 2),
+            "balance_after_withdraw": round(balance_after_withdraw, 2),
+            "withdrawal_fee_pct": WITHDRAWAL_FEE_PCT,
             "settled_pnl": round(win_pnl, 2),
             "open_exposure": round(open_exposure, 2),
             "total_stake": round(total_stake_all, 2),
