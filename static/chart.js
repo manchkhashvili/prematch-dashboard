@@ -141,9 +141,11 @@
       box.innerHTML = `<div class="empty" style="padding:30px">no tick history yet for this selection — it builds up as the pollers run</div>`;
       return;
     }
-    let ymin = Math.min(...ys), ymax = Math.max(...ys);
-    if (ymax - ymin < 0.05) { ymin -= 0.03; ymax += 0.03; }
-    const pad = (ymax - ymin) * 0.1; ymin -= pad; ymax += pad;
+    // Always anchor the y-axis at 0 so the absolute scale is honest and
+    // charts are comparable to each other (a small odds wiggle reads as a
+    // small wiggle, not a full-height swing). Headroom at the top only.
+    let ymin = 0, ymax = Math.max(...ys);
+    ymax += Math.max(0.1, ymax * 0.08);
     const X = t => P.l + (W - P.l - P.r) * (t - t0) / (now - t0);
     const Y = v => P.t + (H - P.t - P.b) * (1 - (v - ymin) / (ymax - ymin));
     const step = s => {
