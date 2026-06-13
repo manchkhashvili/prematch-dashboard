@@ -9,6 +9,7 @@
   <script src="/theme.js?v=20260527"></script>
   <!-- Phase 3.12: cross-page alert poller. Defer = fine; first poll runs 2s after load. -->
   <script src="/alerts.js?v=20260601a" defer></script>
+  <script src="/chart.js?v=20260613" defer></script>
 </head>
 <body>
   <header>
@@ -278,6 +279,7 @@ function render() {
     body.innerHTML = `<tr><td colspan="13" class="empty">no opportunities at current threshold</td></tr>`;
     return;
   }
+  if (window.chartCtxReset) chartCtxReset();
   body.innerHTML = cache.map(o => {
     const partner = (o.kind === "ARB" && o.arb_partner_side && o.arb_partner_odds)
       ? `<div class="partner">+ Pin ${o.arb_partner_side} @ ${Number(o.arb_partner_odds).toFixed(2)}</div>`
@@ -334,6 +336,12 @@ function render() {
         <td class="num">${o.kelly_stake ? o.kelly_stake.toFixed(0) : "—"}</td>
         <td class="num dim">${o.pin_max_stake != null ? "$" + Math.round(o.pin_max_stake) : "—"}</td>
         <td style="white-space:nowrap; text-align:right;">
+          <button class="chart-btn" data-cid="${chartCtxRegister({
+            sport: o.sport, cb_src: o.cb_event_id, pin_src: o.pin_event_id,
+            market_type: o.market_type, period: o.period, line: o.line,
+            team_side: o.team_side, submarket: o.submarket,
+            title: o.match_label, sub: o.market,
+          })}" title="Odds history — CB + Pinnacle">📈</button>
           <a class="log-bet-link" href="/bets.html?${prefill}" title="Log this bet">Log</a>
           <button class="row-flag-btn${isHighlighted ? ' active' : ''}"
                   data-action="highlight" data-key="${key}"
