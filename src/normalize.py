@@ -59,6 +59,44 @@ def has_youth_tag(name: str) -> bool:
 _WHITESPACE = re.compile(r"\s+")
 _NON_ALNUM = re.compile(r"[^a-z0-9 ]")
 
+# Cyrillic → Latin transliteration (2026-06-15, for Lider-Bet).
+# Lider-Bet sometimes returns competitor names in Russian even at lang=en
+# (e.g. the away side "Нуэва Чикаго" for Pinnacle's "Nueva Chicago"). Without
+# this, the NFD→[a-z0-9] pipeline below strips every Cyrillic char and the name
+# normalizes to "" — unmatchable. Transliterating first turns it into a Latin
+# approximation ("nueva chikago") that rapidfuzz can still pair with Pinnacle's
+# spelling ("nueva chicago") at a high token_set_ratio. The exact cross-book
+# (Lider↔Betlive) join uses the SportRadar id instead and bypasses this; this
+# map only rescues the name-only fallback (any local book ↔ Pinnacle, since
+# Pinnacle exposes no SportRadar id). Standard BGN/PCGN-ish scheme; covers
+# Russian/Ukrainian/Serbian Cyrillic. Multi-char outputs (zh, kh, ch, …) are
+# fine — downstream tokenization is whitespace-only.
+_CYRILLIC_MAP = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "ґ": "g", "д": "d", "е": "e",
+    "ё": "e", "є": "ie", "ж": "zh", "з": "z", "и": "i", "і": "i", "ї": "i",
+    "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p",
+    "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts",
+    "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "", "ы": "y", "ь": "", "э": "e",
+    "ю": "yu", "я": "ya", "ђ": "dj", "ј": "j", "љ": "lj", "њ": "nj",
+    "ћ": "c", "џ": "dz",
+}
+
+
+def transliterate_cyrillic(name: str) -> str:
+    """Romanize any Cyrillic in `name`; pass non-Cyrillic chars through.
+
+    No-op (returns the input unchanged) when there's no Cyrillic, so Latin
+    names — every CrystalBet/Pinnacle/Betlive name — are untouched.
+
+    >>> transliterate_cyrillic("Нуэва Чикаго")
+    'nueva chikago'
+    >>> transliterate_cyrillic("Nueva Chicago")
+    'Nueva Chicago'
+    """
+    if not name or not any("Ѐ" <= c <= "ӿ" for c in name):
+        return name
+    return "".join(_CYRILLIC_MAP.get(c.lower(), c) for c in name)
+
 # Alias file lives next to this module.
 ALIASES_PATH = Path(__file__).resolve().parent / "team_aliases.yaml"
 
@@ -133,6 +171,7 @@ def normalize_tennis_name(name: str) -> str:
     """
     if not name:
         return ""
+    name = transliterate_cyrillic(name)
     nfd = unicodedata.normalize("NFD", name)
     ascii_approx = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
 
@@ -175,6 +214,7 @@ def normalize_team(name: str) -> str:
     aliases = _load_aliases()
     key = name.strip().lower()
     aliased = aliases[key] if key in aliases else name
+    aliased = transliterate_cyrillic(aliased)
     nfd = unicodedata.normalize("NFD", aliased)
     ascii_approx = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
     lower = ascii_approx.lower()

@@ -664,3 +664,10 @@ tr.opp-row.user-muted.user-hidden {
   color: var(--text);
   border-color: var(--text-dim);
 }
+
+/* Cross-book grid: bold the best (highest) price per side across books. */
+.best-book {
+  font-weight: 700;
+  color: var(--good-bold);
+  background: var(--good-bg-soft);
+}

@@ -44,6 +44,87 @@ Now keep scrolling for the dated history.
 
 ---
 
+## 2026-06-15 — Multi-book: Lider-Bet + Betlive added (each vs Pinnacle + cross-book)
+
+Added two more Georgian soft books alongside CrystalBet, all compared to
+Pinnacle (the sharp reference) and to each other. **Entirely env-gated and
+default-off** — with no flags the pipeline is byte-identical to CB-vs-Pin
+(`SOFT_BOOKS=('cb',)`, sport-state keys `['cb','pin']`, no extra pollers). Turn
+on with `LIDERBET=1` / `BETLIVE=1` (lowercase accepted); `EXTRA_BOOK_POLL_SEC`
+(default 120) sets their cadence. 625 tests pass (+11 new).
+
+**Scraping references written first:** `docs/liderbet.md`, `docs/betlive.md`
+(full browser-free protocols). Lider-Bet = React SPA + JSON at
+`sports.lider-bet.com/services/pre/…`; Betlive = Angular SPA behind Cloudflare,
+REST at `sportnew.betlive.com/api/…` (curl_cffi Chrome impersonation passes CF
+with no challenge). Both are plain idempotent GETs — no ASP.NET postback dance.
+
+**Matching strategy — investigated before building (the load-bearing finding):**
+- **Pinnacle's guest API exposes NO SportRadar / external id** (0 hits across
+  300 matchups: only its own `id` + participant names + `startTime`). So *any*
+  book-vs-Pinnacle leg MUST be name+time matched — an id-join to Pinnacle is
+  impossible.
+- **Lider's `sr:match:N` == Betlive's `providerEventId`** (both the bare
+  SportRadar match id, verified identical on a shared fixture = `71792526`).
+  So the cross-book (local↔local) join is EXACT on the SR id. Live: **238 exact
+  Lider↔Betlive joins** on soccer, including ones name-matching would miss —
+  e.g. Lider `Уотерфорд` (Cyrillic) ↔ Betlive `Waterford`, and
+  `Saint Patrick´s Athletic FC` ↔ `St. Patricks`.
+- **Cyrillic root cause:** Lider sometimes returns competitor names in Russian
+  even at `lang=en`; `normalize_team()`'s NFD→`[a-z0-9]` step stripped every
+  Cyrillic char → the name normalized to `""` → unmatchable. Fixed with
+  `transliterate_cyrillic()` (Cyrillic→Latin BGN/PCGN-ish; Latin names pass
+  through untouched). "Нуэва Чикаго"→"nueva chikago" now fuzzy-matches
+  Pinnacle's "Nueva Chicago" at 92%.
+- Net rule (tested, per the owner's "id-join if it's true matches and higher
+  yield, else transliterate"): **SR-id join for cross-book** (exact, immune to
+  Cyrillic), **name+time + transliteration for vs-Pinnacle** (no id available).
+- Betlive `providerEventId` is only an SR id when `providerId == 14` (the SR
+  feed); esports/virtual feeds (providerId 19) are gated out so they never
+  produce a false cross-book join.
+
+**Code:**
+- `src/scrapers/liderbet.py` — 3 sports, FT moneyline/total/spread from the
+  curated list view, `sr_match_id` set. Full alt-line ladder available via the
+  batchable `…/matchData/details?matchIds=` (not used in list mode).
+- `src/scrapers/betlive.py` — 3 sports, **moneyline only** from the list view.
+  Totals/handicaps come back as null-outcome placeholders that only load via
+  per-event `getPrematchEvent` (Betlive's "detail" call, like CB ExpandDetail) —
+  the total/spread parser is wired but dormant. `startDate` is **.NET ticks
+  (UTC)**. sr_match_id gated to providerId 14.
+- `src/normalize.py` — `transliterate_cyrillic()` + applied in both normalizers.
+- `src/models.py` — `Source` extended; optional `sr_match_id` on `Odds`.
+- `src/app.py` — env-gated book registry (`EXTRA_BOOKS`/`SOFT_BOOKS`), generic
+  `_extra_book_loop_for_sport` poller, `/api/opportunities?book=` (every opp now
+  tagged with `book`), `/api/cross_arbs` (sr-id book-vs-book lock),
+  `/api/cross_book` (Pinnacle-anchored best-line grid: +EV vs Pin fair + arb).
+- Frontend: book filter + Book column on `arbs.html`; new **Cross-book tab**
+  (`static/cross-book.html`) — best price per side across books, +EV vs Pinnacle
+  devig, arb badge; nav link added to all pages; `.best-book` style.
+- Tests: `test_normalize_cyrillic.py` (5), `test_cross_book_arbs.py` (3),
+  `test_cross_book_grid.py` (3).
+
+**Extended-vs-list polling cost** (benchmark, see `docs/performance.md` §
+"Multi-book: extended vs list" for the table). Per full 3-sport cycle, extended
+(every event's full ladder) over list: **Lider ~7× time** (details batch
+10/req — cheap), **Betlive ~16×** (1 req/event, tiny JSON), **CrystalBet ~133×**
+(~670 MB, ~18 min serial / ~2 min @conc10 — each game is a heavy ExpandDetail
+postback). CB dominates ~90% of the cost; its production change-cache makes
+steady-state far cheaper than this cold-full projection.
+
+**Known gaps (not regressions):**
+1. Betlive contributes moneyline only until per-event detail is wired — so
+   cross-book totals/spreads are mostly CB-vs-Lider for now.
+2. Cross-book arbs found **0 positive** at build time (rare/fleeting — the
+   machinery is unit-tested with a synthetic +4.76% arb and finds candidate
+   markets live).
+3. The `scripts/probe_liderbet.py`, `scripts/probe_betlive.py`,
+   `scripts/bench_extended_vs_list.py` reproducers live under `/scripts/`, which
+   is **gitignored** (dev/research helpers, local-only) — their findings are
+   captured in the tracked docs above.
+
+---
+
 ## 2026-05-31 — Phase 6: Anomalies tab + hourly scanner (separate full scan)
 
 Wires the CB ladder anomaly detector (built earlier today) into the dashboard

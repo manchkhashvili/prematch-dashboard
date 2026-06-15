@@ -345,7 +345,18 @@ organized by component:
 - **Doubles tennis** is partially supported. Same-pair detection via the
   surname-sorted normalizer; mixed partner orderings work but Pinnacle
   often doesn't list doubles at all.
-- **No multi-book.** Only CB vs Pin. Adding a second book would require a
-  scraper module + extending the matcher's pair logic.
+- **Multi-book (2026-06-15).** Beyond CB, two more Georgian soft books —
+  Lider-Bet (`src/scrapers/liderbet.py`) and Betlive
+  (`src/scrapers/betlive.py`), both browser-free JSON (see `docs/liderbet.md`,
+  `docs/betlive.md`) — can be enabled with `LIDERBET=1` / `BETLIVE=1`. Each is
+  matched vs Pinnacle exactly like CB (every `/api/opportunities` row carries a
+  `book` tag; filter on the Arbs page) and cross-book against the others. Two
+  cross-book paths: `/api/cross_arbs` (exact lock joined on the SportRadar match
+  id — Lider's `sr:match:N` equals Betlive's `providerEventId`) and
+  `/api/cross_book` (the Cross-book tab: best price per side across books, +EV
+  vs Pinnacle's devigged fair + arb badge). Default-off is byte-identical to the
+  CB-vs-Pin pipeline. Pinnacle exposes no SR id, so its leg stays name+time
+  matched — with Cyrillic→Latin transliteration in `src/normalize.py` for
+  Lider's occasionally-Russian competitor names.
 - **3-way ARB not emitted.** Vanishingly rare within a single book; the
   +EV pass still surfaces per-side opportunities.

@@ -30,6 +30,18 @@ Environment variables (dashboard mode):
     CB_HEADLESS=1             1=headless Playwright, 0=headed
     CB_USE_SAVED=0            1=parse saved CB HTML samples (dev mode)
 
+    Extra soft books (opt-in; default OFF = unchanged CB-vs-Pin pipeline):
+    LIDERBET=1                add Lider-Bet (browser-free JSON; docs/liderbet.md)
+    BETLIVE=1                 add Betlive    (browser-free JSON; docs/betlive.md)
+                              Each is matched vs Pinnacle exactly like CB (filter
+                              by book on the Arbs tab) AND against each other for
+                              cross-book arbs joined on the SportRadar match id
+                              (/api/cross_arbs). Example:
+                                CB_TRANSPORT=http ANOMALY_SCAN=1 \
+                                  SPORTS=basketball:list,soccer:list,tennis:list \
+                                  LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
+    EXTRA_BOOK_POLL_SEC=120   poll cadence for Lider-Bet / Betlive (JSON, cheap)
+
     SPORTS=                   per-sport mode, one knob to rule them all.
                               Comma-separated 'sport:mode' or 'sport_mode'.
                               Modes:

@@ -149,3 +149,35 @@ Pinnacle granularity.
 - Sustained runs (≥5 s, ≥80 samples) trusted over sub-2 s bursts.
 - All from one residential GE IP; no proxies. No rate-limiting or blocks hit
   across several hundred requests, but we did not probe abuse thresholds.
+
+---
+
+## Multi-book: extended vs list (CrystalBet, Lider-Bet, Betlive)
+
+How much MORE "extended" polling (every event's full market ladder) costs than
+"list" (curated top markets), per full 3-sport (soccer+basketball+tennis) catalog
+cycle. Measured live 2026-06-15 from a GE IP: time the list poll, sample a few
+detail fetches per book for the per-event cost, then project across the real
+event count. Reproducer (gitignored, local): `scripts/bench_extended_vs_list.py`.
+
+| Book | events | LIST reqs / MB / s | EXTENDED reqs / MB / s(serial) / s(conc10) | × reqs / MB / time |
+|---|---|---|---|---|
+| Lider-Bet  | 747 |  8 / 10 / 2.2 |  84 /  65 /   15 /   3.5 | 10× /   6× /   **7×** |
+| Betlive    | 698 | 11 / 21 / 5.9 | 709 / 269 /   94 /  14.7 | 64× /  13× /  **16×** |
+| CrystalBet | 730 |  3 /  4 / 8.2 | 733 / 669 / 1098 / 117.2 | 244× / 154× / **133×** |
+
+Detail-fetch shape decides the cost: **Lider-Bet batches 10 matches/request**
+(`…/matchData/details?matchIds=`) → extended is cheap (~7× time, ~3.5 s/cycle at
+concurrency 10). **Betlive is 1 request/event** (`getPrematchEvent?id=`, not
+batchable) but the JSON is tiny, so concurrency tames it (~15 s/cycle).
+**CrystalBet is the energy hog** — its list is one cheap request but every game
+is a separate heavy `ExpandDetail` postback (~670 MB, ~18 min serial / ~2 min at
+concurrency 10 for all three sports), ~90% of the total cost.
+
+Caveats: this is **cold/full** and **serial** is worst-case. The CB scraper's
+production change-cache only re-expands games whose odds moved, so steady-state
+CB extended is far cheaper than the projection; Lider/Betlive have no such cache
+yet. `s(conc10)` is the realistic poller figure (these books are stateless GETs;
+concurrency scales near-linearly — watch for rate limits). Practical read:
+extended for Lider (and Betlive) is ~free at sane concurrency; doing it for CB is
+what actually costs — so the cache or a longer CB extended cadence is the lever.
