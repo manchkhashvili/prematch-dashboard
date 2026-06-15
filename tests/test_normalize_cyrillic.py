@@ -48,3 +48,13 @@ def test_tennis_cyrillic_surname():
     assert fuzz.token_set_ratio(
         normalize_tennis_name("Медведев Д"), normalize_tennis_name("Daniil Medvedev")
     ) == 100
+
+
+def test_georgian_romanizes():
+    # Lider ships a few in-house tournament names only in Georgian even at
+    # lang=en (no English in the feed). They must not reach the dashboard as
+    # Georgian script — transliterate() romanizes them; Latin tails are kept.
+    from src.normalize import transliterate
+    assert transliterate("პორტუგალია. Hard ") == "portugalia. Hard "
+    assert normalize_team("დინამო თბილისი") == "dinamo tbilisi"
+    assert normalize_team("დინამო თბილისი") != ""
