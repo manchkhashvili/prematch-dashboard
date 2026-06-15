@@ -103,6 +103,9 @@ SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboa
 | `CB_TRANSPORT`             | playwright    | CB byte-mover: `playwright` (browser) or `http` (browser-free ASP.NET postbacks via curl_cffi — same data, ~10× faster detail, no Chromium; parity-verified, see `scripts/cb_parity_check.py`). |
 | `CB_HEADLESS`              | 1             | `1` = headless Chromium, `0` = headed (useful for debugging selectors). Playwright transport only. |
 | `CB_USE_SAVED`             | 0             | `1` = parse saved HTML instead of scraping. Dev mode. |
+| `LIDERBET`                 | 0 (off)       | `1` = add Lider-Bet as a soft book (browser-free JSON; see `docs/liderbet.md`). Matched vs Pinnacle like CB (filter by book on Arbs) and cross-book on the Cross-book tab. |
+| `BETLIVE`                  | 0 (off)       | `1` = add Betlive as a soft book (browser-free JSON behind Cloudflare; see `docs/betlive.md`). List view is moneyline-only for now. |
+| `EXTRA_BOOK_POLL_SEC`      | 120           | Poll cadence for Lider-Bet / Betlive (cheap JSON books). |
 | `HOST`                     | 127.0.0.1     | uvicorn bind host. |
 | `PORT`                     | 8000          | uvicorn bind port. |
 | `BETS_DB_PATH`             | `data/bets.db`| Override the SQLite path for the bet tracker. |
@@ -122,7 +125,12 @@ supersedes them when set.
   CB's price beats Pinnacle's no-vig fair; `ARB` rows lock in a guaranteed
   profit across both sides. Click any row to deep-link into the matches page.
   Right-side action buttons: `Log` (prefill the bet form), `★` (manually
-  highlight in amber), `−` (mute and dim).
+  highlight in amber), `−` (mute and dim). A book filter (CB / Lider / Betlive /
+  All) appears when extra books are enabled.
+- **`/cross-book.html`** — best price per market across your soft books, with
+  Pinnacle's no-vig fair as the reference: `Edge%` = best book vs Pinnacle fair
+  (**+EV**), and an `Arb` badge when the best opposing prices across books lock a
+  profit. Only populated when `LIDERBET=1` / `BETLIVE=1` (and/or CB) are on.
 - **`/bets.html`** — placed bets table with live CB-now / Pin-fair-now / edge
   evolution. Inline sparkline of Pin fair over time per open bet. Settle
   buttons (Won / Lost / Pushed / Void / Delete).

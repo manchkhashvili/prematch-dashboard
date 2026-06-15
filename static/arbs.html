@@ -17,6 +17,7 @@
     <nav>
       <a href="/matches.html">Matches</a>
       <a href="/arbs.html" class="active">Arbs / +EV</a>
+      <a href="/cross-book.html">Cross-book</a>
       <a href="/moves.html">Top Moves</a>
       <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html">Bets</a>
@@ -34,6 +35,12 @@
       <span class="chip on" data-kind="all">All</span>
       <span class="chip"    data-kind="+EV">+EV</span>
       <span class="chip"    data-kind="ARB">ARB</span>
+    </div>
+    <div class="chip-group" id="book-filter" title="Which soft book's price vs Pinnacle. Lider/Betlive appear only when enabled (LIDERBET=1 / BETLIVE=1).">
+      <span class="chip on" data-book="all">All books</span>
+      <span class="chip"    data-book="cb">CB</span>
+      <span class="chip"    data-book="liderbet">Lider</span>
+      <span class="chip"    data-book="betlive">Betlive</span>
     </div>
     <label>
       Min edge %
@@ -62,7 +69,8 @@
           <th>Match</th>
           <th>Market</th>
           <th>Side</th>
-          <th class="num">CB odds</th>
+          <th title="Soft book this row's price is from">Book</th>
+          <th class="num">Book odds</th>
           <th class="num" title="Pinnacle no-vig fair price for the same side as the CB bet. Differs from the matches-page 'Pin H/Pin A' columns, which show Pinnacle's vigged posted prices.">Pin fair</th>
           <th class="num">Edge%</th>
           <th>Kind</th>
@@ -72,7 +80,7 @@
         </tr>
       </thead>
       <tbody id="opps-body">
-        <tr><td colspan="13" class="empty">loading…</td></tr>
+        <tr><td colspan="14" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -81,6 +89,7 @@
 const POLL_MS = 30_000;
 let cache = [];
 let kindFilter = "all";
+let bookFilter = "all";
 const minEdgeInput = document.getElementById("min-edge");
 const alertEnabled = document.getElementById("alert-enabled");
 const alertThreshold = document.getElementById("alert-threshold");
@@ -90,6 +99,14 @@ document.querySelectorAll("#kind-filter .chip").forEach(chip => {
     document.querySelectorAll("#kind-filter .chip").forEach(c => c.classList.remove("on"));
     chip.classList.add("on");
     kindFilter = chip.dataset.kind;
+    fetchAndRender();
+  });
+});
+document.querySelectorAll("#book-filter .chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll("#book-filter .chip").forEach(c => c.classList.remove("on"));
+    chip.classList.add("on");
+    bookFilter = chip.dataset.book;
     fetchAndRender();
   });
 });
@@ -255,6 +272,7 @@ async function fetchAndRender() {
   const minEdge = parseFloat(minEdgeInput.value || "1");
   const params = new URLSearchParams({ min_edge: minEdge });
   if (kindFilter !== "all") params.set("kind", kindFilter);
+  if (bookFilter !== "all") params.set("book", bookFilter);
   try {
     // Fetch opportunities and bet list in parallel — both are needed before render.
     const [oppsRes] = await Promise.all([
@@ -267,7 +285,7 @@ async function fetchAndRender() {
     // page, polls independently, persists seen-set in localStorage.
   } catch (e) {
     document.getElementById("opps-body").innerHTML =
-      `<tr><td colspan="13" class="empty">error loading opportunities</td></tr>`;
+      `<tr><td colspan="14" class="empty">error loading opportunities</td></tr>`;
   }
 }
 
@@ -276,7 +294,7 @@ function render() {
   document.getElementById("row-count").textContent =
     `${cache.length} row${cache.length === 1 ? "" : "s"}`;
   if (cache.length === 0) {
-    body.innerHTML = `<tr><td colspan="13" class="empty">no opportunities at current threshold</td></tr>`;
+    body.innerHTML = `<tr><td colspan="14" class="empty">no opportunities at current threshold</td></tr>`;
     return;
   }
   if (window.chartCtxReset) chartCtxReset();
@@ -297,7 +315,7 @@ function render() {
       side: o.side || "",
       ...(o.submarket ? { submarket: o.submarket } : {}),
       ...(o.team_side ? { team_side: o.team_side } : {}),
-      book: "cb",
+      book: o.book || "cb",
       odds_taken: o.cb_odds.toFixed(2),
       stake: (o.kelly_stake && o.kelly_stake > 0) ? Math.round(o.kelly_stake) : "20",
       bankroll_at_time: "500",
@@ -329,6 +347,7 @@ function render() {
         <td>${o.match_label}</td>
         <td class="dim">${o.market}</td>
         <td>${o.side}${partner}</td>
+        <td class="dim">${o.book || "cb"}</td>
         <td class="num">${fmtNum(o.cb_odds)}</td>
         <td class="num">${fmtNum(o.pin_no_vig)}</td>
         <td class="num ${pctClass(o.edge_pct)}">${fmtPct(o.edge_pct)}</td>
