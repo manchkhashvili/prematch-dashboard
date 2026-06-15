@@ -81,21 +81,46 @@ _CYRILLIC_MAP = {
     "ћ": "c", "џ": "dz",
 }
 
+# Georgian → Latin (national romanization). Lider-Bet sometimes returns a few
+# in-house tournament / category names only in Georgian even at lang=en — these
+# have no English in the feed (verified 2026-06-15: the name is identical across
+# lang=en/ka/ru), so transliteration is the only way to keep Georgian script off
+# the dashboard. Modern Georgian has no case, so the map is single-case.
+_GEORGIAN_MAP = {
+    "ა": "a", "ბ": "b", "გ": "g", "დ": "d", "ე": "e", "ვ": "v", "ზ": "z",
+    "თ": "t", "ი": "i", "კ": "k", "ლ": "l", "მ": "m", "ნ": "n", "ო": "o",
+    "პ": "p", "ჟ": "zh", "რ": "r", "ს": "s", "ტ": "t", "უ": "u", "ფ": "p",
+    "ქ": "k", "ღ": "gh", "ყ": "q", "შ": "sh", "ჩ": "ch", "ც": "ts", "ძ": "dz",
+    "წ": "ts", "ჭ": "ch", "ხ": "kh", "ჯ": "j", "ჰ": "h",
+}
+_TRANSLIT_MAP = {**_CYRILLIC_MAP, **_GEORGIAN_MAP}
 
-def transliterate_cyrillic(name: str) -> str:
-    """Romanize any Cyrillic in `name`; pass non-Cyrillic chars through.
 
-    No-op (returns the input unchanged) when there's no Cyrillic, so Latin
-    names — every CrystalBet/Pinnacle/Betlive name — are untouched.
+def _has_nonlatin(name: str) -> bool:
+    # Cyrillic (incl. Serbian) U+0400–U+04FF / U+0490 range, Georgian U+10A0–U+10FF.
+    return any(("Ѐ" <= c <= "ӿ") or ("Ⴀ" <= c <= "ჿ") for c in name)
 
-    >>> transliterate_cyrillic("Нуэва Чикаго")
+
+def transliterate(name: str) -> str:
+    """Romanize any Cyrillic OR Georgian in `name`; pass other chars through.
+
+    No-op (returns the input unchanged) when there's no Cyrillic/Georgian, so
+    Latin names — every CrystalBet/Pinnacle/Betlive name — are untouched.
+
+    >>> transliterate("Нуэва Чикаго")
     'nueva chikago'
-    >>> transliterate_cyrillic("Nueva Chicago")
+    >>> transliterate("პორტუგალია. Hard")
+    'portugalia. Hard'
+    >>> transliterate("Nueva Chicago")
     'Nueva Chicago'
     """
-    if not name or not any("Ѐ" <= c <= "ӿ" for c in name):
+    if not name or not _has_nonlatin(name):
         return name
-    return "".join(_CYRILLIC_MAP.get(c.lower(), c) for c in name)
+    return "".join(_TRANSLIT_MAP.get(c, _TRANSLIT_MAP.get(c.lower(), c)) for c in name)
+
+
+# Back-compat alias (Cyrillic-only callers / tests predate the Georgian add).
+transliterate_cyrillic = transliterate
 
 # Alias file lives next to this module.
 ALIASES_PATH = Path(__file__).resolve().parent / "team_aliases.yaml"

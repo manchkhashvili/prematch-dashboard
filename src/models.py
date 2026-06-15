@@ -142,3 +142,7 @@ class Opportunity:
     league: str | None = None         # CB league name — for the arbs League column
     pin_max_stake: float | None = None  # Pinnacle maxRiskStake for the matched market
     pin_event_id: str | None = None   # Pinnacle matchup id — for the odds-history chart
+    # SportRadar match id of the soft-book event (None on CB). Lets the
+    # cross-book grid join Lider↔Betlive exactly, independent of the Pinnacle
+    # name-match — see /api/cross_book.
+    sr_match_id: str | None = None
