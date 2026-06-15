@@ -1501,17 +1501,139 @@ async def api_cross_arbs(
     return rows
 
 
-# ── Cross-book "best line" grid (Pinnacle-anchored) ───────────────────────────
-# The Cross-book tab. For every market that at least one soft book and Pinnacle
-# both price, line the books up side by side and pick the best price per side.
-# Pinnacle is the fair reference: +EV = best book price beats Pinnacle's
-# devigged fair; ARB = the best prices on opposing sides sum (inverse) to < 1, a
-# profit lockable across books. Books are anchored on the matched Pinnacle event
-# id, so each book's own name spelling (incl. Lider's Cyrillic) is irrelevant —
-# they were already reconciled to Pinnacle by the per-book matcher. Reuses
-# match_events + compute_opportunities (run at a floor threshold so every side
-# of every matched market comes back, not just the ones already +EV).
+# ── Cross-book "best line" grid (SportRadar-id joined) ────────────────────────
+# The Cross-book tab. Local books are joined EXACTLY on the SportRadar match id
+# (Lider's sr:match:N == Betlive's providerEventId), so the comparison works for
+# every fixture both books carry — independent of name spelling (Lider's
+# Cyrillic/Georgian) and independent of whether Pinnacle even has the match.
+# Only markets where >=2 books price a side are kept (a single-book "comparison"
+# is noise). Pinnacle is attached as the fair reference where it matched the
+# fixture (per-book name-match), giving the +EV column; markets Pinnacle lacks
+# still show the cross-book price spread + arb. CrystalBet (no SR id) is folded
+# in via the pin_event_id bridge: a CB opp's Pinnacle event maps to an SR id
+# through the SR↔Pinnacle pairs the soft books already established.
 _GRID_FLOOR = -1.0e9
+
+
+def _lk(line: float | None) -> float | None:
+    return round(line, 2) if line is not None else None
+
+
+def _cross_book_for_sport(sport: str, min_edge: float, kind: str | None) -> list[dict]:
+    pin_odds = _state[sport]["pin"]["odds"]
+
+    # 1. Per-book opps vs Pinnacle (floor → every side). Build the Pinnacle fair
+    #    lookup keyed by SR id, the SR↔pin bridge, and stash CB opps to fold in.
+    fair: dict[tuple, float] = {}           # (sr, mtype, period, line, submkt, team, side) -> fair price
+    sr_of_pin: dict[str, str] = {}          # pin_event_id -> sr_match_id
+    cb_opps: list = []
+    if pin_odds:
+        for bk in SOFT_BOOKS:
+            bk_odds = _state[sport].get(bk, {}).get("odds")
+            if not bk_odds:
+                continue
+            for o in compute_opportunities(match_events(bk_odds, pin_odds), min_edge_pct=_GRID_FLOOR):
+                if o.kind != "+EV":
+                    continue
+                if o.sr_match_id:
+                    sr_of_pin[o.pin_event_id] = o.sr_match_id
+                    fair[(o.sr_match_id, o.market_type, o.period, _lk(o.line),
+                          o.submarket, o.team_side, o.side)] = o.pin_no_vig
+                elif bk == "cb":
+                    cb_opps.append(o)
+
+    # 2. Cross-book market table from the SR-capable books' RAW odds (all shared
+    #    fixtures, Pinnacle-matched or not). base key = the market identity.
+    table: dict[tuple, dict[str, dict[str, float]]] = {}   # base -> side -> {book: odds}
+    meta: dict[str, dict] = {}                              # sr -> display meta
+    for bk in SOFT_BOOKS:
+        for od in _state[sport].get(bk, {}).get("odds") or []:
+            if not od.sr_match_id:
+                continue
+            base = (od.sr_match_id, od.market_type, od.period, _lk(od.line),
+                    od.submarket, od.team_side)
+            sides = table.setdefault(base, {})
+            for side, dec in od.selections.items():
+                if dec is None or dec <= 1.0:
+                    continue
+                bag = sides.setdefault(side, {})
+                if dec > bag.get(bk, 0.0):
+                    bag[bk] = dec
+            # Prefer Betlive's (clean English) names for display; else Lider's.
+            mslot = meta.get(od.sr_match_id)
+            if mslot is None or bk == "betlive":
+                meta[od.sr_match_id] = {"home": od.home, "away": od.away,
+                                        "league": od.league, "sport": sport,
+                                        "start_time": od.start_time.isoformat() if od.start_time else None}
+
+    # 3. Fold CrystalBet in via the SR↔pin bridge (only onto existing markets).
+    for o in cb_opps:
+        sr = sr_of_pin.get(o.pin_event_id)
+        if not sr:
+            continue
+        base = (sr, o.market_type, o.period, _lk(o.line), o.submarket, o.team_side)
+        sides = table.get(base)
+        if sides is None:
+            continue
+        bag = sides.setdefault(o.side, {})
+        if o.cb_odds > bag.get("cb", 0.0):
+            bag["cb"] = o.cb_odds
+
+    # 4. Emit — only markets with a genuine cross-book comparison (>=2 books on
+    #    some side). One row per side; best book + its +EV vs Pin fair + arb.
+    out: list[dict] = []
+    for base, sides in table.items():
+        sr, mtype, period, line_k, submkt, team_side = base
+        if not any(len(bag) >= 2 for bag in sides.values()):
+            continue
+        best = {}   # side -> (book, odds, edge|None)
+        for side, bag in sides.items():
+            bk, odds = max(bag.items(), key=lambda kv: kv[1])
+            f = fair.get((sr, mtype, period, line_k, submkt, team_side, side))
+            best[side] = (bk, odds, ((odds / f - 1.0) * 100.0) if f else None)
+        need = 3 if (mtype == "moneyline" and "draw" in sides) else 2
+        arb_pct = None
+        if len(best) >= need:
+            inv = sum(1.0 / v[1] for v in best.values())
+            if inv < 1.0:
+                arb_pct = round((1.0 - inv) * 100.0, 3)
+        evs = [v[2] for v in best.values() if v[2] is not None]
+        top_ev = max(evs) if evs else None
+        if kind == "ev" and (top_ev is None or top_ev < min_edge):
+            continue
+        if kind == "arb" and (arb_pct is None or arb_pct < min_edge):
+            continue
+        if kind is None and not ((top_ev is not None and top_ev >= min_edge)
+                                 or (arb_pct is not None and arb_pct >= min_edge)):
+            continue
+        m = meta.get(sr, {})
+        label = _market_label_for(mtype, period, line_k)
+        for side, (bk, odds, edge) in best.items():
+            f = fair.get((sr, mtype, period, line_k, submkt, team_side, side))
+            out.append({
+                "sport": sport, "sr_match_id": sr,
+                "match_label": f"{m.get('home','?')} — {m.get('away','?')}",
+                "league": m.get("league"), "start_time": m.get("start_time"),
+                "market": label, "market_type": mtype, "period": period,
+                "line": line_k, "side": side,
+                "pin_fair": round(f, 4) if f else None,
+                "prices": {b: round(v, 3) for b, v in sides[side].items()},
+                "edges": ({b: round((v / f - 1.0) * 100.0, 2) for b, v in sides[side].items()}
+                          if f else {}),
+                "best_book": bk, "best_odds": round(odds, 3),
+                "best_edge_pct": round(edge, 2) if edge is not None else None,
+                "arb_pct": arb_pct,
+            })
+    return out
+
+
+def _market_label_for(market_type: str, period: str, line: float | None) -> str:
+    base = {"moneyline": "Moneyline", "spread": "Spread",
+            "total": "Total", "team_total": "Team total"}.get(market_type, market_type)
+    parts = [base, period] if period and period != "FT" else [base]
+    if line is not None:
+        parts.append(f"{line:+g}" if market_type in ("spread",) else f"{line:g}")
+    return " ".join(parts)
 
 
 @app.get("/api/cross_book")
@@ -1521,79 +1643,20 @@ async def api_cross_book(
     kind: str | None = Query(None, pattern="^(ev|arb)$",
                              description="ev = +EV markets only; arb = lockable arbs only"),
 ) -> list[dict]:
-    """Best price across all enabled soft books per market, vs Pinnacle fair.
+    """Cross-book best-line grid, joined on the SportRadar match id.
 
-    One row per (market, side): each book's price, the best book, its +EV vs
-    Pinnacle's devigged fair, and a market-level `arb_pct` when the best
-    opposing prices lock a profit. Empty until Pinnacle + >=1 soft book overlap.
+    One row per (market, side): every book's price, the best book, its +EV vs
+    Pinnacle's devigged fair (where Pinnacle has the match), and a market-level
+    `arb_pct` when the best opposing prices lock a profit. Only markets where
+    >=2 books price a side appear. Needs >=2 soft books enabled (LIDERBET=1 /
+    BETLIVE=1, and/or CB).
     """
-    # market_key -> {"meta": {...}, "sides": {side: {"pin_fair": dec, "prices": {book: {odds, edge}}}}}
-    markets: dict[tuple, dict] = {}
-    for sport in SPORT_NAMES:
-        pin_odds = _state[sport]["pin"]["odds"]
-        if not pin_odds:
-            continue
-        for bk in SOFT_BOOKS:
-            bk_odds = _state[sport].get(bk, {}).get("odds")
-            if not bk_odds:
-                continue
-            matched = match_events(bk_odds, pin_odds)
-            for o in compute_opportunities(matched, min_edge_pct=_GRID_FLOOR):
-                if o.kind != "+EV":          # per-side rows only; skip ARB combos
-                    continue
-                mkey = (sport, o.pin_event_id, o.market_type, o.period, o.line,
-                        o.submarket, o.team_side)
-                m = markets.setdefault(mkey, {"meta": None, "sides": {}})
-                if m["meta"] is None:
-                    m["meta"] = {
-                        "sport": sport, "match_label": o.match_label,
-                        "league": o.league, "market": o.market,
-                        "market_type": o.market_type, "period": o.period,
-                        "line": o.line, "pin_event_id": o.pin_event_id,
-                        "start_time": o.start_time.isoformat() if o.start_time else None,
-                    }
-                side = m["sides"].setdefault(o.side, {"pin_fair": o.pin_no_vig, "prices": {}})
-                prev = side["prices"].get(bk)
-                if prev is None or o.cb_odds > prev["odds"]:
-                    side["prices"][bk] = {"odds": o.cb_odds, "edge": o.edge_pct}
-
     rows: list[dict] = []
-    for m in markets.values():
-        meta, sides = m["meta"], m["sides"]
-        best = {}   # side -> (book, odds, edge)
-        for side, s in sides.items():
-            if not s["prices"]:
-                continue
-            bk, p = max(s["prices"].items(), key=lambda kv: kv[1]["odds"])
-            best[side] = (bk, p["odds"], p["edge"])
-        if not best:
-            continue
-        top_ev = max(v[2] for v in best.values())
-        need = 3 if (meta["market_type"] == "moneyline" and "draw" in sides) else 2
-        arb_pct = None
-        if len(best) >= need:
-            inv = sum(1.0 / v[1] for v in best.values())
-            if inv < 1.0:
-                arb_pct = round((1.0 - inv) * 100.0, 3)
-        if kind == "ev" and top_ev < min_edge:
-            continue
-        if kind == "arb" and (arb_pct is None or arb_pct < min_edge):
-            continue
-        if kind is None and top_ev < min_edge and (arb_pct is None or arb_pct < min_edge):
-            continue
-        for side, s in sides.items():
-            if side not in best:
-                continue
-            bk, odds, edge = best[side]
-            rows.append({
-                **meta, "side": side,
-                "pin_fair": round(s["pin_fair"], 4) if s["pin_fair"] else None,
-                "prices": {b: round(p["odds"], 3) for b, p in s["prices"].items()},
-                "edges": {b: round(p["edge"], 2) for b, p in s["prices"].items()},
-                "best_book": bk, "best_odds": round(odds, 3), "best_edge_pct": round(edge, 2),
-                "arb_pct": arb_pct, "top_ev_pct": round(top_ev, 2),
-            })
-    rows.sort(key=lambda d: -max(d["best_edge_pct"], d["arb_pct"] if d["arb_pct"] is not None else -1e9))
+    for sport in SPORT_NAMES:
+        rows.extend(_cross_book_for_sport(sport, min_edge, kind))
+    rows.sort(key=lambda d: -max(
+        d["best_edge_pct"] if d["best_edge_pct"] is not None else -1e9,
+        d["arb_pct"] if d["arb_pct"] is not None else -1e9))
     return rows
 
 

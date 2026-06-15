@@ -112,6 +112,24 @@ with no challenge). Both are plain idempotent GETs — no ASP.NET postback dance
 postback). CB dominates ~90% of the cost; its production change-cache makes
 steady-state far cheaper than this cold-full projection.
 
+**Follow-up fixes (same day, after live review):**
+- **Georgian names.** A few Lider in-house tournament names come back Georgian
+  even at `lang=en` (verified: identical across en/ka/ru — no English exists in
+  the feed; the site's "English switch" is just `lang=en`, which I already use).
+  Generalized `transliterate_cyrillic` → `transliterate` (Cyrillic **+ Georgian**)
+  and applied it to Lider's display fields (home/away/league) so no non-Latin
+  script reaches the dashboard. "პორტუგალია. Hard" → "portugalia. Hard".
+- **Cross-book was useless (single-book noise).** The Pinnacle-anchored grid was
+  88% single-book rows (one book matched Pinnacle, the other didn't) — the live
+  screenshot showed CB-only rows with Lider/Betlive empty. Rebuilt
+  `/api/cross_book` to **join local books on the SportRadar id** (exact, name-
+  independent) and **drop any market without ≥2 books**. Pinnacle fair is
+  attached for the +EV column where it matched the fixture; CB (no SR id) folds
+  in via a pin_event_id↔sr bridge. Added `sr_match_id` to `Opportunity`
+  (edge.py) to carry it through. Live: 379 rows, **0 CB-only, 0 non-Latin**, all
+  Lider↔Betlive comparisons. NB Lider & Betlive share the SR odds feed so their
+  prices are often identical — the useful divergence is CB-vs-them.
+
 **Known gaps (not regressions):**
 1. Betlive contributes moneyline only until per-event detail is wired — so
    cross-book totals/spreads are mostly CB-vs-Lider for now.

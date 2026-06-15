@@ -32,6 +32,7 @@ import re
 from datetime import datetime, timezone
 
 from src.models import Odds
+from src.normalize import transliterate
 
 log = logging.getLogger(__name__)
 
@@ -118,10 +119,13 @@ def _parse_match(
 ) -> list[Odds]:
     home = (ancestors.get(m.get("homeId"), {}) or {}).get("name") or ""
     away = (ancestors.get(m.get("awayId"), {}) or {}).get("name") or ""
-    home, away = home.strip(), away.strip()
+    # Romanize for display — Lider ships some names in Russian/Georgian even at
+    # lang=en (no English exists in the feed). transliterate() is a no-op on the
+    # Latin majority. The matcher re-normalizes anyway, so this is display-safe.
+    home, away = transliterate(home.strip()), transliterate(away.strip())
     if not home or not away:
         return []
-    league = (ancestors.get(m.get("tourId"), {}) or {}).get("name")
+    league = transliterate((ancestors.get(m.get("tourId"), {}) or {}).get("name") or "") or None
 
     start_time = None
     st = m.get("startTime")
