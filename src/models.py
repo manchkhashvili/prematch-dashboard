@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-Source     = Literal["crystalbet", "pinnacle"]
+Source     = Literal["crystalbet", "pinnacle", "liderbet", "betlive"]
 # "htft" = the 9-way Halftime/Fulltime combo market (selections keyed "1/1",
 # "1/X", ..., "2/2"). Captured only by the permissive (anomaly-scan) classifier
 # for CB-internal consistency checks — never matched against Pinnacle.
@@ -81,6 +81,13 @@ class Odds:
     # price on; also caps how much an arb partner-leg can take. None on CB rows
     # and on Pinnacle entries that ship no limits.
     max_stake: float | None = None
+    # SportRadar match id, bare numeric string e.g. "71792526" (2026-06-15).
+    # Set by the Lider-Bet scraper (from meta.matchProvider.matchId "sr:match:N")
+    # and the Betlive scraper (from providerEventId when the feed is SportRadar).
+    # Lets the matcher join Lider↔Betlive EXACTLY for cross-book arbs, bypassing
+    # name fuzzing (and Lider's occasional Cyrillic names). None on CrystalBet /
+    # Pinnacle, which expose no SportRadar id — those legs match on name+time.
+    sr_match_id: str | None = None
 
     def __post_init__(self) -> None:
         # Sanity: all decimal odds must be > 1.0. CB renders 1.0 for suspended
