@@ -66,6 +66,28 @@ def htft_flag(
     return None
 
 
+import os as _os
+# HT/FT combo vs the FT moneyline (draw dropped). For a heavy favourite the combo
+# runs ~1.3–1.4× the ML, so this is really "top of the distribution", not a hard
+# anomaly line — exploratory. Tunable live via SOFT_HTFT_ML_RATIO. Needs no
+# standalone first-half market → works for every book (incl. Lider-Bet).
+HTFT_ML_RATIO = float(_os.environ.get("SOFT_HTFT_ML_RATIO", "1.35"))
+
+
+def htft_vs_ml_flag(
+    fav: str, ml_home: Optional[float], ml_away: Optional[float],
+    htft_11: Optional[float], htft_22: Optional[float],
+    *, ratio: float = HTFT_ML_RATIO,
+) -> Optional[tuple[str, float, float, float]]:
+    """For the favourite side, flag when the HT/FT combo is >= `ratio` × the FT
+    moneyline. Returns (side, ml_odds, htft_odds, ratio) or None."""
+    if fav == "home" and ml_home and htft_11 and htft_11 >= ratio * ml_home:
+        return ("home", ml_home, htft_11, round(htft_11 / ml_home, 2))
+    if fav == "away" and ml_away and htft_22 and htft_22 >= ratio * ml_away:
+        return ("away", ml_away, htft_22, round(htft_22 / ml_away, 2))
+    return None
+
+
 def should_open(ml_home: Optional[float], ml_away: Optional[float],
                 league: Optional[str]) -> bool:
     """Cheap list-view gate: open a match's detail only if it has a heavy

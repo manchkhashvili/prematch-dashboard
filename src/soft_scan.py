@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 
 from src import htft_favourite as hf
+from src import basketball_fav
 from src.basketball_fav import fav_disagreement
 
 log = logging.getLogger(__name__)
@@ -66,23 +67,30 @@ def _flag(book, sport, kind, home, away, league, event_id, detail, severity,
 
 
 def _soccer_htft_flag(book, home, away, league, eid, ml, h1, htft, start=None):
-    """ml=(h,a) FT moneyline; h1=(h,a) 1st-half result; htft={'1/1':o,'2/2':o}."""
+    """ml=(h,a) FT moneyline; h1=(h,a) 1st-half result (may be None,None); htft
+    combo dict. Try HT/FT vs the standalone first-half leg; else vs the FT ML."""
     fav = hf.favourite_side(ml[0], ml[1])
     if fav is None or not htft:
         return None
-    res = hf.htft_flag(fav, h1[0], h1[1], htft.get("1/1"), htft.get("2/2"))
+    c11, c22 = htft.get("1/1"), htft.get("2/2")
+    vs = "1st-half"
+    res = hf.htft_flag(fav, h1[0], h1[1], c11, c22) if (h1 and h1[0]) else None
+    if not res:                                   # no first-half (or clean) → vs the ML
+        res = hf.htft_vs_ml_flag(fav, ml[0], ml[1], c11, c22)
+        vs = "ML"
     if not res:
         return None
     side, leg, combo, ratio = res
     return _flag(book, "soccer", "soccer_htft", home, away, league, eid,
-                 f"{side} HT/FT {combo:g} vs 1st-half {leg:g} = {ratio:g}× "
-                 f"(soft: combo should ≈ the leg for a heavy favourite)",
+                 f"{side} HT/FT {combo:g} vs {vs} {leg:g} = {ratio:g}× "
+                 f"(combo priced generously for a heavy favourite)",
                  (ratio - 1) * 100, outcome=("1/1" if side == "home" else "2/2"),
                  start_time=start)
 
 
-def _basketball_fav_flag(book, home, away, league, eid, ml2, ml3, ht, start=None):
-    res = fav_disagreement(ml2=ml2, ml3=ml3, ht=ht)
+def _basketball_fav_flag(book, home, away, league, eid, ml2, ml3, ht, htft=None, start=None):
+    res = fav_disagreement(ml2=ml2, ml3=ml3, ht=ht,
+                           htft=basketball_fav.htft_winner(htft))
     if not res:
         return None
     probs = "  ".join(f"{k}={v*100:.0f}%" for k, v in res["probs"].items())
@@ -159,14 +167,14 @@ def _one(sport, book, home, away, league, eid, ft_ml, ft3, ft2, h1, htft, start)
     """ft_ml=(h,a) list moneyline; ft3/ft2 = 3-way/2-way selections dicts;
     h1 = 1st-half selections; htft = combo selections."""
     if sport == "soccer":
-        if not htft or not h1:
+        if not htft:
             return None
-        return _soccer_htft_flag(book, home, away, league, eid, ft_ml,
-                                 (h1.get("home"), h1.get("away")), htft, start)
+        h1_pair = (h1.get("home"), h1.get("away")) if h1 else (None, None)
+        return _soccer_htft_flag(book, home, away, league, eid, ft_ml, h1_pair, htft, start)
     ml2 = (ft2.get("home"), ft2.get("away")) if ft2 else None
     ml3 = (ft3.get("home"), ft3.get("away")) if ft3 else None
     htm = (h1.get("home"), h1.get("away")) if h1 else None
-    return _basketball_fav_flag(book, home, away, league, eid, ml2, ml3, htm, start)
+    return _basketball_fav_flag(book, home, away, league, eid, ml2, ml3, htm, htft, start)
 
 
 # ── Betlive (getLeagueEvents list → getPrematchEvent detail) ──────────────────
@@ -188,7 +196,7 @@ def _bl_markets(fe):
         labs = {k for k, v in od.items() if v}
         low = name.lower()
         if is_htft_market(name) and "1/1" in labs:
-            htft = {"1/1": od.get("1/1"), "2/2": od.get("2/2")}
+            htft = {k: v for k, v in od.items() if "/" in k}     # full 9-way combo
         elif lined:
             continue
         elif is_h1_result_market(name) and {"1", "2"} <= labs:
@@ -275,7 +283,7 @@ def _lb_extract(m, mts, L):
         name, labels = _lb_labels(mk, mts)
         od = {k: L._odds(v) for k, v in labels.items()}
         if is_htft_market(name) and od.get("1/1"):
-            htft = {"1/1": od.get("1/1"), "2/2": od.get("2/2")}
+            htft = {k: v for k, v in od.items() if "/" in k}     # full 9-way combo
         elif is_h1_result_market(name) and od.get("1") and od.get("2"):
             h1 = {"home": od.get("1"), "away": od.get("2")}
         cls = L._classify_market(name)
