@@ -36,3 +36,9 @@ def test_should_open_gate():
     assert hf.should_open(None, 8.0, "Chile, Copa") is True         # missing-odds fav
     assert hf.should_open(1.12, 6.0, "World Cup 2026") is False     # top league
     assert hf.should_open(1.9, 2.1, "Brazil, Serie B") is False     # no favourite
+
+
+def test_htft_vs_ml_flag():
+    r = hf.htft_vs_ml_flag("home", 1.25, 6.0, 1.75, 30.0, ratio=1.35)   # 1.4x
+    assert r and r[0] == "home" and r[3] == 1.4
+    assert hf.htft_vs_ml_flag("home", 1.25, 6.0, 1.60, 30.0, ratio=1.35) is None  # 1.28x

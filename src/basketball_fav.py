@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-FAV_GAP_PP = 15.0    # flag when the home-win-prob spread across markets ≥ this
+FAV_GAP_PP = 10.0    # flag when the home-win-prob spread across markets ≥ this
+                     # (measured: the 3-way often disagrees with the 2-way by ~12pp)
 
 
 def _p_home(home: Optional[float], away: Optional[float]) -> Optional[float]:
@@ -27,16 +28,27 @@ def _p_home(home: Optional[float], away: Optional[float]) -> Optional[float]:
     return ih / (ih + ia)
 
 
+def htft_winner(htft: Optional[dict]) -> Optional[tuple]:
+    """(home, away) FT-winner odds implied by a 9-way HT/FT combo: home wins FT =
+    */1 (1/1, X/1, 2/1); away = */2. Lets the HT/FT position join the comparison."""
+    if not htft:
+        return None
+    ph = sum(1.0 / htft[k] for k in ("1/1", "X/1", "2/1") if htft.get(k))
+    pa = sum(1.0 / htft[k] for k in ("1/2", "X/2", "2/2") if htft.get(k))
+    return (1.0 / ph, 1.0 / pa) if ph and pa else None
+
+
 def fav_disagreement(
     ml2: Optional[tuple] = None,   # (home, away) — 2-way incl-OT winner
     ml3: Optional[tuple] = None,   # (home, away) — 3-way regulation result (drop draw)
     ht: Optional[tuple] = None,    # (home, away) — HT result (drop draw)
+    htft: Optional[tuple] = None,  # (home, away) — implied by the HT/FT combo
     *, min_gap_pp: float = FAV_GAP_PP,
 ) -> Optional[dict]:
     """Return a flag dict if the favourite flips or the home-win-prob spread is
     >= min_gap_pp across the provided markets, else None. Needs >= 2 markets."""
     ps: dict[str, float] = {}
-    for name, pair in (("ml2", ml2), ("ml3", ml3), ("ht", ht)):
+    for name, pair in (("ml2", ml2), ("ml3", ml3), ("ht", ht), ("htft", htft)):
         if pair:
             p = _p_home(pair[0], pair[1])
             if p is not None:
