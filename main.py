@@ -15,8 +15,12 @@ Common flavors (per-sport mode via SPORTS env var — see below):
     python main.py 2>&1 | tee dashboard.log               # tee logs for debugging
 
     # Anomalies tab — separate hourly full-detail basketball scan, on top of
-    # whatever (light) modes you run. Works even with everything in list mode:
-    ANOMALY_SCAN=1 SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboard.log
+    # whatever (light) modes you run. Works even with everything in list mode.
+    # The scan is browser-free by default now (CB_ANOMALY_TRANSPORT=http), so it
+    # needs no Chromium even when CB_TRANSPORT=playwright. Add BETLIVE_ANOMALY=1
+    # for the betlive favourite-flip watch (incl-OT vs regulation 1X2):
+    ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 BETLIVE=1 \
+      SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboard.log
 
 Dev mode — one cycle, print table, exit:
 
@@ -36,11 +40,20 @@ Environment variables (dashboard mode):
                               Each is matched vs Pinnacle exactly like CB (filter
                               by book on the Arbs tab) AND against each other for
                               cross-book arbs joined on the SportRadar match id
-                              (/api/cross_arbs). Example:
-                                CB_TRANSPORT=http ANOMALY_SCAN=1 \
+                              (/api/cross_arbs). Example (fully browser-free —
+                              all books over HTTP/JSON, anomaly scan incl.):
+                                CB_TRANSPORT=http ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 \
                                   SPORTS=basketball:list,soccer:list,tennis:list \
                                   LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
     EXTRA_BOOK_POLL_SEC=120   poll cadence for Lider-Bet / Betlive (JSON, cheap)
+
+    BETLIVE_ANOMALY=1         betlive favourite-flip watch → Anomalies tab. Slow
+                              full-ladder discover (BETLIVE_DISCOVER_SEC=600) +
+                              cheap refreshOdds watch (BETLIVE_WATCH_SEC=8,
+                              ~50 KB/tick). BETLIVE_MIN_GAP_PP=2.0,
+                              BETLIVE_ANOMALY_SPORT_IDS=6. Independent of BETLIVE=1.
+    CB_ANOMALY_TRANSPORT=http anomaly scan transport (default http = browser-free,
+                              even when CB_TRANSPORT=playwright). =playwright to force.
 
     SPORTS=                   per-sport mode, one knob to rule them all.
                               Comma-separated 'sport:mode' or 'sport_mode'.

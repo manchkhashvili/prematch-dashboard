@@ -83,9 +83,13 @@ def test_create_bet_rejects_zero_stake(clean_db):
         _make_bet(stake=0)
 
 
-def test_create_bet_rejects_unknown_book(clean_db):
+def test_create_bet_accepts_any_book(clean_db):
+    # book is free-form (it's the account's tag) — any non-empty name is first-class
+    bid = _make_bet(book="fanduel")
+    assert bets.get_bet(bid)["book"] == "fanduel"
+    # blank/non-string still rejected (schema is NOT NULL)
     with pytest.raises(ValueError, match="book"):
-        _make_bet(book="fanduel")
+        _make_bet(book="   ")
 
 
 def test_create_bet_accepts_optional_fields(clean_db):
@@ -344,7 +348,9 @@ class TestEditBet:
         with pytest.raises(ValueError):
             bets.update_bet(bid, odds_taken=1.0)
         with pytest.raises(ValueError):
-            bets.update_bet(bid, book="bogus")
+            bets.update_bet(bid, book="")          # blank book rejected
+        bets.update_bet(bid, book="1xbet")          # any non-empty book accepted
+        assert bets.get_bet(bid)["book"] == "1xbet"
 
     def test_account_and_market_editable(self, clean_db):
         bid = _make_bet()
@@ -353,3 +359,106 @@ class TestEditBet:
         b = bets.get_bet(bid)
         assert (b["account_id"], b["market_type"], b["line"], b["side"]) \
             == (7, "spread", -3.5, "away")
+
+
+# ── Parlays (bet_legs) ────────────────────────────────────────────────────────
+
+def _leg(**o):
+    leg = {"sport": "soccer", "match_label": "PSG vs Villa", "period": "FT",
+           "market_type": "moneyline", "side": "home", "odds": 1.5}
+    leg.update(o)
+    return leg
+
+
+def test_add_leg_converts_single_to_parlay(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=20.0)     # leg 1 @ 2.0
+    bets.add_leg(bid, **_leg(odds=1.5))             # leg 2 @ 1.5
+    b = bets.get_bet(bid)
+    legs = bets.list_legs(bid)
+    assert b["is_parlay"] == 1
+    assert len(legs) == 2
+    assert [l["leg_index"] for l in legs] == [1, 2]
+    assert legs[0]["odds"] == 2.0 and legs[1]["odds"] == 1.5   # leg 1 migrated
+    assert b["odds_taken"] == pytest.approx(3.0)               # combined 2.0×1.5
+    assert b["stake"] == 20.0 and b["status"] == "open"        # stake untouched
+
+
+def test_add_third_leg_multiplies(clean_db):
+    bid = _make_bet(odds_taken=2.0)
+    bets.add_leg(bid, **_leg(odds=1.5))
+    bets.add_leg(bid, **_leg(odds=2.0, match_label="A vs B"))
+    assert len(bets.list_legs(bid)) == 3
+    assert bets.get_bet(bid)["odds_taken"] == pytest.approx(6.0)  # 2×1.5×2
+
+
+def test_add_leg_rejects_settled_bet(clean_db):
+    bid = _make_bet()
+    bets.settle_bet(bid, "won")
+    with pytest.raises(ValueError, match="open"):
+        bets.add_leg(bid, **_leg())
+
+
+def test_add_leg_rejects_bad_odds(clean_db):
+    bid = _make_bet()
+    with pytest.raises(ValueError, match="odds"):
+        bets.add_leg(bid, **_leg(odds=1.0))
+
+
+def test_parlay_all_won_pays_product(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=10.0)
+    bets.add_leg(bid, **_leg(odds=1.5))             # combined 3.0
+    bets.settle_leg(bid, 1, "won")
+    assert bets.get_bet(bid)["status"] == "open"    # still one leg open
+    bets.settle_leg(bid, 2, "won")
+    b = bets.get_bet(bid)
+    assert b["status"] == "won"
+    assert b["payout"] == pytest.approx(30.0)       # 10 × 2.0 × 1.5
+
+
+def test_parlay_any_leg_lost_loses_whole(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=10.0)
+    bets.add_leg(bid, **_leg(odds=1.5))
+    bets.settle_leg(bid, 1, "won")
+    bets.settle_leg(bid, 2, "lost")
+    b = bets.get_bet(bid)
+    assert b["status"] == "lost" and b["payout"] == 0.0
+
+
+def test_parlay_pushed_leg_drops_and_recomputes(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=10.0)
+    bets.add_leg(bid, **_leg(odds=1.5))
+    bets.settle_leg(bid, 1, "pushed")               # leg 1 drops (factor 1.0)
+    bets.settle_leg(bid, 2, "won")
+    b = bets.get_bet(bid)
+    assert b["status"] == "won"
+    assert b["odds_taken"] == pytest.approx(1.5)    # only the surviving leg
+    assert b["payout"] == pytest.approx(15.0)       # 10 × 1.5
+
+
+def test_parlay_all_pushed_refunds_stake(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=10.0)
+    bets.add_leg(bid, **_leg(odds=1.5))
+    bets.settle_leg(bid, 1, "pushed")
+    bets.settle_leg(bid, 2, "void")
+    b = bets.get_bet(bid)
+    assert b["status"] == "pushed" and b["payout"] == pytest.approx(10.0)
+
+
+def test_parlay_reopen_leg_returns_to_open(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=10.0)
+    bets.add_leg(bid, **_leg(odds=1.5))
+    bets.settle_leg(bid, 1, "won")
+    bets.settle_leg(bid, 2, "won")
+    assert bets.get_bet(bid)["status"] == "won"
+    bets.settle_leg(bid, 2, "open")                 # un-settle one leg
+    b = bets.get_bet(bid)
+    assert b["status"] == "open" and b["payout"] is None and b["settled_at"] is None
+
+
+def test_remove_leg_folds_back_to_single(clean_db):
+    bid = _make_bet(odds_taken=2.0, stake=10.0, match_label="Lakers vs Warriors")
+    bets.add_leg(bid, **_leg(odds=1.5, match_label="PSG vs Villa"))
+    bets.remove_leg(bid, 2)                          # drop the added leg
+    b = bets.get_bet(bid)
+    assert b["is_parlay"] == 0 and bets.list_legs(bid) == []
+    assert b["odds_taken"] == 2.0 and b["match_label"] == "Lakers vs Warriors"

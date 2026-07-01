@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src import normalize  # noqa: E402  (for alias-cache manipulation)
 from src.matcher import (  # noqa: E402
     _accept,
+    _group_by_event,
     SCORE_LOOSE,
     SCORE_TIGHT,
     TIME_LOOSE_SECONDS,
@@ -366,3 +367,53 @@ class TestYouthGuard:
         assert has_youth_tag("spain u 17")
         assert not has_youth_tag("Utah Jazz")          # 'U' alone not a tag
         assert not has_youth_tag("Union 99ers")         # number not in 16-23
+
+
+class TestGenderGuard:
+    """AU NBL1 double-headers: a men's and women's game share IDENTICAL team
+    names (~2h apart), marked only by 'Women' in the league. They must neither
+    collapse into one event nor cross-match. Mirrors the youth guard."""
+
+    def _o(self, source, league, start, hp=1.9, ap=1.9):
+        from datetime import datetime, timezone
+        return Odds(
+            source=source, sport="basketball",
+            home="Southern Tigers", away="North Adelaide Rockets",
+            market_type="moneyline", period="FT",
+            selections={"home": hp, "away": ap},
+            fetched_at=datetime(2026, 6, 20, tzinfo=timezone.utc),
+            start_time=start, league=league,
+        )
+
+    _MEN = datetime(2026, 6, 20, 10, 45, tzinfo=timezone.utc)
+    _WOMEN = datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc)
+
+    def test_women_and_men_do_not_collapse(self):
+        # Same team names, different league/time → two distinct events, not one.
+        same = [self._o("pinnacle", "Australia - NBL1", self._MEN),
+                self._o("pinnacle", "Australia - NBL1 Women", self._WOMEN)]
+        assert len(_group_by_event(same)) == 2
+
+    def test_double_header_matches_same_gender_only(self):
+        cb = [self._o("crystalbet", "NBL1 Central(OT)", self._MEN),
+              self._o("crystalbet", "NBL1 Central, Women(OT)", self._WOMEN)]
+        pin = [self._o("pinnacle", "Australia - NBL1", self._MEN),
+               self._o("pinnacle", "Australia - NBL1 Women", self._WOMEN)]
+        matched = match_events(cb, pin)
+        assert len(matched) == 2
+        for m in matched:                       # each pairing is gender-consistent
+            assert ("Women" in m.cb[0].league) == ("Women" in m.pin[0].league)
+
+    def test_men_never_matches_women(self):
+        cb = [self._o("crystalbet", "NBL1 Central(OT)", self._MEN)]
+        pin = [self._o("pinnacle", "Australia - NBL1 Women", self._MEN)]  # even same time
+        assert match_events(cb, pin) == []
+
+    def test_women_markers_detected(self):
+        from src.normalize import has_women_tag
+        assert has_women_tag("Australia - NBL1 Women")
+        assert has_women_tag("Women. NBL1 Central (OT)")
+        assert has_women_tag("Liga Femenina")
+        assert has_women_tag("Hawks (W)")
+        assert not has_women_tag("Australia - NBL1")
+        assert not has_women_tag("Hawks", "Lakers", "USA NBA")

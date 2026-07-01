@@ -137,9 +137,21 @@ def test_htft_combo_longer_than_independent_product_flagged():
 
 
 def test_htft_small_violation_within_tolerance_not_flagged():
-    # ~1.7% past the product bound (2.44 vs 2.40) stays under the 2% gate.
-    rows = _htft_fixture(combo_11=2.44, combo_22=3.35)
+    # Correlation-fair for the 1/1 legs (1.60, 1.50) = 1.60×(1+(1.50-1)/2)=2.00;
+    # 2.03 is ~1.5% over → under the 2% gate, no flag.
+    rows = _htft_fixture(combo_11=2.03, combo_22=3.35)
     assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
+
+
+def test_htft_combo_correlation_fair_flags_river_plate():
+    # River Plate shape: H1 home 1.35, FT home 1.14, 1/1 @ 1.55. The naive
+    # product 1.35×1.14=1.539 → only 0.7% over (missed). The correlation fair
+    # 1.35×(1+(1.14-1)/2)=1.444 → 1.55 is ~7% over → flagged.
+    rows = _htft_fixture(combo_11=1.55, combo_22=3.35,
+                         h1=(1.35, 17.1, 3.05), ft=(1.14, 18.3, 5.35))
+    flags = [f for f in find_consistency_flags(rows)
+             if f.kind == "htft_combo" and f.outcome == "1/1"]
+    assert flags and "generous" in flags[0].detail and flags[0].severity >= 5
 
 
 def test_htft_odds_range_gate_suppresses_out_of_range_flags():
@@ -238,3 +250,51 @@ def test_htft_fair_ignores_longshot_outcomes():
 def test_htft_fair_skipped_without_mu_source():
     rows = [_o("htft", "FT", _fair_9(0.85), sec="Halftime/Fulltime")]
     assert not any(f.kind == "htft_fair" for f in find_consistency_flags(rows))
+
+
+# ── soccer (HT/FT) support — un-gated 2026-06-21 ──────────────────────────────
+def _so(mt, per, sel, line=None, sec=None, event="RP"):
+    return Odds(source="crystalbet", sport="soccer", home="River Plate", away="Boca",
+                market_type=mt, period=per, selections=sel, fetched_at=NOW,
+                line=line, league="Argentina", raw_event_id=event, section=sec or (mt + per))
+
+
+def test_soccer_htft_combo_longer_than_product_flagged():
+    # River Plate: FT 1X2 home 1.12, H1 1X2 home 1.35, HT/FT 1/1 @ 1.55.
+    # 1.35 × 1.12 = 1.512; 1.55 is ~2.5% longer → too generous (correlation bound).
+    rows = [
+        _so("moneyline", "FT", {"home": 1.12, "draw": 8.0, "away": 15.0}),
+        _so("moneyline", "H1", {"home": 1.35, "draw": 4.0, "away": 7.0}),
+        _so("htft", "FT", {"1/1": 1.55, "2/2": 12.0}),
+    ]
+    combo = [f for f in find_consistency_flags(rows)
+             if f.kind == "htft_combo" and f.outcome == "1/1"]
+    assert combo and combo[0].sport == "soccer"
+
+
+def test_ht_vs_ft_divergence_flagged():
+    rows = [
+        _so("moneyline", "FT", {"home": 1.12, "draw": 8.0, "away": 15.0}),   # P_home ~0.82
+        _so("moneyline", "H1", {"home": 1.70, "draw": 2.9, "away": 5.0}),    # P_home ~0.52
+    ]
+    div = [f for f in find_consistency_flags(rows) if f.kind == "ht_vs_ft_divergence"]
+    assert div and div[0].severity >= 18 and div[0].sport == "soccer"
+
+
+def test_soccer_small_ht_ft_gap_not_flagged():
+    rows = [
+        _so("moneyline", "FT", {"home": 1.9, "draw": 3.3, "away": 4.0}),
+        _so("moneyline", "H1", {"home": 2.2, "draw": 2.9, "away": 3.6}),
+    ]
+    div = [f for f in find_consistency_flags(rows) if f.kind == "ht_vs_ft_divergence"]
+    assert not div
+
+
+def test_basketball_ht_ft_divergence_river_plate():
+    # River Plate: FT 2-way 1.12/4.35 (~80% home), HT 2-way 1.35/2.55 (~65%) → ~14pp.
+    rows = [
+        _o("moneyline", "FT", {"home": 1.12, "away": 4.35}),
+        _o("moneyline", "H1", {"home": 1.35, "away": 2.55}),
+    ]
+    div = [f for f in find_consistency_flags(rows) if f.kind == "ht_vs_ft_divergence"]
+    assert div and 12 <= div[0].severity <= 16

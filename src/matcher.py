@@ -45,7 +45,12 @@ from typing import NamedTuple
 from rapidfuzz import fuzz
 
 from src.models import Odds
-from src.normalize import has_youth_tag, normalize_team, normalize_tennis_name
+from src.normalize import (
+    has_women_tag,
+    has_youth_tag,
+    normalize_team,
+    normalize_tennis_name,
+)
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +137,7 @@ def match_with_diagnostics(
     # Enumerate EVERY (cb, pin) pair with its score — no time filter at this
     # stage. The tiered _accept() applies time as part of the threshold rule
     # so we can't pre-filter on time without knowing the score first.
-    scored: list[tuple[float, tuple[str, str], tuple[str, str]]] = []
+    scored: list[tuple[float, tuple[str, str, bool], tuple[str, str, bool]]] = []
     for cb_key, (ch_n, ca_n) in cb_norm.items():
         cb_time = cb_events[cb_key][0].start_time
         for pin_key, (ph_n, pa_n) in pin_norm.items():
@@ -150,11 +155,15 @@ def match_with_diagnostics(
     cb_youth = {k: (has_youth_tag(k[0]), has_youth_tag(k[1])) for k in cb_events}
     pin_youth = {k: (has_youth_tag(k[0]), has_youth_tag(k[1])) for k in pin_events}
 
-    # Apply tiered accept + global sorted-by-score greedy assignment.
+    # Apply tiered accept + global sorted-by-score greedy assignment. Two hard
+    # guards beat the fuzzy score: youth (U16–U23 ≠ senior, on names) and gender
+    # (women ≠ men — c[*][2] is the is_women flag from the event key). Both must
+    # agree or the pair is dropped no matter how high the name score.
     candidates = sorted(
         (
             c for c in scored
             if cb_youth[c[1]] == pin_youth[c[2]]
+            and c[1][2] == c[2][2]                 # gender guard: women↔women only
             and _accept(
                 c[0],
                 cb_events[c[1]][0].start_time,
@@ -163,8 +172,8 @@ def match_with_diagnostics(
         ),
         key=lambda c: -c[0],
     )
-    used_cb: set[tuple[str, str]] = set()
-    used_pin: set[tuple[str, str]] = set()
+    used_cb: set[tuple[str, str, bool]] = set()
+    used_pin: set[tuple[str, str, bool]] = set()
     matched: list[MatchedEvent] = []
 
     for score, cb_key, pin_key in candidates:
@@ -187,7 +196,7 @@ def match_with_diagnostics(
     # For every unmatched CB event, find its best (still-unused) Pin candidate
     # regardless of threshold — for the curation loop.
     unmatched: list[UnmatchedEvent] = []
-    best_by_cb: dict[tuple[str, str], tuple[float, tuple[str, str]]] = {}
+    best_by_cb: dict[tuple[str, str, bool], tuple[float, tuple[str, str, bool]]] = {}
     for score, cb_key, pin_key in scored:
         if pin_key in used_pin:
             continue  # already taken by another CB event
@@ -254,10 +263,19 @@ def log_unmatched(result: MatchResults, *, path: Path = UNMATCHED_LOG_PATH) -> N
 
 def _group_by_event(
     odds_list: list[Odds],
-) -> dict[tuple[str, str], list[Odds]]:
-    groups: dict[tuple[str, str], list[Odds]] = defaultdict(list)
+) -> dict[tuple[str, str, bool], list[Odds]]:
+    """Group a source's Odds into events. Key is (home, away, is_women).
+
+    Gender is part of the key so a men's and women's game that share IDENTICAL
+    team names (Australian NBL1 double-headers — same clubs, ~2h apart, marked
+    only by "Women" in the league) don't collapse into one mixed event. That
+    collapse previously priced a men's line against the women's fair price and
+    produced phantom +EV. The marker lives in the league; team names are checked
+    too for books that suffix "(W)"."""
+    groups: dict[tuple[str, str, bool], list[Odds]] = defaultdict(list)
     for o in odds_list:
-        groups[(o.home, o.away)].append(o)
+        women = has_women_tag(o.league or "", o.home, o.away)
+        groups[(o.home, o.away, women)].append(o)
     return dict(groups)
 
 

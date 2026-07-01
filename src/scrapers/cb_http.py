@@ -86,6 +86,19 @@ GET_TIMEOUT = 60
 POST_TIMEOUT = 120
 IMPERSONATE = "chrome124"
 
+# English-flip verification. A correctly flipped game panel has ~0 Georgian
+# (Mkhedruli) characters; an unflipped one has hundreds. When several sport
+# sessions warm at once (boot), CB's ImageButtonEn flip occasionally doesn't
+# take and the session would otherwise stay stuck serving Georgian team/league
+# names until the next hourly re-warm. fetch_list_html checks the panel and
+# re-warms once if it's Georgian.
+_GEORGIAN_RE = re.compile(r"[Ⴀ-ჿ]")
+_GEORGIAN_OK_MAX = 30
+
+
+def georgian_chars(html: str) -> int:
+    return len(_GEORGIAN_RE.findall(html))
+
 
 # ── ASP.NET wire-format helpers (pure functions) ──────────────────────────────
 
@@ -241,7 +254,26 @@ class CbHttpSession:
         log.info("CB http: session warmed for sport_id=%d", self.sport_id)
 
     def fetch_list_html(self) -> str:
-        """SelectAllChampionats → the UpdatePanelGames panel HTML (full board)."""
+        """SelectAllChampionats → the UpdatePanelGames panel HTML (full board).
+
+        Verifies the session is actually in English; if the panel comes back
+        Georgian (a transient flip miss at warm time), re-warm once and refetch
+        so names never get stuck in Georgian."""
+        panel = self._list_panel()
+        if georgian_chars(panel) > _GEORGIAN_OK_MAX:
+            log.warning(
+                "CB http: sport_id=%d list came back Georgian (%d glyphs) — "
+                "re-warming to re-apply the English flip",
+                self.sport_id, georgian_chars(panel),
+            )
+            self.warm()
+            panel = self._list_panel()
+            if georgian_chars(panel) > _GEORGIAN_OK_MAX:
+                log.error("CB http: sport_id=%d still Georgian after re-warm",
+                          self.sport_id)
+        return normalize_html(panel)
+
+    def _list_panel(self) -> str:
         body = {**self.fields, SM: f"{UPDATE_PANELS_HOLDER}|{BTN_CHAMP}",
                 "__EVENTTARGET": BTN_CHAMP, "__EVENTARGUMENT": "",
                 HF_CHAMP_PARAM: f"SelectAllChampionats:{self.sport_id}",
@@ -254,7 +286,7 @@ class CbHttpSession:
                 f"CB http: SelectAllChampionats:{self.sport_id} returned no "
                 f"UpdatePanelGames panel ({len(delta):,}B delta)"
             )
-        return normalize_html(panel)
+        return panel
 
     def expand_detail_html(self, game_id: str) -> str:
         """ExpandDetail → all updatePanel segments (detail table rides in the

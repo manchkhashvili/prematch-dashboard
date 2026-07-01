@@ -146,3 +146,9 @@ class Opportunity:
     # cross-book grid join Lider↔Betlive exactly, independent of the Pinnacle
     # name-match — see /api/cross_book.
     sr_match_id: str | None = None
+    # Match-quality signals carried from the matcher so the UI can flag how much
+    # to trust this row's soft-book↔Pinnacle pairing (see edge.match_confidence).
+    # A high fuzzy name score with an implausibly large edge usually means the
+    # Pinnacle leg is the WRONG game (common in same-named lower divisions).
+    match_score: float | None = None         # fuzzy team-name score 0–100
+    match_time_delta_sec: float | None = None  # |kickoff_cb − kickoff_pin|; None if unknown

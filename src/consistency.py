@@ -62,7 +62,7 @@ from typing import Iterable, Optional
 
 from src import htft_model
 from src.models import Odds
-from src.vig import devig_2way  # returns FAIR PROBABILITIES (p_home, p_away)
+from src.vig import devig_2way, devig_3way  # FAIR PROBABILITIES (devigged)
 
 
 # ── Thresholds (tunable; defaults sit well above measured normal variation) ────
@@ -85,6 +85,15 @@ HTFT_SHAPE_MIN_PROB = 0.05  # shape check only on outcomes the model gives >=5%
 # longer than 4.5 is longshot territory where flags were noise.
 HTFT_ODDS_MIN = 1.15
 HTFT_ODDS_MAX = 4.5
+# HT-vs-FT divergence: flag when the home win-prob at half time differs from the
+# full-time win-prob by at least this many percentage points. Surfaces matches
+# where the half and the full match are priced very differently (the HT/FT value
+# zone — e.g. a heavy FT favourite that's only lightly favoured at the break).
+HT_FT_DIV_PP = 13.0   # e.g. River Plate: 80% FT favourite but ~65% at HT (~14pp)
+
+# Sports the consistency engine evaluates. Basketball (its original home) and
+# soccer (1X2 + HT/FT). Other sports lack these cross-market relationships.
+CONSISTENCY_SPORTS = ("basketball", "soccer")
 
 
 @dataclass(frozen=True)
@@ -146,10 +155,17 @@ def _devig_home(home: float, away: float) -> Optional[float]:
 @dataclass
 class _PeriodView:
     """Derived per-(event,period) summary used by the checks."""
-    ml_phome: Optional[float] = None          # P(home win) from the moneyline
+    ml_phome: Optional[float] = None          # P(home win) from the 2-way moneyline
+    ml_phome3: Optional[float] = None          # P(home win) from a 3-way 1X2 (soccer)
     spread_pwin: Optional[float] = None        # P(home win) from spread @ line 0
     spread_center: Optional[float] = None      # home_line where P(cover)=0.5
     total_center: Optional[float] = None       # total where P(over)=0.5
+
+    @property
+    def home_winprob(self) -> Optional[float]:
+        """Devigged P(home) — the 2-way ML where present, else the 3-way 1X2
+        (home / (home+away+draw)). Lets HT-vs-FT compare across sports."""
+        return self.ml_phome if self.ml_phome is not None else self.ml_phome3
 
 
 def _main_section(rows: list[Odds]) -> list[Odds]:
@@ -176,6 +192,18 @@ def _build_period_view(period_odds: dict[str, list[Odds]]) -> _PeriodView:
                 v.ml_phome = _devig_home(s["home"], s["away"])
                 if v.ml_phome is not None:
                     break
+        # 3-way 1X2 (soccer FT / 1st-half result): devigged P(home) over all
+        # three outcomes — used by the HT-vs-FT divergence check.
+        for o in ml:
+            s = o.selections
+            if {"home", "draw", "away"} <= set(s):
+                try:
+                    p = devig_3way(s["home"], s["draw"], s["away"])[0]
+                    if 0.0 < p < 1.0:
+                        v.ml_phome3 = p
+                        break
+                except (ValueError, ZeroDivisionError):
+                    pass
     sp = _main_section(period_odds.get("spread", []))
     sprows = []
     zero_ph = None
@@ -221,13 +249,14 @@ def find_consistency_flags(
     decisive_prob: float = DECISIVE_PROB,
     extreme_pp: float = EXTREME_PP,
     htft_gap_pct: float = HTFT_GAP_PCT,
+    ht_ft_div_pp: float = HT_FT_DIV_PP,
 ) -> list[ConsistencyFlag]:
     """Find CB-internal contradictions across markets/periods. See module docs."""
     # Group: event_id -> period -> market_type -> [Odds]
     events: dict[Optional[str], dict[str, dict[str, list[Odds]]]] = {}
     meta: dict[Optional[str], Odds] = {}
     for o in odds:
-        if o.sport != "basketball":
+        if o.sport not in CONSISTENCY_SPORTS:
             continue
         ev = events.setdefault(o.raw_event_id, {})
         ev.setdefault(o.period, {}).setdefault(o.market_type, []).append(o)
@@ -240,7 +269,7 @@ def find_consistency_flags(
 
         def mk(kind, per_label, detail, severity, outcome=None):
             flags.append(ConsistencyFlag(
-                sport="basketball", league=m.league, home=m.home, away=m.away,
+                sport=m.sport, league=m.league, home=m.home, away=m.away,
                 start_time=m.start_time, event_id=eid,
                 kind=kind, periods=per_label, detail=detail,
                 severity=round(severity, 2), outcome=outcome,
@@ -300,6 +329,21 @@ def find_consistency_flags(
                            f"FT {ft.ml_phome*100:.0f}% (a short period should be closer "
                            f"to 50%)", q_dev - ft_dev)
 
+        # 4b. HT vs FT divergence — the home win-prob swings a lot between the
+        #     half and the full match (the HT/FT value zone: e.g. a heavy FT
+        #     favourite only lightly favoured at the break). Sport-agnostic;
+        #     uses the 2-way ML or the 3-way 1X2 home prob, whichever exists.
+        h1v, ftv = views.get("H1"), views.get("FT")
+        if h1v and ftv:
+            p_h1, p_ft = h1v.home_winprob, ftv.home_winprob
+            if p_h1 is not None and p_ft is not None:
+                div_pp = abs(p_ft - p_h1) * 100.0
+                if div_pp >= ht_ft_div_pp:
+                    mk("ht_vs_ft_divergence", "H1 vs FT",
+                       f"home win-prob {p_h1*100:.0f}% (HT) → {p_ft*100:.0f}% (FT), "
+                       f"{div_pp:.0f}pp apart — the half and the full match are "
+                       f"priced very differently", div_pp)
+
         # 5. HT/FT combo vs its own legs (1/1 and 2/2; raw odds, see module doc)
         combo = _first_htft(periods)
         if combo:
@@ -327,16 +371,23 @@ def find_consistency_flags(
                            f"(off by {short_pct:.0f}%)", short_pct,
                            outcome=combo_key)
                         continue
-                    # correlation: combo can't beat the independent product
-                    prod = l_h1 * l_ft
-                    long_pct = (c - prod) / prod * 100.0
+                    # correlation-adjusted fair: the naive product (l_h1 × l_ft)
+                    # over-states the fair odds — conditioning on the HT lead
+                    # makes the FT leg SHORTER than its unconditional price, so the
+                    # true combo is shorter than the product. Approximate the
+                    # conditional FT leg by halving its margin over evens (owner's
+                    # model 2026-06-21): fair = HT_leg × (1 + (FT_leg − 1)/2),
+                    # clamped at the longest leg (can't beat dominance). A combo
+                    # longer than that fair is over-generous (the +EV direction).
+                    fair = max(l_h1 * (1.0 + (l_ft - 1.0) / 2.0), l_h1, l_ft)
+                    long_pct = (c - fair) / fair * 100.0
                     if long_pct >= htft_gap_pct:
                         mk("htft_combo", "H1+FT",
-                           f"HT/FT {combo_key} @{c:g} exceeds H1 {who} @{l_h1:g} "
-                           f"× FT {who} @{l_ft:g} = {prod:.2f} — legs are "
-                           f"positively correlated so the combo should be "
-                           f"SHORTER than the product, not {long_pct:.0f}% "
-                           f"longer (too generous)", long_pct,
+                           f"HT/FT {combo_key} @{c:g} vs correlation-fair {fair:.2f} "
+                           f"(H1 {who} @{l_h1:g} × half the FT {who} margin, FT "
+                           f"@{l_ft:g}) — {long_pct:.0f}% too generous; conditioning "
+                           f"on the HT lead shortens the FT leg, so fair sits below "
+                           f"the {l_h1 * l_ft:.2f} independent product", long_pct,
                            outcome=combo_key)
 
         # 6. HT/FT vs the bivariate-normal fair model (basketball only —

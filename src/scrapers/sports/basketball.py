@@ -545,6 +545,12 @@ _PERIOD_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(1st|first|1)\b.*\bquarter\b|\bq1\b"),       "Q1"),
     (re.compile(r"\b(2nd|second)\b.*\b(half|period)\b"),         "H2"),
     (re.compile(r"\b(1st|first|1)\b.*\b(half|period)\b"),        "H1"),
+    # Some leagues period-qualify with a bare "Halftime" instead of "1st half"
+    # ("1X2 Halftime", "Asian Handicap Halftime", "Under/Over Halftime", …).
+    # Without this they all silently default to FT — corrupting the FT view with
+    # a second result market and leaving the H1 view empty. (The Halftime/Fulltime
+    # COMBO is matched as htft before _derive_period runs, so it's unaffected.)
+    (re.compile(r"\bhalf ?time\b"),                             "H1"),
 ]
 
 
@@ -560,7 +566,13 @@ def _derive_period(norm: str) -> str:
     return "FT"
 
 
-_RE_HTFT_TITLE = re.compile(r"^halftime\s*/\s*fulltime$")
+# Halftime/Fulltime combo. Leagues vary: "Halftime/Fulltime", "Half Time / Full
+# Time", and the abbreviated "HT/FT Including Overtime" (La Liga Federal). Matched
+# as a prefix so an "Including Overtime"/"(OT)" suffix still classifies — but NOT
+# the multi-market combos ("Halftime/Fulltime and Total", "... Correct Score"),
+# which are unmatchable and must stay out (excluded below).
+_RE_HTFT_TITLE = re.compile(r"^(?:half\s*time\s*/\s*full\s*time|ht\s*/\s*ft)\b")
+_RE_HTFT_EXCLUDE = re.compile(r"\band\b|&|correct|exact|\btotal\b|score")
 # Plain N-way result markets phrased with "1x2": "Full Time Result(1X2)",
 # "1st half - 1x2", "2nd Quarter - 1x2", ... Excludes the 3-way HANDICAP
 # ("Handicap(1X2)") and any combo ("... & 1x2", "... and 1st half total").
@@ -583,7 +595,7 @@ def classify_market_title_permissive(title: str) -> Optional[MarketClassificatio
     #   - plain 1x2 result markets — the REGULATION-time 3-way moneylines that
     #     are those legs (HT/FT is settled on regulation, so the bounds must
     #     use regulation legs, not the incl-OT 2-way winner).
-    if _RE_HTFT_TITLE.fullmatch(norm):
+    if _RE_HTFT_TITLE.match(norm) and not _RE_HTFT_EXCLUDE.search(norm):
         return MarketClassification(market_type="htft", period="FT")
     if _RE_PLAIN_1X2.search(norm) and not _RE_1X2_EXCLUDE.search(norm):
         return MarketClassification(

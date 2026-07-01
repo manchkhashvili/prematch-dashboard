@@ -80,8 +80,9 @@
     Consistency flags
     <span class="hint" style="font-weight:normal;">
       — CB contradicts itself across markets/periods (ML vs handicap, period totals
-      vs full, quarter MLs vs full). Diagnostic only: "something looks wrong here",
-      not an opportunity. Tuned to ignore normal period-to-period variation.
+      vs full, quarter MLs vs full), plus betlive favourite-flips (incl-OT 2-way
+      disagrees with the regulation 1X2 on the favourite). Diagnostic only:
+      "something looks wrong here". Tuned to ignore normal period-to-period variation.
     </span>
   </h2>
   <div class="table-wrap">
@@ -220,6 +221,8 @@ const KIND_LABEL = {
   quarter_ml_extreme: "quarter ML extreme",
   htft_combo: "HT/FT combo",
   htft_fair: "HT/FT fair (model)",
+  betlive_flip: "betlive: favourite flip",
+  betlive_ot_fold: "betlive: OT-fold",
 };
 function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
 function renderConsistency(flags) {

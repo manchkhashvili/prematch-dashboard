@@ -295,6 +295,13 @@ td.dim { color: var(--text-faint); }
 .kind-ev  { color: var(--good);  border-color: var(--good); }
 .kind-arb { color: var(--accent); border-color: var(--accent); }
 
+/* Match-confidence chip (how much to trust the Pinnacle pairing) */
+.conf { display: inline-block; font-size: 11px; font-family: var(--mono);
+        padding: 1px 6px; border-radius: 3px; border: 1px solid; cursor: help; }
+.conf-strong { color: var(--good); border-color: var(--good); }
+.conf-medium { color: var(--warn); border-color: var(--warn); }
+.conf-weak   { color: var(--bad);  border-color: var(--bad); background: rgba(248,81,73,0.08); }
+
 /* ARB partner-leg note below the Side cell */
 .partner {
   font-family: var(--mono);
