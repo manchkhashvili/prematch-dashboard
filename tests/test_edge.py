@@ -270,3 +270,62 @@ def test_opportunity_carries_pin_max_stake():
                                  min_edge_pct=1.0)
     assert opps, "expected at least one opportunity from a 2.40 vs ~1.9 fair gap"
     assert all(o.pin_max_stake == 525.0 for o in opps)
+
+
+# ── Match confidence (2026-06-19) ─────────────────────────────────────────────
+from src.edge import match_confidence  # noqa: E402
+from src.models import Opportunity  # noqa: E402
+
+
+def _opp(**over):
+    f = dict(start_time=NOW, match_label="A — B", market="ML FT", side="home",
+             cb_odds=2.0, pin_no_vig=2.0, edge_pct=5.0, kind="+EV", kelly_stake=10.0,
+             match_score=100.0, match_time_delta_sec=0.0)
+    f.update(over)
+    return Opportunity(**f)
+
+
+def test_match_signals_plumbed_onto_opportunity():
+    cb = _odds("crystalbet", "moneyline", {"home": 2.10, "away": 1.80})
+    pin = _odds("pinnacle", "moneyline", {"home": 1.91, "away": 1.91})
+    o = next(o for o in compute_opportunities([_match([cb], [pin])], min_edge_pct=0.0)
+             if o.side == "home")
+    assert o.match_score == 100.0
+    assert o.match_time_delta_sec == 0.0       # both start_time = NOW
+
+
+def test_confidence_strong_clean_match():
+    assert match_confidence(_opp(match_score=95.0, edge_pct=5.0, match_time_delta_sec=0)) == "strong"
+
+
+def test_confidence_weak_on_implausible_edge():
+    # The Serie D case: perfect name + same kickoff but a +145% edge = wrong game.
+    assert match_confidence(_opp(match_score=100.0, edge_pct=145.0, match_time_delta_sec=0)) == "weak"
+
+
+def test_confidence_weak_on_low_name_score():
+    assert match_confidence(_opp(match_score=70.0, edge_pct=5.0)) == "weak"
+
+
+def test_confidence_weak_on_far_kickoff():
+    assert match_confidence(_opp(match_score=95.0, edge_pct=5.0,
+                                 match_time_delta_sec=60 * 60)) == "weak"
+
+
+def test_confidence_medium_when_uncertain():
+    # decent (not strong) name, small edge → medium
+    assert match_confidence(_opp(match_score=82.0, edge_pct=5.0)) == "medium"
+    # a big-but-not-huge edge caps even a great name down to medium
+    assert match_confidence(_opp(match_score=95.0, edge_pct=15.0)) == "medium"
+
+
+def test_confidence_weak_on_notable_edge_with_imperfect_name():
+    # the wrong-but-similar match: a 12% +EV only a so-so name (82) vouches for.
+    assert match_confidence(_opp(match_score=82.0, edge_pct=12.0)) == "weak"
+
+
+def test_confidence_arb_threshold_tighter_than_ev():
+    # 15% is implausible for an ARB vs Pinnacle → weak (ARB huge=12), but only
+    # big-ish for +EV → medium (EV huge=25).
+    assert match_confidence(_opp(kind="ARB", edge_pct=15.0, match_score=100.0)) == "weak"
+    assert match_confidence(_opp(kind="+EV", edge_pct=15.0, match_score=100.0)) == "medium"

@@ -45,6 +45,54 @@ BANKROLL = 1000.0             # reference bankroll in local currency
 KELLY_FRACTION = 0.25         # quarter-Kelly
 MIN_EDGE_PCT = 1.0            # default minimum edge threshold
 
+# ── Match-confidence thresholds ───────────────────────────────────────────────
+# Soft-book↔Pinnacle pairings are name+time fuzzy (Pinnacle exposes no SR id),
+# so a row can be the WRONG game even at a high name score — rife in same-named
+# lower divisions (a +145% Serie D "edge" is a mismatched Pinnacle game, not a
+# real edge). The chip combines three independent signals:
+#   • name score   — the matcher's fuzzy team-name score (0–100)
+#   • kickoff gap  — how far the two books' start times disagree
+#   • price sanity — edge magnitude; Pinnacle is razor-sharp, so an implausibly
+#                    large edge almost always means a bad/stale Pinnacle match.
+_NAME_STRONG = 88.0           # ≥ → name side is trustworthy
+_NAME_WEAK = 78.0             # < → name side is shaky (drop to weak)
+_TIME_NEAR_SEC = 25 * 60      # kickoffs within 25 min agree well
+_TIME_FAR_SEC = 40 * 60       # kickoffs > 40 min apart → weak
+# Edge that's "too good to be real" vs Pinnacle (Pinnacle is razor-sharp, so a
+# large soft-book edge is almost always a wrong/stale Pinnacle match, not a real
+# edge — calibrated on live soccer 2026-06-19, where 25–136% +EV rows were all
+# mismatches). +EV vs a sharp fair runs single digits; ARB vs Pinnacle is rarer.
+_EDGE_BIG = {"+EV": 10.0, "ARB": 5.0}    # above this: never "strong"; weak if the name can't vouch
+_EDGE_HUGE = {"+EV": 25.0, "ARB": 12.0}  # above this: "weak" outright (almost surely a mismatch)
+
+
+def match_confidence(o) -> str:
+    """How much to trust this opportunity's soft-book↔Pinnacle match:
+    'strong' | 'medium' | 'weak'. Pure function of the match-quality signals on
+    the Opportunity + its edge magnitude. Used for the Arbs/EV 'Match' column.
+
+    weak when ANY of: the edge is implausibly large; the kickoffs disagree a lot;
+    the name score is poor; or a notable edge rides on a less-than-great name (the
+    classic 'similar-but-wrong team' match). strong only when a trustworthy name,
+    a small edge, and an aligned (or unknown) kickoff all agree. Otherwise medium.
+    """
+    score = o.match_score
+    td = o.match_time_delta_sec
+    big = _EDGE_BIG.get(o.kind, 10.0)
+    huge = _EDGE_HUGE.get(o.kind, 25.0)
+    edge = o.edge_pct
+
+    far_time = td is not None and td > _TIME_FAR_SEC
+    near_time = td is not None and td <= _TIME_NEAR_SEC
+    low_name = score is not None and score < _NAME_WEAK
+    high_name = score is not None and score >= _NAME_STRONG
+
+    if edge >= huge or far_time or low_name or (edge >= big and not high_name):
+        return "weak"
+    if high_name and edge < big and (near_time or td is None):
+        return "strong"
+    return "medium"
+
 
 def compute_opportunities(
     matched: list[MatchedEvent],
@@ -73,6 +121,14 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
         match_label = f"{event.home} — {event.away}"
         start_time = cb.start_time or datetime.now(tz=timezone.utc)
         cb_event_id = cb.raw_event_id
+        # Match-quality signals for the confidence chip: the matcher's fuzzy name
+        # score, and the kickoff disagreement between the two books (None if
+        # either time is unknown).
+        match_score = event.score
+        match_dt = (
+            abs((cb.start_time - pin.start_time).total_seconds())
+            if cb.start_time and pin.start_time else None
+        )
 
         # Devigged same-side fair prices for THIS market. Used as the
         # `pin_no_vig` value on both +EV and ARB rows so the column has one
@@ -107,6 +163,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                     pin_max_stake=pin.max_stake,
                     pin_event_id=pin.raw_event_id,
                     sr_match_id=cb.sr_match_id,
+                    match_score=match_score, match_time_delta_sec=match_dt,
                 ))
 
         # ── ARB pass ────────────────────────────────────────────────────────
@@ -149,6 +206,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                 pin_max_stake=pin.max_stake,
                 pin_event_id=pin.raw_event_id,
                 sr_match_id=cb.sr_match_id,
+                match_score=match_score, match_time_delta_sec=match_dt,
             ))
 
     return opps

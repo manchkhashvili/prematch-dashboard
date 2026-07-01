@@ -73,6 +73,7 @@
           <th class="num">Book odds</th>
           <th class="num" title="Pinnacle no-vig fair price for the same side as the CB bet. Differs from the matches-page 'Pin H/Pin A' columns, which show Pinnacle's vigged posted prices.">Pin fair</th>
           <th class="num">Edge%</th>
+          <th title="How much to trust the soft-book↔Pinnacle match. Pinnacle matches are name+time fuzzy, so a strong-looking name can still be the wrong game (common in same-named lower divisions). An implausibly large edge is the tell — it's weighted down to 'weak'.">Match</th>
           <th>Kind</th>
           <th class="num">Kelly</th>
           <th class="num" title="Pinnacle's maxRiskStake limit on the matched market — high limits mean Pinnacle trusts its price (sharper reference); also caps the ARB partner leg">Pin max</th>
@@ -80,7 +81,7 @@
         </tr>
       </thead>
       <tbody id="opps-body">
-        <tr><td colspan="14" class="empty">loading…</td></tr>
+        <tr><td colspan="15" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -146,6 +147,17 @@ function pctClass(v) {
   if (v >= 5)   return "edge-pos-bold";
   if (v > 0)    return "edge-pos";
   return "edge-neg";
+}
+// Match-confidence chip: strong / medium / weak, with the underlying signals in
+// the tooltip so a surprising rating is explainable.
+function confChip(o) {
+  const c = o.confidence || "medium";
+  const bits = [];
+  if (o.match_score != null) bits.push(`name ${o.match_score}/100`);
+  if (o.match_time_delta_min != null) bits.push(`kickoff Δ ${o.match_time_delta_min}min`);
+  bits.push(`edge ${o.edge_pct != null ? o.edge_pct.toFixed(1) : "?"}%`);
+  const tip = `match confidence: ${c} — ${bits.join(" · ")}`;
+  return `<span class="conf conf-${c}" title="${tip}">${c}</span>`;
 }
 function fmtTime(iso) {
   if (!iso) return "—";
@@ -285,7 +297,7 @@ async function fetchAndRender() {
     // page, polls independently, persists seen-set in localStorage.
   } catch (e) {
     document.getElementById("opps-body").innerHTML =
-      `<tr><td colspan="14" class="empty">error loading opportunities</td></tr>`;
+      `<tr><td colspan="15" class="empty">error loading opportunities</td></tr>`;
   }
 }
 
@@ -294,7 +306,7 @@ function render() {
   document.getElementById("row-count").textContent =
     `${cache.length} row${cache.length === 1 ? "" : "s"}`;
   if (cache.length === 0) {
-    body.innerHTML = `<tr><td colspan="14" class="empty">no opportunities at current threshold</td></tr>`;
+    body.innerHTML = `<tr><td colspan="15" class="empty">no opportunities at current threshold</td></tr>`;
     return;
   }
   if (window.chartCtxReset) chartCtxReset();
@@ -351,6 +363,7 @@ function render() {
         <td class="num">${fmtNum(o.cb_odds)}</td>
         <td class="num">${fmtNum(o.pin_no_vig)}</td>
         <td class="num ${pctClass(o.edge_pct)}">${fmtPct(o.edge_pct)}</td>
+        <td>${confChip(o)}</td>
         <td><span class="kind ${o.kind === '+EV' ? 'kind-ev' : 'kind-arb'}">${o.kind}</span></td>
         <td class="num">${o.kelly_stake ? o.kelly_stake.toFixed(0) : "—"}</td>
         <td class="num dim">${o.pin_max_stake != null ? "$" + Math.round(o.pin_max_stake) : "—"}</td>

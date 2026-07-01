@@ -73,6 +73,14 @@
       align-items: center;
       margin-top: 6px;
     }
+    .seg { display: flex; gap: 14px; align-items: center; }
+    .seg-opt { display: inline-flex; align-items: center; gap: 5px; font-weight: normal !important; cursor: pointer; }
+    .seg-opt input { width: auto; }
+    /* Parlay legs shown under the Match cell */
+    .legs { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
+    .leg { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 0.92em; }
+    .leg .leg-btns { display: inline-flex; gap: 3px; margin-left: auto; }
+    .legs-foot { margin-top: 2px; font-size: 0.9em; }
     .btn {
       background: var(--accent);
       color: var(--bg);
@@ -265,13 +273,16 @@
       <div class="cap-forms">
         <form id="acct-form">
           <label>New account name <input name="name" required placeholder="e.g. 1xbet" /></label>
-          <label>Auto-link bets from
-            <select name="book_tag">
-              <option value="">— none —</option>
-              <option value="cb">CrystalBet bets</option>
-              <option value="pin">Pinnacle bets</option>
-              <option value="other">'other' bets</option>
-            </select>
+          <label>Auto-link bets from (book tag — free-form)
+            <input name="book_tag" list="known-books"
+                   placeholder="e.g. betlive, 1xbet — or leave blank" />
+            <datalist id="known-books">
+              <option value="cb">CrystalBet</option>
+              <option value="pin">Pinnacle</option>
+              <option value="liderbet">Lider-Bet</option>
+              <option value="betlive">Betlive</option>
+              <option value="other">other</option>
+            </datalist>
           </label>
           <button class="btn" type="submit">Add account</button>
         </form>
@@ -294,6 +305,7 @@
           <label>To <select name="to_id" id="transfer-to" required></select></label>
           <label>Amount <input name="amount" type="number" step="0.01" min="0.01" required /></label>
           <button class="btn" type="submit">Transfer</button>
+          <span class="hint" id="transfer-fee-hint" style="flex-basis:100%"></span>
         </form>
       </div>
       <span class="form-error" id="cap-error"></span>
@@ -351,13 +363,22 @@
           <option value="under">under</option>
         </select>
       </label>
-      <label>Book / account (stake flows through its balance)
+      <label class="full-row" id="stake-source-row">Stake source
+        <span class="seg">
+          <label class="seg-opt"><input type="radio" name="stake_source" value="money" checked /> 💵 Money</label>
+          <label class="seg-opt"><input type="radio" name="stake_source" value="roll" /> 🎲 Roll a previous bet → parlay</label>
+        </span>
+      </label>
+      <label class="full-row" id="roll-target-row" style="display:none">Add this game to which open bet (its stake rides on the combined odds)
+        <select id="roll-target"></select>
+      </label>
+      <label id="account-row">Book / account (stake flows through its balance)
         <select name="account_id" id="bet-account" required></select>
       </label>
       <label>Odds taken (decimal)
         <input name="odds_taken" type="number" step="0.01" min="1.01" required />
       </label>
-      <label>Stake ($)
+      <label id="stake-row">Stake ($)
         <input name="stake" type="number" step="0.01" min="0.01" required value="20" />
       </label>
       <label>Kickoff (optional, ISO)
@@ -443,6 +464,7 @@ function readFormToPayload(form) {
   // book + bankroll_at_time are derived server-side (account's book_tag,
   // current equity) — only forward book if a prefill link supplied it.
   if (!o.book) delete o.book;
+  delete o.stake_source;   // UI-only toggle, never sent
   return o;
 }
 
@@ -454,6 +476,9 @@ function startEditBet(b) {
   const det = document.getElementById("new-bet-details");
   const form = document.getElementById("bet-form");
   det.open = true;
+  const money = form.querySelector('input[name=stake_source][value=money]');
+  if (money) money.checked = true;
+  setStakeSource("money");   // edit always uses the money fields (account/stake)
   document.getElementById("bet-form-summary").textContent =
     `Edit bet #${b.id} — ${b.match_label} (${b.status})`;
   document.getElementById("bet-submit").textContent = "Save changes";
@@ -475,7 +500,43 @@ function resetFormMode() {
   document.getElementById("bet-form-summary").textContent = "Log a new bet";
   document.getElementById("bet-submit").textContent = "Log bet";
   document.getElementById("payout-row").style.display = "none";
+  const money = document.querySelector('#bet-form input[name=stake_source][value=money]');
+  if (money) money.checked = true;
+  setStakeSource("money");
 }
+
+// ── Parlay: stake source = money | roll a previous bet into the parlay ───────
+function stakeSource() {
+  const el = document.querySelector('#bet-form input[name=stake_source]:checked');
+  return el ? el.value : "money";
+}
+
+function setStakeSource(mode, targetId) {
+  const isRoll = mode === "roll";
+  document.getElementById("roll-target-row").style.display = isRoll ? "" : "none";
+  document.getElementById("account-row").style.display = isRoll ? "none" : "";
+  document.getElementById("stake-row").style.display = isRoll ? "none" : "";
+  // toggle `required` so the browser won't block submit on a hidden field
+  document.getElementById("bet-account").required = !isRoll;
+  document.querySelector('#bet-form [name=stake]').required = !isRoll;
+  document.getElementById("bet-submit").textContent = isRoll ? "Add to parlay" : "Log bet";
+  if (targetId != null) document.getElementById("roll-target").value = String(targetId);
+}
+
+function populateRollTarget(openBets) {
+  const sel = document.getElementById("roll-target");
+  const cur = sel.value;
+  sel.innerHTML = openBets.length
+    ? openBets.map(b => {
+        const lbl = b.is_parlay ? `${b.legs.length}-leg parlay` : b.match_label;
+        return `<option value="${b.id}">#${b.id} ${lbl} (@${Number(b.odds_taken).toFixed(2)}, $${b.stake.toFixed(0)})</option>`;
+      }).join("")
+    : `<option value="">— no open bets to roll into —</option>`;
+  if (cur) sel.value = cur;
+}
+
+document.querySelectorAll('#bet-form input[name=stake_source]').forEach(r =>
+  r.addEventListener("change", () => setStakeSource(r.value)));
 
 document.getElementById("bet-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -487,6 +548,18 @@ document.getElementById("bet-form").addEventListener("submit", async (e) => {
       delete payload.cb_event_id;  // hidden prefill field — not part of edits
       r = await fetch(`/api/bets/${editingBetId}`, {
         method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } else if (stakeSource() === "roll") {
+      // Parlay: add this game as a leg of the chosen open bet. No new money —
+      // stake/account are inherited; the form's odds become the leg odds.
+      const targetId = document.getElementById("roll-target").value;
+      if (!targetId) { formError.textContent = "Pick an open bet to roll into"; return; }
+      payload.odds = payload.odds_taken;
+      for (const k of ["odds_taken","stake","account_id","book","payout","cb_event_id"]) delete payload[k];
+      r = await fetch(`/api/bets/${targetId}/legs`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -614,6 +687,31 @@ function outcomeBtns(b) {
     <button class="settle-btn${on('cashout')}"   data-action="settle" data-outcome="cashout" data-id="${b.id}" title="Cash out — you'll be asked for the amount the book paid">C/O</button>`;
 }
 
+// Parlay legs, listed under the Match cell with per-leg settle buttons. The
+// parlay status/odds/payout roll up server-side from these leg results.
+function legsBlock(b) {
+  if (!b.is_parlay || !Array.isArray(b.legs)) return "";
+  const rows = b.legs.map(l => {
+    const ln = (l.line === null || l.line === undefined) ? "" : ` ${l.line > 0 ? "+" : ""}${l.line}`;
+    const mk = `${l.market_type || ""}${ln} ${l.side}`.trim();
+    const a = o => l.status === o ? " active" : "";
+    const btns = `
+      <button class="settle-btn won${a('won')}"   data-action="leg-settle" data-id="${b.id}" data-leg="${l.leg_index}" data-outcome="won"    title="Leg won">✓</button>
+      <button class="settle-btn lost${a('lost')}" data-action="leg-settle" data-id="${b.id}" data-leg="${l.leg_index}" data-outcome="lost"   title="Leg lost">✗</button>
+      <button class="settle-btn${a('pushed')}"    data-action="leg-settle" data-id="${b.id}" data-leg="${l.leg_index}" data-outcome="pushed" title="Push — drops from the parlay">P</button>
+      <button class="settle-btn"                   data-action="leg-settle" data-id="${b.id}" data-leg="${l.leg_index}" data-outcome="open"   title="Reopen leg">↺</button>`;
+    return `<div class="leg">
+        <span class="status-chip status-${l.status}">${l.status}</span>
+        <b>${l.match_label}</b> <span class="dim">${mk} @ ${Number(l.odds).toFixed(2)}</span>
+        <span class="leg-btns">${btns}</span>
+      </div>`;
+  }).join("");
+  const pot = b.stake * b.odds_taken;
+  return `<div class="legs">${rows}
+      <div class="legs-foot dim">combined @ <b>${Number(b.odds_taken).toFixed(2)}</b> · potential payout <b>${fmtMoney(pot)}</b></div>
+    </div>`;
+}
+
 async function fetchAndRender() {
   try {
     const r = await fetch(`/api/bets?status=all`);
@@ -629,6 +727,7 @@ async function fetchAndRender() {
     const nOpen = bets.filter(b => b.status === "open").length;
     document.getElementById("bets-summary").innerHTML =
       `<b>${nOpen}</b> open · <b>${bets.length}</b> total bets`;
+    populateRollTarget(bets.filter(b => b.status === "open"));   // for the parlay picker
     if (bets.length === 0) {
       tbody.innerHTML = `<tr><td colspan="15" class="empty">no bets logged yet</td></tr>`;
       return;
@@ -642,17 +741,37 @@ async function fetchAndRender() {
       const sparkSVG = makeSparkline(hist);
       const lineLabel = (b.line === null || b.line === undefined)
         ? "" : ` ${b.line > 0 ? "+" : ""}${b.line}`;
-      const market = `${b.market_type}${lineLabel} (${b.period})`
-        + (b.submarket ? ` [${b.submarket}]` : "")
-        + (b.team_side ? ` [${b.team_side}]` : "");
-      const settle = (b.status === "open")
-        ? `<div class="settle-cell">
+      const market = b.is_parlay
+        ? `${b.legs.length} legs`
+        : `${b.market_type}${lineLabel} (${b.period})`
+            + (b.submarket ? ` [${b.submarket}]` : "")
+            + (b.team_side ? ` [${b.team_side}]` : "");
+      const matchCell = b.is_parlay ? `<b>Parlay</b>${legsBlock(b)}` : b.match_label;
+      const sideCell = b.is_parlay
+        ? `<span class="dim">${market}</span>`
+        : `<span class="dim">${market}</span> · <b>${b.side}</b>`;
+      const addLegBtn = (b.status === "open")
+        ? `<button class="settle-btn" data-action="add-leg" data-id="${b.id}" title="Add another game → parlay">➕</button>`
+        : "";
+      let settle;
+      if (b.is_parlay) {
+        // Parlays settle per-leg (in the Match cell); the row keeps add-leg/edit/delete.
+        const head = (b.status === "open") ? ""
+          : `<span class="row-count" style="margin:0">${fmtMoney(b.payout || 0)}</span>`;
+        settle = `<div class="settle-cell">${head}${addLegBtn}
+             <button class="settle-btn"      data-action="edit"    data-id="${b.id}" title="Edit stake / account">✎</button>
+             <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
+           </div>`;
+      } else if (b.status === "open") {
+        settle = `<div class="settle-cell">
              ${outcomeBtns(b)}
              ${chartCellBet(b)}
+             ${addLegBtn}
              <button class="settle-btn"      data-action="edit"    data-id="${b.id}" title="Edit this bet (stake, odds, market, account…)">✎</button>
              <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
-           </div>`
-        : `<div class="settle-cell">
+           </div>`;
+      } else {
+        settle = `<div class="settle-cell">
              <span class="row-count" style="margin:0">${fmtMoney(b.payout || 0)}</span>
              ${outcomeBtns(b)}
              <button class="settle-btn"      data-action="settle" data-outcome="open" data-id="${b.id}" title="Reopen (un-settle this bet)">↺</button>
@@ -660,13 +779,14 @@ async function fetchAndRender() {
              <button class="settle-btn"      data-action="edit"    data-id="${b.id}" title="Edit this bet (stake, odds, payout…)">✎</button>
              <button class="settle-btn del"  data-action="delete"  data-id="${b.id}" title="Delete">×</button>
            </div>`;
+      }
       return `
         <tr class="bet-row-${b.status}">
           <td class="mono dim">${fmtTime(b.placed_at)}</td>
           <td class="mono dim">${fmtTime(b.start_time)}</td>
           <td class="dim">${b.sport}</td>
-          <td>${b.match_label}</td>
-          <td><span class="dim">${market}</span> · <b>${b.side}</b></td>
+          <td>${matchCell}</td>
+          <td>${sideCell}</td>
           <td class="dim">${accountName(b)}</td>
           <td class="num">${fmtNum(b.odds_taken)}</td>
           <td class="num">$${b.stake.toFixed(0)}</td>
@@ -700,6 +820,23 @@ async function fetchAndRender() {
             headers: { "content-type": "application/json" },
             body: JSON.stringify(body),
           });
+        } else if (action === "leg-settle") {
+          await fetch(`/api/bets/${id}/legs/${btn.dataset.leg}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ outcome: btn.dataset.outcome }),
+          });
+        } else if (action === "add-leg") {
+          // open the form pre-targeted to roll a new game into THIS bet
+          editingBetId = null;
+          document.getElementById("new-bet-details").open = true;
+          const roll = document.querySelector('#bet-form input[name=stake_source][value=roll]');
+          if (roll) roll.checked = true;
+          setStakeSource("roll", id);
+          document.getElementById("bet-form-summary").textContent =
+            `Add a game to bet #${id} → parlay`;
+          document.getElementById("new-bet-details").scrollIntoView({ behavior: "smooth", block: "center" });
+          return;  // no refetch — the form is now in add-leg mode
         } else if (action === "edit") {
           const b = bets.find(x => String(x.id) === id);
           if (b) startEditBet(b);
@@ -785,13 +922,15 @@ async function loadCapital() {
     const ledger = await ledR.json();
     capAccounts = cap.accounts;
     const t = cap.totals;
+    window._capFeePct = t.withdrawal_fee_pct ?? 6;   // for the transfer fee preview
 
     const totalNet = capShowNet;
+    const feePct = t.withdrawal_fee_pct ?? 6;
     const totalVal = totalNet ? t.current_capital : t.total_gross;
     const totalLbl = totalNet ? `Total − withdrawal` : `Total`;
     const totalTip = totalNet
-      ? `Cash-out value: bank balance + (book balance + open bets) × ${(1 - (t.withdrawal_fee_pct ?? 6) / 100).toFixed(2)}. Book money (free cash + open-bet stakes) loses ${t.withdrawal_fee_pct ?? 6}% gross on withdrawal; the bank is fee-free. Click to show the gross total.`
-      : `All your money = starting capital + PnL (open bets counted at stake), before any withdrawal fee. Click to show what you'd net after withdrawing from the books (−${t.withdrawal_fee_pct ?? 6}%).`;
+      ? `Cash-out value: bank + book money minus the books' ${feePct}% GROSS withdrawal commission (${fmtMoney(t.withdrawal_cost)} right now — gross-up means 6.38 on 100, not 6). The bank is fee-free. Click to show the gross total.`
+      : `All your money = starting capital + PnL (open bets counted at stake), before any withdrawal commission. Click to show what you'd net after pulling book money to the bank (−${fmtMoney(t.withdrawal_cost)}).`;
     document.getElementById("cap-cards").innerHTML = `
       <div class="cap-card" id="card-total" style="cursor:pointer" title="${totalTip}"><div class="v">${fmtMoney(totalVal)}</div><div class="k">${totalLbl} ⇄</div></div>
       <div class="cap-card" id="card-starting" style="cursor:pointer"
@@ -799,9 +938,11 @@ async function loadCapital() {
         <div class="v">${fmtMoney(t.starting_capital)}</div>
         <div class="k">Starting capital ✎${t.starting_capital ? "" : " — click to set"}</div>
       </div>
-      <div class="cap-card"><div class="v ${moneyClass(t.settled_pnl)}">${fmtMoney(t.settled_pnl)}</div><div class="k">Settled PnL</div></div>
+      <div class="cap-card" title="Settled betting PnL ${fmtMoney(t.settled_pnl)} − withdrawal fees paid ${fmtMoney(t.commission_paid ?? 0)}. The books' withdrawal commission is a real cost, so it's deducted here."><div class="v ${moneyClass((t.net_pnl ?? t.settled_pnl))}">${fmtMoney(t.net_pnl ?? t.settled_pnl)}</div><div class="k">PnL − fees</div></div>
       <div class="cap-card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
-      <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes (turnover)">Yield</div></div>
+      <div class="cap-card" title="Withdrawal commissions actually PAID on book→bank transfers (the ${feePct}% gross fee). A real cost — deducted from PnL on the left."><div class="v ${t.commission_paid ? "neg" : ""}">${fmtMoney(t.commission_paid ?? 0)}</div><div class="k">Fees paid</div></div>
+      <div class="cap-card" title="Profit pulled OUT of the operation — transfer Bank → Dividend. Excluded from Total/equity; it's no longer working capital."><div class="v ${t.dividend_total ? "neg" : ""}">${fmtMoney(t.dividend_total ?? 0)}</div><div class="k">Dividend</div></div>
+      <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes (turnover, excl. pushes)">Yield</div></div>
       <div class="cap-card"><div class="v ${moneyClass(t.roi_pct)}">${t.roi_pct == null ? "—" : (t.roi_pct >= 0 ? "+" : "") + t.roi_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / starting capital — total return on the bankroll you put in">ROI</div></div>
       <div class="cap-card"><div class="v">${t.n_open ?? 0} <span style="color:var(--text-dim);font-size:12px">/ ${t.n_bets ?? 0}</span></div><div class="k" title="open / total bets">Bets open / total</div></div>
       <div class="cap-card curve">${pnlCurveSVG(cap.pnl_curve)}</div>
@@ -822,10 +963,18 @@ async function loadCapital() {
     document.getElementById("cap-body").innerHTML = cap.accounts.map(a => {
       const actions = a.id === null ? "" : a.archived
         ? `<button class="settle-btn" data-cap="unarchive" data-id="${a.id}">unarchive</button>`
-        : `<button class="settle-btn" data-cap="rename" data-id="${a.id}" data-name="${a.name}">✎</button>
+        : `<button class="settle-btn" data-cap="setbal" data-id="${a.id}" data-bal="${a.balance}" data-name="${a.name}" title="Set the real balance — books the difference as PnL. For when you bet a lot on a book but don't log the individual bets.">＄ bal</button>
+           <button class="settle-btn" data-cap="setexp" data-id="${a.id}" data-exp="${a.manual_open_stake || 0}" data-name="${a.name}" title="Set money tied up in OPEN bets (exposure). Moves it out of the free balance — not PnL. Lower it again when those bets settle.">⧗ exp</button>
+           <button class="settle-btn" data-cap="rename" data-id="${a.id}" data-name="${a.name}">✎</button>
+           <button class="settle-btn" data-cap="tag" data-id="${a.id}" data-tag="${a.book_tag || ''}" title="Set book tag — a tagged account is a BOOK (charges the withdrawal fee on book→bank); empty = the bank/cash (fee-free)">🏷</button>
            <button class="settle-btn del" data-cap="delete" data-id="${a.id}" title="delete (archives if it has history)">×</button>`;
+      const tagChip = a.is_dividend
+        ? ` <span class="dim mono" title="dividend sink — money pulled out of the operation, excluded from Total">·dividend</span>`
+        : a.book_tag
+        ? ` <span class="dim mono" title="book tag — charges the withdrawal fee on withdrawals to the bank">·${a.book_tag}</span>`
+        : (a.id ? ` <span class="dim" title="no book tag — treated as the bank/cash, so NO withdrawal fee">·bank</span>` : "");
       return `<tr class="${a.archived ? "arch" : ""}">
-        <td>${a.name}${a.archived ? ' <span class="dim">(archived)</span>' : ""}</td>
+        <td>${a.name}${tagChip}${a.archived ? ' <span class="dim">(archived)</span>' : ""}</td>
         <td class="num">${fmtMoney(a.opening)}</td>
         <td class="num">${fmtMoney(a.ledger_net)}</td>
         <td class="num ${moneyClass(a.bet_pnl)}">${fmtMoney(a.bet_pnl)}</td>
@@ -872,6 +1021,37 @@ async function loadCapital() {
           await capFetch(`/api/capital/accounts/${id}`, "DELETE");
         } else if (act === "unarchive") {
           await capFetch(`/api/capital/accounts/${id}`, "PATCH", { unarchive: true });
+        } else if (act === "setbal") {
+          const cur = parseFloat(btn.dataset.bal) || 0;
+          const v = prompt(
+            `Set the real balance of "${btn.dataset.name}".\n\n` +
+            `Current tracked balance: ${cur.toFixed(2)}.\n` +
+            `The difference is booked as PnL — settled PnL, ROI, net-PnL and the ` +
+            `curve all update automatically. (Use this instead of logging every bet.)`,
+            cur.toFixed(2));
+          if (v === null) return;
+          const bal = parseFloat(v);
+          if (isNaN(bal)) { alert("Enter a number"); return; }
+          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { balance: bal });
+        } else if (act === "setexp") {
+          const cur = parseFloat(btn.dataset.exp) || 0;
+          const v = prompt(
+            `Money tied up in OPEN bets on "${btn.dataset.name}" (exposure).\n\n` +
+            `This moves out of the free balance (it's not PnL). Lower it again as ` +
+            `those bets settle, then update the balance.`,
+            cur.toFixed(2));
+          if (v === null) return;
+          const exp = parseFloat(v);
+          if (isNaN(exp) || exp < 0) { alert("Enter a non-negative number"); return; }
+          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { open_exposure: exp });
+        } else if (act === "tag") {
+          const tag = prompt(
+            "Book tag — controls the withdrawal fee.\n\n" +
+            "Set to the book (e.g. liderbet, betlive) → withdrawals to the bank are charged the gross commission.\n" +
+            "Leave EMPTY for the bank / your own cash (fee-free).",
+            btn.dataset.tag);
+          if (tag === null) return;
+          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { book_tag: tag });
         }
         loadCapital();
       });
@@ -959,9 +1139,30 @@ document.getElementById("transfer-form").addEventListener("submit", async (e) =>
       amount: parseFloat(fd.get("amount")),
     });
     e.target.reset();
+    updateTransferHint();
     loadCapital();
   } catch (_) {}
 });
+
+// Live preview of the book→bank withdrawal commission (gross-up: 6.38 on 100).
+function updateTransferHint() {
+  const hint = document.getElementById("transfer-fee-hint");
+  const from = capAccounts.find(a => String(a.id) === document.getElementById("transfer-from").value);
+  const to = capAccounts.find(a => String(a.id) === document.getElementById("transfer-to").value);
+  const amt = parseFloat(document.querySelector("#transfer-form [name=amount]").value);
+  const feePct = (window._capFeePct ?? 6);
+  if (from && to && from.book_tag && !to.book_tag && amt > 0) {
+    const comm = amt * feePct / (100 - feePct);            // 6.38 on 100
+    hint.textContent = `${from.name} → ${to.name}: −${feePct}% gross commission `
+      + `${fmtMoney(comm)} → bank gets ${fmtMoney(amt - comm)}`;
+    hint.style.color = "var(--bad)";
+  } else {
+    hint.textContent = "";
+  }
+}
+["transfer-from", "transfer-to"].forEach(id =>
+  document.getElementById(id).addEventListener("change", updateTransferHint));
+document.querySelector("#transfer-form [name=amount]").addEventListener("input", updateTransferHint);
 
 // Capital performance-window chips (7d / 30d / 90d / All).
 document.getElementById("cap-window").addEventListener("click", (e) => {

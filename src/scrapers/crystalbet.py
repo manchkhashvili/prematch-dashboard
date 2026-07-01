@@ -115,6 +115,22 @@ _USE_HTTP_TRANSPORT = CB_TRANSPORT == "http"
 if _USE_HTTP_TRANSPORT:
     log.info("CB_TRANSPORT=http — browser-free transport (no Playwright)")
 
+# The hourly anomaly scan sweeps the WHOLE basketball board in full detail, so it
+# is the most transport-sensitive job. It defaults to the browser-free HTTP path
+# even when the main app runs Playwright — ExpandDetail is ~355 KB / ~0.3 s per
+# game over HTTP vs seconds of browser nav, and needs no Chromium. The cb_http
+# sessions are independent of the Playwright pages, so the two transports coexist
+# fine. Override with CB_ANOMALY_TRANSPORT=playwright to force the browser path.
+CB_ANOMALY_TRANSPORT = os.environ.get("CB_ANOMALY_TRANSPORT", "http").strip().lower()
+if CB_ANOMALY_TRANSPORT not in ("playwright", "http"):
+    raise ValueError(
+        f"CB_ANOMALY_TRANSPORT={CB_ANOMALY_TRANSPORT!r} — must be 'playwright' or 'http'"
+    )
+_ANOMALY_USE_HTTP = CB_ANOMALY_TRANSPORT == "http"
+if _ANOMALY_USE_HTTP and not _USE_HTTP_TRANSPORT:
+    log.info("CB_ANOMALY_TRANSPORT=http — anomaly scan runs browser-free "
+             "(no Playwright) even though CB_TRANSPORT=playwright")
+
 LEAGUE_SKIP = frozenset({"outright", "outrights"})
 
 # Saved-HTML sample paths (one per sport — used by dry_run_parse_saved
@@ -910,10 +926,13 @@ async def _expand_and_parse_one_http(
 
 async def _expand_game(
     game: _GameOnList, fetched_at: datetime, sport: Any, page: Any,
-    classify: Any = None, ladder_mode: bool = False,
+    classify: Any = None, ladder_mode: bool = False, use_http: bool | None = None,
 ) -> list[Odds]:
-    """Transport dispatch for one game's detail expansion."""
-    if _USE_HTTP_TRANSPORT:
+    """Transport dispatch for one game's detail expansion. `use_http` overrides
+    the global CB_TRANSPORT for this call (None = follow the global), letting the
+    anomaly scan run browser-free even on a Playwright main app."""
+    http = _USE_HTTP_TRANSPORT if use_http is None else use_http
+    if http:
         return await _expand_and_parse_one_http(
             game, fetched_at, sport, classify=classify, ladder_mode=ladder_mode,
         )
@@ -923,13 +942,14 @@ async def _expand_game(
 
 
 async def _refresh_list_html_for_sport(
-    sport_id: int, sport_name: str, *, headed: bool,
+    sport_id: int, sport_name: str, *, headed: bool, use_http: bool | None = None,
 ) -> tuple[Any, str]:
     """Fetch the list-view HTML via the configured transport, with the
     standard reset-and-retry-once on failure. Returns (page, list_html);
     page is None on the HTTP transport (expansion doesn't need it there).
+    `use_http` overrides CB_TRANSPORT for this call (None = follow the global).
     """
-    if _USE_HTTP_TRANSPORT:
+    if _USE_HTTP_TRANSPORT if use_http is None else use_http:
         try:
             return None, await cb_http.fetch_list_html(sport_id)
         except Exception as e:
@@ -963,6 +983,7 @@ async def _refresh_list_html_for_sport(
 async def _fetch_for_sport(
     sport: Any, *, headed: bool, force_detail: bool = False,
     classify_override: Any = None, bypass_cache: bool = False,
+    use_http: bool | None = None,
 ) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
@@ -982,7 +1003,7 @@ async def _fetch_for_sport(
     async with sport_lock:
         # ── 1. List view refresh (transport-dispatched, retry-once inside) ──
         page, list_html = await _refresh_list_html_for_sport(
-            sport_id, sport_name, headed=headed,
+            sport_id, sport_name, headed=headed, use_http=use_http,
         )
 
         # ── 2. Per-game extraction from list HTML ──
@@ -1038,7 +1059,7 @@ async def _fetch_for_sport(
                 try:
                     detail_odds = await _expand_game(
                         game, fetched_at, sport, page,
-                        classify=classify_override, ladder_mode=True,
+                        classify=classify_override, ladder_mode=True, use_http=use_http,
                     )
                     if detail_odds:
                         all_odds.extend(detail_odds)
@@ -1088,7 +1109,7 @@ async def _fetch_for_sport(
             if cache.needs_expansion(game.event_id, game.loadinfo):
                 try:
                     detail_odds = await _expand_game(
-                        game, fetched_at, sport, page,
+                        game, fetched_at, sport, page, use_http=use_http,
                     )
                     if detail_odds:
                         cache.mark_loaded(game.event_id, game.loadinfo)
@@ -1174,7 +1195,7 @@ async def fetch_crystalbet_basketball_anomaly_ladders(
     return await _fetch_for_sport(
         basketball, headed=headed, force_detail=True,
         classify_override=basketball.classify_market_title_permissive,
-        bypass_cache=True,
+        bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
     )
 
 
@@ -1197,7 +1218,7 @@ async def fetch_crystalbet_basketball_games(
     sport_lock = _get_sport_lock(sport_id)
     async with sport_lock:
         page, list_html = await _refresh_list_html_for_sport(
-            sport_id, sport.SPORT_NAME, headed=headed,
+            sport_id, sport.SPORT_NAME, headed=headed, use_http=_ANOMALY_USE_HTTP,
         )
         games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
         targets = [g for g in games if g.event_id in wanted]
@@ -1209,7 +1230,7 @@ async def fetch_crystalbet_basketball_games(
                 detail = await _expand_game(
                     g, fetched_at, sport, page,
                     classify=sport.classify_market_title_permissive,
-                    ladder_mode=True,
+                    ladder_mode=True, use_http=_ANOMALY_USE_HTTP,
                 )
                 out.extend(detail if detail else g.list_odds)
             except Exception as e:

@@ -22,7 +22,7 @@ Two tables, one foreign-key relationship:
     side              TEXT NOT NULL          home | away | draw | over | under
     submarket         TEXT                   corners | None (for soccer corner markets)
     team_side         TEXT                   home | away | None (for team_total)
-    book              TEXT NOT NULL          cb | pin | other
+    book              TEXT NOT NULL          free-form book/account tag (cb, pin, betlive, 1xbet, …)
     odds_taken        REAL NOT NULL          decimal
     stake             REAL NOT NULL
     bankroll_at_time  REAL NOT NULL
@@ -95,7 +95,10 @@ def _resolve_db_path(path: Path | None) -> Path:
 # "cashout" (2026-06-12): settled early at a book-offered amount — payout is
 # whatever the book paid, supplied by the user (no formula).
 VALID_STATUSES = ("open", "won", "lost", "pushed", "void", "cashout")
-VALID_BOOKS = ("cb", "pin", "other")
+# `book` is FREE-FORM: it's just the bet's account book_tag, so any account/book
+# (betlive, 1xbet, a new one tomorrow) is first-class with zero code change.
+# KNOWN_BOOKS is ONLY a suggestion list for the UI datalist + docs — NOT enforced.
+KNOWN_BOOKS = ("cb", "pin", "liderbet", "betlive", "other")
 
 _conn: sqlite3.Connection | None = None
 _conn_lock = threading.Lock()
@@ -178,6 +181,31 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_history_bet ON bet_odds_history(bet_id);
 
+        -- Parlay legs (2026-06-18): a parlay is ONE bets row (the header — one
+        -- stake, combined odds = Π legs, rolled-up status/payout) plus N rows
+        -- here, one per game. A single bet has zero leg rows and is unchanged.
+        -- Keeping a parlay as one bets row is what keeps the capital invariant
+        -- (one stake, one payout) correct with no double-counted exposure.
+        CREATE TABLE IF NOT EXISTS bet_legs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bet_id INTEGER NOT NULL REFERENCES bets(id) ON DELETE CASCADE,
+            leg_index INTEGER NOT NULL,
+            sport TEXT,
+            cb_event_id TEXT,
+            match_label TEXT NOT NULL,
+            period TEXT,
+            market_type TEXT,
+            line REAL,
+            side TEXT NOT NULL,
+            submarket TEXT,
+            team_side TEXT,
+            start_time TEXT,
+            odds REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            UNIQUE(bet_id, leg_index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_legs_bet ON bet_legs(bet_id);
+
         -- Capital tracker (src/capital.py): where the bankroll lives.
         -- accounts = places money sits (a book, the bank, cash). book_tag
         -- optionally links an account to the bets.book value so legacy bets
@@ -187,7 +215,13 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             name TEXT NOT NULL UNIQUE,
             book_tag TEXT,
             created_at TEXT NOT NULL,
-            archived INTEGER NOT NULL DEFAULT 0
+            archived INTEGER NOT NULL DEFAULT 0,
+            -- 1 = a "dividend" sink: profit pulled OUT of the operation. Excluded
+            -- from working capital/equity; the Total is reduced by what sits here.
+            is_dividend INTEGER NOT NULL DEFAULT 0,
+            -- manually-tracked open-bet exposure (money tied up in unsettled bets
+            -- you didn't log individually). Adds to open_stake; reduces free balance.
+            manual_open_stake REAL NOT NULL DEFAULT 0
         );
         -- ledger = signed money movements that are NOT bet results:
         -- opening (starting capital), deposit, withdraw, transfer (paired
@@ -208,6 +242,18 @@ def _create_schema(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(bets)")}
     if "account_id" not in cols:
         conn.execute("ALTER TABLE bets ADD COLUMN account_id INTEGER")
+    # is_parlay (2026-06-18): 1 when this bets row is a parlay header (its legs
+    # live in bet_legs). 0/absent = ordinary single bet.
+    if "is_parlay" not in cols:
+        conn.execute("ALTER TABLE bets ADD COLUMN is_parlay INTEGER NOT NULL DEFAULT 0")
+    # is_dividend (2026-06-21): mark an account as a dividend sink (money pulled
+    # out of the operation, excluded from working capital).
+    acct_cols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
+    if "is_dividend" not in acct_cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN is_dividend INTEGER NOT NULL DEFAULT 0")
+    # manual_open_stake (2026-07-01): manually-set open-bet exposure per account.
+    if "manual_open_stake" not in acct_cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN manual_open_stake REAL NOT NULL DEFAULT 0")
 
 
 def _require_conn() -> sqlite3.Connection:
@@ -240,8 +286,8 @@ def create_bet(**fields: Any) -> int:
     missing = [k for k in required if k not in fields or fields[k] is None]
     if missing:
         raise ValueError(f"create_bet missing required fields: {missing}")
-    if fields["book"] not in VALID_BOOKS:
-        raise ValueError(f"book must be one of {VALID_BOOKS}; got {fields['book']!r}")
+    if not isinstance(fields["book"], str) or not fields["book"].strip():
+        raise ValueError(f"book must be a non-empty string; got {fields['book']!r}")
     if float(fields["odds_taken"]) <= 1.0:
         raise ValueError(f"odds_taken must be > 1.0; got {fields['odds_taken']}")
     if float(fields["stake"]) <= 0:
@@ -316,8 +362,8 @@ def update_bet(bet_id: int, **fields: Any) -> bool:
         return False
     if "status" in fields and fields["status"] not in VALID_STATUSES:
         raise ValueError(f"status must be one of {VALID_STATUSES}; got {fields['status']!r}")
-    if "book" in fields and fields["book"] not in VALID_BOOKS:
-        raise ValueError(f"book must be one of {VALID_BOOKS}; got {fields['book']!r}")
+    if "book" in fields and (not isinstance(fields["book"], str) or not fields["book"].strip()):
+        raise ValueError(f"book must be a non-empty string; got {fields['book']!r}")
     if fields.get("odds_taken") is not None and float(fields["odds_taken"]) <= 1.0:
         raise ValueError(f"odds_taken must be > 1.0; got {fields['odds_taken']}")
     if fields.get("stake") is not None and float(fields["stake"]) <= 0:
@@ -381,6 +427,183 @@ def delete_bet(bet_id: int) -> bool:
     with _conn_lock:
         cur = conn.execute("DELETE FROM bets WHERE id = ?", (bet_id,))
         return cur.rowcount > 0
+
+
+# ── Parlays (bet_legs) ────────────────────────────────────────────────────────
+# A parlay is ONE bets row (header) + N bet_legs rows. The header's stake is the
+# single real wager; its odds_taken/status/payout are DERIVED from the legs by
+# _recompute_parlay. A single bet has no legs and is untouched by all of this.
+_LEG_FIELDS = (
+    "sport", "cb_event_id", "match_label", "period", "market_type", "line",
+    "side", "submarket", "team_side", "start_time", "odds", "status",
+)
+_LEG_OUTCOMES = ("won", "lost", "pushed", "void", "open")
+
+
+def list_legs(bet_id: int) -> list[dict]:
+    conn = _require_conn()
+    with _conn_lock:
+        rows = conn.execute(
+            "SELECT * FROM bet_legs WHERE bet_id = ? ORDER BY leg_index", (bet_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _insert_leg(conn: sqlite3.Connection, bet_id: int, leg_index: int, leg: dict) -> int:
+    payload = {k: leg.get(k) for k in _LEG_FIELDS}
+    payload["status"] = leg.get("status") or "open"
+    payload["bet_id"] = bet_id
+    payload["leg_index"] = leg_index
+    fields = ("bet_id", "leg_index", *_LEG_FIELDS)
+    cols = ", ".join(fields)
+    ph = ", ".join(f":{k}" for k in fields)
+    return conn.execute(f"INSERT INTO bet_legs ({cols}) VALUES ({ph})", payload).lastrowid
+
+
+def add_leg(bet_id: int, **leg: Any) -> int:
+    """Add a game (leg) to a bet, turning it into a parlay. The bet must be OPEN.
+    The first call migrates the bet's own market into leg 1, so combined odds =
+    product of all legs. Stake/account are untouched — no new money. Returns the
+    new leg's id."""
+    for k in ("match_label", "side", "odds"):
+        if leg.get(k) in (None, ""):
+            raise ValueError(f"add_leg missing required leg field: {k}")
+    if float(leg["odds"]) <= 1.0:
+        raise ValueError(f"leg odds must be > 1.0; got {leg['odds']}")
+    bet = get_bet(bet_id)
+    if not bet:
+        raise ValueError(f"bet {bet_id} not found")
+    if bet["status"] != "open":
+        raise ValueError("can only add a leg to an open bet")
+    conn = _require_conn()
+    with _conn_lock:
+        existing = conn.execute(
+            "SELECT COALESCE(MAX(leg_index), 0) FROM bet_legs WHERE bet_id = ?", (bet_id,)
+        ).fetchone()[0]
+        if not bet["is_parlay"]:
+            # fold the header's own market down into leg 1
+            _insert_leg(conn, bet_id, 1, {
+                "sport": bet["sport"], "cb_event_id": bet["cb_event_id"],
+                "match_label": bet["match_label"], "period": bet["period"],
+                "market_type": bet["market_type"], "line": bet["line"],
+                "side": bet["side"], "submarket": bet["submarket"],
+                "team_side": bet["team_side"], "start_time": bet["start_time"],
+                "odds": bet["odds_taken"], "status": "open",
+            })
+            conn.execute("UPDATE bets SET is_parlay = 1 WHERE id = ?", (bet_id,))
+            existing = 1
+        leg_id = _insert_leg(conn, bet_id, existing + 1, leg)
+    _recompute_parlay(bet_id)
+    return leg_id
+
+
+def settle_leg(bet_id: int, leg_index: int, outcome: str) -> bool:
+    """Set one leg's result (won|lost|pushed|void|open) and roll the parlay up.
+    Returns True if a leg row changed."""
+    if outcome not in _LEG_OUTCOMES:
+        raise ValueError(f"leg outcome must be one of {_LEG_OUTCOMES}; got {outcome!r}")
+    conn = _require_conn()
+    with _conn_lock:
+        changed = conn.execute(
+            "UPDATE bet_legs SET status = ? WHERE bet_id = ? AND leg_index = ?",
+            (outcome, bet_id, leg_index),
+        ).rowcount > 0
+    if changed:
+        _recompute_parlay(bet_id)
+    return changed
+
+
+def remove_leg(bet_id: int, leg_index: int) -> bool:
+    """Drop a leg. If the parlay falls to a single remaining leg, fold it back to
+    an ordinary single bet (the remaining leg's market on the header)."""
+    conn = _require_conn()
+    with _conn_lock:
+        changed = conn.execute(
+            "DELETE FROM bet_legs WHERE bet_id = ? AND leg_index = ?",
+            (bet_id, leg_index),
+        ).rowcount > 0
+        if changed:                       # re-index the survivors 1..N
+            rows = conn.execute(
+                "SELECT id FROM bet_legs WHERE bet_id = ? ORDER BY leg_index", (bet_id,)
+            ).fetchall()
+            for i, r in enumerate(rows, 1):
+                conn.execute("UPDATE bet_legs SET leg_index = ? WHERE id = ?", (i, r["id"]))
+            n = len(rows)
+    if not changed:
+        return False
+    if n <= 1:
+        _fold_to_single(bet_id)
+    else:
+        _recompute_parlay(bet_id)
+    return True
+
+
+def _fold_to_single(bet_id: int) -> None:
+    """Collapse a 1-leg (or 0-leg) parlay back to a plain single bet."""
+    conn = _require_conn()
+    with _conn_lock:
+        leg = conn.execute(
+            "SELECT * FROM bet_legs WHERE bet_id = ? ORDER BY leg_index LIMIT 1", (bet_id,)
+        ).fetchone()
+        if leg is not None:
+            conn.execute(
+                "UPDATE bets SET is_parlay = 0, sport = ?, cb_event_id = ?, "
+                "match_label = ?, period = ?, market_type = ?, line = ?, side = ?, "
+                "submarket = ?, team_side = ?, start_time = ?, odds_taken = ? WHERE id = ?",
+                (leg["sport"], leg["cb_event_id"], leg["match_label"], leg["period"],
+                 leg["market_type"], leg["line"], leg["side"], leg["submarket"],
+                 leg["team_side"], leg["start_time"], leg["odds"], bet_id),
+            )
+            conn.execute("DELETE FROM bet_legs WHERE bet_id = ?", (bet_id,))
+        else:
+            conn.execute("UPDATE bets SET is_parlay = 0 WHERE id = ?", (bet_id,))
+
+
+def _recompute_parlay(bet_id: int) -> None:
+    """Derive the parlay header (odds_taken, status, payout, settled_at) from its
+    legs. No-op for a bet with no legs. Roll-up:
+      any leg lost           → lost,  payout 0
+      all settled, ≥1 won    → won,   payout = stake × Π(won-leg odds)
+      all settled, none won  → pushed (full refund)
+      otherwise              → open
+    pushed/void legs drop out of every product (factor 1.0)."""
+    conn = _require_conn()
+    with _conn_lock:
+        legs = conn.execute(
+            "SELECT odds, status FROM bet_legs WHERE bet_id = ? ORDER BY leg_index",
+            (bet_id,),
+        ).fetchall()
+        if not legs:
+            return
+        row = conn.execute("SELECT stake FROM bets WHERE id = ?", (bet_id,)).fetchone()
+        if row is None:
+            return
+        stake = row["stake"]
+        statuses = [l["status"] for l in legs]
+        combined = 1.0                    # header odds = product of legs still standing
+        for l in legs:
+            if l["status"] not in ("pushed", "void"):
+                combined *= l["odds"]
+        now = _now_iso()
+        if "lost" in statuses:
+            status, payout, settled_at = "lost", 0.0, now
+        elif all(s in ("won", "pushed", "void") for s in statuses):
+            won_odds = 1.0
+            for l in legs:
+                if l["status"] == "won":
+                    won_odds *= l["odds"]
+            if "won" in statuses:
+                status, payout = "won", stake * won_odds
+            else:                         # every leg pushed/void → stake back
+                status, payout = "pushed", stake
+            settled_at = now
+        else:
+            status, payout, settled_at = "open", None, None
+        conn.execute(
+            "UPDATE bets SET is_parlay = 1, odds_taken = ?, status = ?, "
+            "payout = ?, settled_at = ? WHERE id = ?",
+            (combined, status, payout, settled_at, bet_id),
+        )
 
 
 # ── History tracking ─────────────────────────────────────────────────────────

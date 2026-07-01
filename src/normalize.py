@@ -56,6 +56,35 @@ def has_youth_tag(name: str) -> bool:
     """True if the team name carries a youth/age-group marker (U16–U23)."""
     return bool(_YOUTH_TAG.search(name or ""))
 
+
+# Women's-competition markers. Unlike youth tags, gender is carried in the
+# LEAGUE, not the team names: an Australian NBL1 double-header lists the men's and
+# women's games with IDENTICAL club names ("Southern Tigers v North Adelaide
+# Rockets") distinguished only by "Women" in the league ("NBL1" vs "NBL1 Women").
+# Checked deaccented so "Féminine" → "feminine"; men's leagues are simply
+# unmarked, so the flag is binary (women vs not) exactly like the youth guard.
+_WOMEN_TAG = re.compile(
+    r"(?i)(?:\b(?:women|womens|woman|ladies|female|feminine|feminin|femminile|"
+    r"frauen|damen|dames|femenino|femenina|mujeres|senhoras)\b|\(w\))"
+)
+
+
+def has_women_tag(*texts: str) -> bool:
+    """True if any string (league and/or team names) marks a WOMEN's competition.
+
+    Used to (1) keep a men's and women's game with identical team names from
+    collapsing into one event, and (2) stop a women's event matching a men's one
+    — the gender analogue of has_youth_tag. The marker normally lives in the
+    league; team names are checked too for books that suffix "(W)"."""
+    for t in texts:
+        if not t:
+            continue
+        flat = "".join(c for c in unicodedata.normalize("NFD", t)
+                       if unicodedata.category(c) != "Mn")
+        if _WOMEN_TAG.search(flat):
+            return True
+    return False
+
 _WHITESPACE = re.compile(r"\s+")
 _NON_ALNUM = re.compile(r"[^a-z0-9 ]")
 

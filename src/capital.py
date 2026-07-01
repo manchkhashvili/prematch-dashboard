@@ -18,9 +18,9 @@ deposits/withdrawals never bend the PnL number, only the balance.
 
 Attribution: each bet flows through bets.account_id when set (the bets-page
 picker). Legacy bets (NULL account_id) attribute via accounts.book_tag
-matching bets.book ('cb' | 'pin' | 'other'). Bets that match neither are
-aggregated under a virtual "(unassigned)" row so the totals always reconcile
-with the bets table.
+matching bets.book ('cb' | 'pin' | 'liderbet' | 'betlive' | 'other'). Bets that
+match neither are aggregated under a virtual "(unassigned)" row so the totals
+always reconcile with the bets table.
 
 Deleting an account: hard delete only when nothing references it (no ledger
 rows, no attributed bets — directly or via book_tag); otherwise it archives,
@@ -43,20 +43,31 @@ from src.bets import _now_iso, _require_conn, _conn_lock  # shared DB conn/lock
 
 log = logging.getLogger(__name__)
 
-LEDGER_KINDS = ("opening", "deposit", "withdraw", "transfer", "adjustment")
+LEDGER_KINDS = ("opening", "deposit", "withdraw", "transfer", "adjustment",
+                "commission", "pnl")
 
-# Books charge a gross commission on withdrawals (the owner's books: ~6%).
+# Books charge a GROSS commission on withdrawals (the owner's books: ~6%).
 # Applied to BOOK accounts (those with a book_tag) when valuing "what you'd
-# actually have if you pulled the money out". The Bank (no tag) is fee-free —
-# it's already your own money. Override with WITHDRAWAL_FEE_PCT.
+# actually have if you pulled the money out" and when transferring book→bank.
+# The Bank (no tag) is fee-free — it's already your own money. Override via env.
 WITHDRAWAL_FEE_PCT = float(os.environ.get("WITHDRAWAL_FEE_PCT", "6"))
 
-# Seeded once into an empty accounts table: covers the three bets.book values
-# (so every legacy bet attributes somewhere) + the bank. Rename/delete freely.
+
+def withdrawal_rate() -> float:
+    """Commission to pull money from a book to the bank, as a fraction of the
+    amount withdrawn. The fee is quoted GROSS, so it grosses up: a 6% gross fee
+    costs 6/(100−6) = 6.38% of what you take out — 6.38 on 100, not 6."""
+    f = WITHDRAWAL_FEE_PCT
+    return f / (100.0 - f) if 0 < f < 100 else 0.0
+
+# Seeded once into an empty accounts table: covers every bets.book value (so
+# every legacy bet attributes somewhere) + the bank. Rename/delete freely.
 _DEFAULT_ACCOUNTS = (
     ("Bank", None),
     ("CrystalBet", "cb"),
     ("Pinnacle", "pin"),
+    ("Lider-Bet", "liderbet"),
+    ("Betlive", "betlive"),
     ("Other books", "other"),
 )
 
@@ -89,17 +100,34 @@ def list_accounts(include_archived: bool = True) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def add_account(name: str, book_tag: Optional[str] = None) -> int:
+def ensure_dividend_account() -> int | None:
+    """Create the 'Dividend' sink account if none exists yet. Idempotent — runs
+    every boot so existing DBs gain it too (unlike ensure_seed_accounts, which
+    only fires on an empty table). Returns its id."""
+    conn = _require_conn()
+    with _conn_lock:
+        row = conn.execute(
+            "SELECT id FROM accounts WHERE is_dividend = 1 LIMIT 1").fetchone()
+        if row:
+            return row["id"]
+        cur = conn.execute(
+            "INSERT INTO accounts (name, book_tag, created_at, is_dividend) "
+            "VALUES (?, NULL, ?, 1)", ("Dividend", _now_iso()))
+        log.info("capital: created Dividend account (id=%d)", cur.lastrowid)
+        return cur.lastrowid
+
+
+def add_account(name: str, book_tag: Optional[str] = None,
+                is_dividend: bool = False) -> int:
     name = (name or "").strip()
     if not name:
         raise ValueError("account name required")
-    if book_tag is not None and book_tag not in _bets.VALID_BOOKS:
-        raise ValueError(f"book_tag must be one of {_bets.VALID_BOOKS} or null")
+    book_tag = (book_tag or "").strip() or None   # free-form; any book is first-class
     conn = _require_conn()
     with _conn_lock:
         cur = conn.execute(
-            "INSERT INTO accounts (name, book_tag, created_at) VALUES (?, ?, ?)",
-            (name, book_tag, _now_iso()),
+            "INSERT INTO accounts (name, book_tag, created_at, is_dividend) VALUES (?, ?, ?, ?)",
+            (name, book_tag, _now_iso(), 1 if is_dividend else 0),
         )
         return cur.lastrowid
 
@@ -112,6 +140,59 @@ def rename_account(account_id: int, name: str) -> bool:
     with _conn_lock:
         cur = conn.execute(
             "UPDATE accounts SET name = ? WHERE id = ?", (name, account_id)
+        )
+        return cur.rowcount > 0
+
+
+def set_balance(account_id: int, new_balance: float,
+                note: Optional[str] = None) -> float:
+    """Reconcile an account to `new_balance`, booking the difference as realized
+    PnL (a 'pnl' ledger row). For when you bet a lot on a book but don't log the
+    individual bets: just set the balance you see and the swing becomes PnL,
+    flowing into settled PnL / ROI / net-PnL / equity / the curve automatically.
+    Returns the PnL delta applied (0.0 if already matching)."""
+    new_balance = float(new_balance)
+    row = next((a for a in capital_summary()["accounts"] if a["id"] == account_id), None)
+    if row is None:
+        raise KeyError(f"account {account_id} not found")
+    delta = round(new_balance - row["balance"], 2)
+    if abs(delta) < 0.005:
+        return 0.0
+    base = f" — {note}" if note else ""
+    conn = _require_conn()
+    with _conn_lock:
+        conn.execute(
+            "INSERT INTO ledger (ts, account_id, kind, amount, note) VALUES (?, ?, 'pnl', ?, ?)",
+            (_now_iso(), account_id, delta,
+             f"balance set to {new_balance:.2f} (PnL {delta:+.2f}){base}"),
+        )
+    return delta
+
+
+def set_open_exposure(account_id: int, amount: float) -> bool:
+    """Set an account's manually-tracked open-bet exposure (money tied up in
+    unsettled bets you didn't log). It adds to open_stake and reduces the free
+    balance — but is NOT PnL (placing a bet just moves cash into exposure). When
+    those bets settle, update the balance (set_balance) and lower this again."""
+    amount = max(0.0, float(amount))
+    conn = _require_conn()
+    with _conn_lock:
+        cur = conn.execute("UPDATE accounts SET manual_open_stake = ? WHERE id = ?",
+                           (round(amount, 2), account_id))
+        return cur.rowcount > 0
+
+
+def set_book_tag(account_id: int, book_tag: Optional[str]) -> bool:
+    """Set/clear an account's book_tag (free-form). A tagged account is a BOOK
+    (charges the withdrawal commission on book→bank transfers and in the cash-out
+    valuation); an untagged account is the bank/cash (fee-free). Lets you fix an
+    account that was created without a tag — e.g. a 'Liderbet' that defaulted to
+    null and was therefore treated as fee-free."""
+    book_tag = (book_tag or "").strip() or None
+    conn = _require_conn()
+    with _conn_lock:
+        cur = conn.execute(
+            "UPDATE accounts SET book_tag = ? WHERE id = ?", (book_tag, account_id)
         )
         return cur.rowcount > 0
 
@@ -195,7 +276,13 @@ def add_entry(
 def transfer(
     from_id: int, to_id: int, amount: float, note: Optional[str] = None,
 ) -> tuple[int, int]:
-    """Move money between two accounts — a paired ledger row on each side."""
+    """Move `amount` out of from_id into to_id — a paired ledger row each side.
+
+    Withdrawing FROM a book TO the bank charges the book's gross commission: the
+    full `amount` leaves the book, the bank receives `amount − commission`, where
+    commission = amount × withdrawal_rate() (6.38 on 100 at a 6% gross fee). Any
+    other direction (deposit, book↔book, bank↔bank) is fee-free and conserves the
+    amount. Returns (out_id, in_id)."""
     amount = abs(float(amount))
     if amount == 0:
         raise ValueError("amount must be non-zero")
@@ -203,24 +290,38 @@ def transfer(
         raise ValueError("transfer needs two different accounts")
     conn = _require_conn()
     with _conn_lock:
-        names = {
-            r["id"]: r["name"] for r in conn.execute(
-                "SELECT id, name FROM accounts WHERE id IN (?, ?)",
+        accts = {
+            r["id"]: r for r in conn.execute(
+                "SELECT id, name, book_tag FROM accounts WHERE id IN (?, ?)",
                 (from_id, to_id),
             ).fetchall()
         }
-        if from_id not in names or to_id not in names:
+        if from_id not in accts or to_id not in accts:
             raise KeyError("both transfer accounts must exist")
+        # Commission only on a real withdrawal: book (tagged) → bank (untagged).
+        # The transfer pair is balanced (full amount); the commission is its own
+        # 'commission' row so the fee actually PAID is tracked + reported (and
+        # deducted from PnL), not just implied by an asymmetric pair.
+        commission = 0.0
+        if accts[from_id]["book_tag"] and not accts[to_id]["book_tag"]:
+            commission = round(amount * withdrawal_rate(), 2)
         ts = _now_iso()
         base = f" — {note}" if note else ""
         out_id = conn.execute(
             "INSERT INTO ledger (ts, account_id, kind, amount, note) VALUES (?, ?, 'transfer', ?, ?)",
-            (ts, from_id, -amount, f"to {names[to_id]}{base}"),
+            (ts, from_id, -amount, f"to {accts[to_id]['name']}{base}"),
         ).lastrowid
         in_id = conn.execute(
             "INSERT INTO ledger (ts, account_id, kind, amount, note) VALUES (?, ?, 'transfer', ?, ?)",
-            (ts, to_id, amount, f"from {names[from_id]}{base}"),
+            (ts, to_id, amount, f"from {accts[from_id]['name']}{base}"),
         ).lastrowid
+        if commission:
+            conn.execute(
+                "INSERT INTO ledger (ts, account_id, kind, amount, note) VALUES (?, ?, 'commission', ?, ?)",
+                (ts, to_id, -commission,
+                 f"{accts[from_id]['name']} withdrawal commission "
+                 f"(−{WITHDRAWAL_FEE_PCT:g}% gross, {commission:.2f})"),
+            )
         return out_id, in_id
 
 
@@ -328,14 +429,20 @@ def capital_summary(since: Optional[str] = None) -> dict:
             "n_bets": 0, "n_open": 0,
         })
 
+    commission_paid = 0.0   # withdrawal fees actually paid (windowed by `since`)
+    pnl_events: list[tuple[str, int, float]] = []   # manual 'set balance' PnL rows
     for e in entries:
         b = bucket(e["account_id"])
         b["ledger_net"] += e["amount"]
         if e["kind"] == "opening":
             b["opening"] += e["amount"]
+        elif e["kind"] == "commission" and (since is None or e["ts"] >= since):
+            commission_paid -= e["amount"]   # amount is negative; paid is positive
+        elif e["kind"] == "pnl":
+            pnl_events.append((e["ts"], e["id"], e["amount"]))
 
-    # (settled_at, id, pnl, stake) — windowed perf is filtered from this.
-    settled_events: list[tuple[str, int, float, float]] = []
+    # (settled_at, id, pnl, stake, status) — windowed perf is filtered from this.
+    settled_events: list[tuple[str, int, float, float, str]] = []
     total_bets = total_open = 0
     for bet in all_bets:
         b = bucket(_attribute(bet, tag_to_id))
@@ -351,22 +458,25 @@ def capital_summary(since: Optional[str] = None) -> dict:
             b["bet_pnl"] += pnl     # all-time, drives the balance
             # bet id breaks same-second settled_at ties deterministically
             settled_events.append(
-                (bet["settled_at"] or bet["placed_at"], bet["id"], pnl, bet["stake"])
+                (bet["settled_at"] or bet["placed_at"], bet["id"], pnl,
+                 bet["stake"], bet["status"])
             )
 
     rows = []
     for a in accounts:
         b = bucket(a["id"])
+        # open exposure = logged open-bet stakes + the manually-tracked amount.
+        open_stake = b["open_stake"] + (a.get("manual_open_stake") or 0.0)
         rows.append({
             **a,
             "opening": round(b["opening"], 2),
             "ledger_net": round(b["ledger_net"], 2),
             "bet_pnl": round(b["bet_pnl"], 2),
-            "open_stake": round(b["open_stake"], 2),
+            "open_stake": round(open_stake, 2),
             "total_stake": round(b["total_stake"], 2),
             "n_bets": int(b["n_bets"]),
             "n_open": int(b["n_open"]),
-            "balance": round(b["ledger_net"] + b["bet_pnl"] - b["open_stake"], 2),
+            "balance": round(b["ledger_net"] + b["bet_pnl"] - open_stake, 2),
         })
     un = per.get(None)
     if un and (un["n_bets"] or un["ledger_net"]):
@@ -384,39 +494,63 @@ def capital_summary(since: Optional[str] = None) -> dict:
         })
 
     # "Current capital": realistic cash-out value =
-    #   bank balance + (book balance + open bets) * (1 - fee)
+    #   bank balance + (book balance + open bets) − withdrawal commission
     # Book money — both the free balance AND the stakes tied up in open bets —
-    # loses the gross withdrawal fee when pulled out; the Bank / untagged
-    # accounts are fee-free. Open stakes count at face (what you put in), and
-    # (balance + open_stake) == ledger_net + bet_pnl (all the account's money,
-    # open bets valued at stake). Negative totals take no fee.
-    fee = WITHDRAWAL_FEE_PCT / 100.0
+    # loses the GROSS withdrawal commission when pulled out to the bank (6.38 on
+    # 100, see withdrawal_rate); the Bank / untagged accounts are fee-free. Open
+    # stakes count at face (what you put in), and (balance + open_stake) ==
+    # ledger_net + bet_pnl (all the account's money, open bets valued at stake).
+    # Negative totals take no fee.
+    rate = withdrawal_rate()
     for r in rows:
         gross = r["balance"] + r["open_stake"]   # free cash + open-bet stakes
         if r.get("book_tag") and gross > 0:
-            r["current_value"] = round(gross * (1.0 - fee), 2)
+            r["withdrawal_cost"] = round(gross * rate, 2)
+            r["current_value"] = round(gross - r["withdrawal_cost"], 2)
         else:
+            r["withdrawal_cost"] = 0.0
             r["current_value"] = round(gross, 2)
 
-    starting = sum(r["opening"] for r in rows)
-    open_exposure = sum(r["open_stake"] for r in rows)
-    total_stake_all = sum(r["total_stake"] for r in rows)
-    equity = sum(r["balance"] for r in rows)
-    current_capital = sum(r["current_value"] for r in rows)
+    # Dividend accounts are money pulled OUT of the operation — excluded from all
+    # working-capital totals; their balance is reported separately and the Total
+    # is reduced by it (the cash that went to dividend left the working accounts).
+    work = [r for r in rows if not r.get("is_dividend")]
+    dividend_total = round(sum(r["balance"] for r in rows if r.get("is_dividend")), 2)
+    starting = sum(r["opening"] for r in work)
+    open_exposure = sum(r["open_stake"] for r in work)
+    total_stake_all = sum(r["total_stake"] for r in work)
+    equity = sum(r["balance"] for r in work)
+    current_capital = sum(r["current_value"] for r in work)
+    total_withdrawal_cost = sum(r["withdrawal_cost"] for r in work)
 
     # Performance (windowed by `since`): settled PnL, turnover, yield, ROI and
     # the curve count only bets settled in the window. Deposits/withdrawals are
     # excluded from the curve — it shows betting results, balances show cash.
-    settled_events.sort(key=lambda t: (t[0], t[1]))
-    curve, acc = [], 0.0
+    # Yield uses ONLY logged bets (they carry a stake = turnover). Manual
+    # 'set balance' PnL has no turnover, so it's excluded from yield but IS part
+    # of settled PnL / ROI / net-PnL / equity and the curve.
     win_pnl = win_turnover = 0.0
-    for ts, _bid, pnl, stake in settled_events:
+    for ts, _bid, pnl, stake, status in settled_events:
         if since is not None and ts < since:
+            continue
+        if status == "pushed":       # push = no action → not real turnover
             continue
         win_pnl += pnl
         win_turnover += stake
-        acc += pnl
+    manual_pnl = sum(amt for ts, _id, amt in pnl_events
+                     if since is None or ts >= since)
+    # Combined PnL curve: settled bets + manual PnL adjustments, in time order
+    # (ts, then row id for a deterministic tie-break within the same second).
+    timeline = ([(ts, bid, pnl) for ts, bid, pnl, _stake, _st in settled_events]
+                + [(ts, eid, amt) for ts, eid, amt in pnl_events])
+    timeline.sort(key=lambda t: (t[0], t[1]))
+    curve, acc = [], 0.0
+    for ts, _id, delta in timeline:
+        if since is not None and ts < since:
+            continue
+        acc += delta
         curve.append({"ts": ts, "pnl": round(acc, 2)})
+    settled_pnl = win_pnl + manual_pnl
 
     return {
         "accounts": rows,
@@ -428,7 +562,19 @@ def capital_summary(since: Optional[str] = None) -> dict:
             "total_gross": round(equity + open_exposure, 2),
             "current_capital": round(current_capital, 2),
             "withdrawal_fee_pct": WITHDRAWAL_FEE_PCT,
-            "settled_pnl": round(win_pnl, 2),
+            # what you'd pay in book commissions to move ALL book money to the
+            # bank right now (gross-up; = total_gross − current_capital).
+            "withdrawal_cost": round(total_withdrawal_cost, 2),
+            # settled_pnl = logged-bet PnL + manual 'set balance' PnL.
+            "settled_pnl": round(settled_pnl, 2),
+            "manual_pnl": round(manual_pnl, 2),
+            # withdrawal commissions actually PAID (a real cost) and the PnL net
+            # of them — what you actually kept after the books' cut.
+            "commission_paid": round(commission_paid, 2),
+            "net_pnl": round(settled_pnl - commission_paid, 2),
+            # dividends pulled out of the operation (already excluded from the
+            # totals above; surfaced so the UI can show "Total" net of it).
+            "dividend_total": dividend_total,
             "open_exposure": round(open_exposure, 2),
             "total_stake": round(total_stake_all, 2),
             # yield = pnl / turnover (settled stakes in window); the standard
@@ -436,10 +582,10 @@ def capital_summary(since: Optional[str] = None) -> dict:
             # bankroll you put in (total, not per book).
             "yield_pct": round(win_pnl / win_turnover * 100.0, 2)
             if win_turnover else None,
-            "roi_pct": round(win_pnl / starting * 100.0, 2)
+            "roi_pct": round(settled_pnl / starting * 100.0, 2)
             if starting else None,
             # back-compat alias used by older pnl.html
-            "growth_pct": round(win_pnl / starting * 100.0, 2)
+            "growth_pct": round(settled_pnl / starting * 100.0, 2)
             if starting else None,
             "n_bets": total_bets,
             "n_open": total_open,

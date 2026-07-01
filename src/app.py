@@ -46,7 +46,7 @@ from fastapi.staticfiles import StaticFiles
 from src import bets, capital, ticks
 from src.anomalies import find_ladder_anomalies
 from src.consistency import find_consistency_flags
-from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities
+from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities, match_confidence
 from src.matcher import (
     MatchedEvent, UnmatchedEvent, log_unmatched,
     match_events, match_with_diagnostics,
@@ -321,6 +321,29 @@ else:
         ANOMALY_SCAN_AT_MINUTES = [15, 45]
 
 
+# ── Betlive favourite-flip watch (browser-free, two-speed) ────────────────────
+# Opt-in (BETLIVE_ANOMALY=1), independent of the Playwright CB ANOMALY_SCAN — it
+# is browser-free REST, so it runs anywhere. Surfaces incl-OT vs regulation
+# moneyline inconsistencies (src/betlive_anomalies.py) into the Anomalies tab's
+# consistency list. DISCOVER does the heavy full-ladder sweep infrequently;
+# WATCH re-prices just the moneylines via refreshOdds every few seconds (cheap),
+# so detection latency is seconds while the board cost stays tiny.
+def _betlive_anomaly_enabled() -> bool:
+    return os.environ.get("BETLIVE_ANOMALY", "").strip().lower() in ("1", "on", "true", "yes")
+
+
+BETLIVE_ANOMALY = _betlive_anomaly_enabled()
+BETLIVE_DISCOVER_SEC = int(os.environ.get("BETLIVE_DISCOVER_SEC", "600"))  # heavy sweep cadence
+BETLIVE_WATCH_SEC = int(os.environ.get("BETLIVE_WATCH_SEC", "8"))          # cheap refreshOdds cadence
+BETLIVE_MIN_GAP_PP = float(os.environ.get("BETLIVE_MIN_GAP_PP", "2.0"))    # report >= this many pp
+try:
+    BETLIVE_ANOMALY_SPORT_IDS = tuple(
+        int(x) for x in os.environ.get("BETLIVE_ANOMALY_SPORT_IDS", "6").split(",") if x.strip()
+    ) or (6,)
+except ValueError:
+    BETLIVE_ANOMALY_SPORT_IDS = (6,)
+
+
 # ── Shared state (per-sport namespaced) ───────────────────────────────────────
 def _empty_source_state() -> dict[str, Any]:
     return {"odds": [], "fetched_at": None, "error": None, "count": 0}
@@ -371,6 +394,15 @@ _anomaly_watch_at: datetime | None = None    # last fast watch re-scan time
 _anomalies_computed_at: datetime | None = None
 _anomalies_cb_fetched_at: datetime | None = None
 _anomalies_error: str | None = None
+
+# ── Betlive favourite-flip watch state ────────────────────────────────────────
+# Decoupled from the CB consistency list so neither subsystem can clobber the
+# other. Merged into /api/anomalies `consistency` at request time.
+_betlive_consistency: list[dict] = []        # favourite-flip flags (betlive book)
+_betlive_watch: dict = {}                    # {event_id: {meta, reg, ot}} from discover
+_betlive_computed_at: datetime | None = None  # last discover/watch update
+_betlive_error: str | None = None
+_betlive_energy: dict = {}                    # bytes/time of the last discover sweep
 
 
 # ── Background pollers (parameterized over sport) ─────────────────────────────
@@ -1062,6 +1094,70 @@ async def _anomaly_watch_loop():
             log.exception("anomaly watch re-scan failed")
 
 
+# ── Betlive favourite-flip loops ──────────────────────────────────────────────
+async def _betlive_set_flags(anomalies) -> None:
+    """Recompute flag dicts (carrying first_seen) and publish them."""
+    from src import betlive_watch as bw
+    global _betlive_consistency, _betlive_computed_at
+    ts = datetime.now(tz=timezone.utc)
+    flags = bw.flags_with_first_seen(
+        [a for a in anomalies if a.gap_pp >= BETLIVE_MIN_GAP_PP],
+        _betlive_consistency, ts.isoformat())
+    async with _state_lock:
+        _betlive_consistency = flags
+        _betlive_computed_at = ts
+
+
+async def _betlive_discover_loop():
+    """Slow: full getPrematchEvent sweep — refreshes the watch map (new events /
+    outcomeIds) and re-detects from full ladders. Heavy but infrequent; runs in
+    a worker thread so it never blocks the event loop."""
+    from src import betlive_watch as bw
+    global _betlive_watch, _betlive_error, _betlive_energy
+    await asyncio.sleep(20)   # let the cheap pollers init first
+    while True:
+        try:
+            watch, anomalies, energy = await asyncio.to_thread(
+                bw.discover, BETLIVE_ANOMALY_SPORT_IDS)
+            async with _state_lock:
+                _betlive_watch = watch
+                _betlive_energy = energy
+                _betlive_error = None
+            await _betlive_set_flags(anomalies)
+            log.info("betlive discover: watching %d events, %d flip(s) "
+                     "(%.1f MB extended)", len(watch),
+                     len(_betlive_consistency), energy.get("ext_bytes", 0) / 1e6)
+        except Exception as e:
+            log.exception("betlive discover failed")
+            async with _state_lock:
+                _betlive_error = str(e)[:200]
+        await asyncio.sleep(BETLIVE_DISCOVER_SEC)
+
+
+async def _betlive_watch_loop():
+    """Fast: one refreshOdds POST re-prices every watched event's moneylines
+    (~50 KB) and the OT-fold check is recomputed. This is what catches a flip
+    within seconds, between the slow discover sweeps."""
+    from src import betlive_watch as bw
+    global _betlive_error
+    sess = None
+    while True:
+        await asyncio.sleep(BETLIVE_WATCH_SEC)
+        watch = dict(_betlive_watch)
+        if not watch:
+            continue
+        try:
+            if sess is None:
+                sess = await asyncio.to_thread(bw.session)
+            anomalies, _nbytes = await asyncio.to_thread(bw.refresh, sess, watch)
+            await _betlive_set_flags(anomalies)
+        except Exception as e:
+            sess = None    # drop a possibly-dead session; rebuilt next tick
+            async with _state_lock:
+                _betlive_error = str(e)[:200]
+            log.debug("betlive watch refresh failed: %s", e)
+
+
 def _attach_pin_to_anomalies(
     rows: list[dict], cb_odds: list[Odds], pin_odds: list[Odds],
     recent_moves: list[dict],
@@ -1129,6 +1225,7 @@ async def lifespan(app: FastAPI):
     # Init the bets SQLite DB once at boot. Idempotent — safe across restarts.
     bets.init_db()
     capital.ensure_seed_accounts()
+    capital.ensure_dividend_account()
 
     # Restore caches from disk (per sport). First cycle warm-up if loaded.
     loaded = cache_persistence.load_all(SPORT_NAMES)
@@ -1170,6 +1267,11 @@ async def lifespan(app: FastAPI):
             tasks.append(asyncio.create_task(_anomaly_watch_loop(), name="anomaly_watch_loop"))
             log.info("anomaly watch loop ENABLED — flagged games re-scanned every %ds",
                      ANOMALY_WATCH_SEC)
+    if BETLIVE_ANOMALY:
+        tasks.append(asyncio.create_task(_betlive_discover_loop(), name="betlive_discover_loop"))
+        tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
+        log.info("betlive favourite-flip watch ENABLED — discover/%ds, refreshOdds/%ds, sports=%s",
+                 BETLIVE_DISCOVER_SEC, BETLIVE_WATCH_SEC, BETLIVE_ANOMALY_SPORT_IDS)
     try:
         yield
     finally:
@@ -1312,8 +1414,14 @@ async def api_anomalies(
     recent_moves = _recent_moves.get("basketball", [])
     rows = _attach_pin_to_anomalies(base, _anomaly_cb_odds, pin_odds, recent_moves)
     rows.sort(key=lambda r: r["pct"], reverse=True)
+    # CB-internal flags + betlive favourite-flip flags share the consistency
+    # list; both carry kind/periods/detail/severity so the tab renders them the
+    # same way (betlive rows tagged book="betlive").
+    cons = [f for f in (_recent_consistency + _betlive_consistency)
+            if f["severity"] >= min_severity]
+    cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
-        "enabled": ANOMALY_SCAN,
+        "enabled": ANOMALY_SCAN or BETLIVE_ANOMALY,
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "cb_fetched_at": _anomalies_cb_fetched_at.isoformat() if _anomalies_cb_fetched_at else None,
         "scan_sec": ANOMALY_SCAN_SEC,
@@ -1327,10 +1435,19 @@ async def api_anomalies(
         "watch_count": len(_anomaly_watchlist),
         "watch_sec": ANOMALY_WATCH_SEC,
         "watch_at": _anomaly_watch_at.isoformat() if _anomaly_watch_at else None,
+        "betlive": {
+            "enabled": BETLIVE_ANOMALY,
+            "watching": len(_betlive_watch),
+            "flips": len(_betlive_consistency),
+            "computed_at": _betlive_computed_at.isoformat() if _betlive_computed_at else None,
+            "watch_sec": BETLIVE_WATCH_SEC,
+            "discover_sec": BETLIVE_DISCOVER_SEC,
+            "error": _betlive_error,
+        },
         "count": len(rows),
         "anomalies": rows,
-        "consistency": [f for f in _recent_consistency if f["severity"] >= min_severity],
-        "consistency_count": sum(1 for f in _recent_consistency if f["severity"] >= min_severity),
+        "consistency": cons,
+        "consistency_count": len(cons),
     }
 
 
@@ -1341,14 +1458,14 @@ async def api_anomalies_status() -> dict:
     that /api/anomalies does. Lets alerts.js poll every 30s on every page
     without paying the full re-match cost."""
     return {
-        "enabled": ANOMALY_SCAN,
+        "enabled": ANOMALY_SCAN or BETLIVE_ANOMALY,
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "next_scan_in_sec": (
             round(_seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES))
             if ANOMALY_SCAN_AT_MINUTES is not None else None
         ),
         "anomalies": len(_recent_anomalies),
-        "consistency": len(_recent_consistency),
+        "consistency": len(_recent_consistency) + len(_betlive_consistency),
         "coverage": _anomaly_coverage,
     }
 
@@ -1809,6 +1926,14 @@ def _current_odds_for_bet(bet: dict) -> tuple[float | None, float | None]:
 
 def _bet_to_dict(bet: dict) -> dict:
     """Augment a stored bet row with computed-on-demand fields for the UI."""
+    if bet.get("is_parlay"):
+        # A parlay has no single market, so live odds / edge / CLV don't apply;
+        # the UI renders the legs list + combined odds (header odds_taken) instead.
+        out = dict(bet)
+        out["legs"] = bets.list_legs(bet["id"])
+        out["cb_odds_now"] = out["pin_fair_now"] = None
+        out["edge_now_pct"] = out["clv_pct"] = None
+        return out
     cb_now, pin_now = _current_odds_for_bet(bet)
 
     edge_now_pct = None
@@ -1830,6 +1955,7 @@ def _bet_to_dict(bet: dict) -> dict:
     out["pin_fair_now"] = pin_now
     out["edge_now_pct"] = edge_now_pct
     out["clv_pct"] = clv_pct
+    out["legs"] = []
     return out
 
 
@@ -1954,6 +2080,42 @@ async def api_delete_bet(bet_id: int) -> dict:
     return {"deleted": bet_id}
 
 
+@app.post("/api/bets/{bet_id}/legs")
+async def api_add_leg(bet_id: int, payload: dict) -> dict:
+    """Add a game (leg) to a bet, making it a parlay. Body = the leg's game
+    fields (match_label, side, odds, + sport/period/market_type/line/...). Stake
+    and account are inherited from the bet — no new money. Backs both the
+    'add a game from edit' and 'roll a previous bet' UI flows."""
+    from fastapi import HTTPException
+    try:
+        bets.add_leg(bet_id, **payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _bet_to_dict(bets.get_bet(bet_id))
+
+
+@app.patch("/api/bets/{bet_id}/legs/{leg_index}")
+async def api_settle_leg(bet_id: int, leg_index: int, payload: dict) -> dict:
+    """Set one leg's result: {'outcome': won|lost|pushed|void|open}. The parlay
+    status/odds/payout roll up automatically."""
+    from fastapi import HTTPException
+    try:
+        ok = bets.settle_leg(bet_id, leg_index, payload.get("outcome"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"leg {leg_index} of bet {bet_id} not found")
+    return _bet_to_dict(bets.get_bet(bet_id))
+
+
+@app.delete("/api/bets/{bet_id}/legs/{leg_index}")
+async def api_remove_leg(bet_id: int, leg_index: int) -> dict:
+    from fastapi import HTTPException
+    if not bets.remove_leg(bet_id, leg_index):
+        raise HTTPException(status_code=404, detail=f"leg {leg_index} of bet {bet_id} not found")
+    return _bet_to_dict(bets.get_bet(bet_id))
+
+
 # ── Odds history charts (src/ticks.py) ────────────────────────────────────────
 @app.get("/api/chart")
 async def api_chart(
@@ -2024,6 +2186,13 @@ async def api_patch_account(account_id: int, payload: dict) -> dict:
     try:
         if payload.get("unarchive"):
             ok = capital.unarchive_account(account_id)
+        elif "balance" in payload:
+            capital.set_balance(account_id, float(payload["balance"]), payload.get("note"))
+            ok = True
+        elif "open_exposure" in payload:
+            ok = capital.set_open_exposure(account_id, float(payload["open_exposure"]))
+        elif "book_tag" in payload:
+            ok = capital.set_book_tag(account_id, payload.get("book_tag"))
         else:
             ok = capital.rename_account(account_id, payload.get("name", ""))
     except ValueError as e:
@@ -2374,6 +2543,11 @@ def _opp_to_dict(o) -> dict:
         "league": o.league,
         "pin_max_stake": o.pin_max_stake,
         "pin_event_id": o.pin_event_id,
+        # Match-quality chip (how much to trust the Pinnacle pairing).
+        "confidence": match_confidence(o),
+        "match_score": round(o.match_score, 1) if o.match_score is not None else None,
+        "match_time_delta_min": (round(o.match_time_delta_sec / 60.0, 1)
+                                 if o.match_time_delta_sec is not None else None),
     }
 
 
