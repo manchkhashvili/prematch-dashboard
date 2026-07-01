@@ -963,8 +963,7 @@ async function loadCapital() {
     document.getElementById("cap-body").innerHTML = cap.accounts.map(a => {
       const actions = a.id === null ? "" : a.archived
         ? `<button class="settle-btn" data-cap="unarchive" data-id="${a.id}">unarchive</button>`
-        : `<button class="settle-btn" data-cap="setbal" data-id="${a.id}" data-bal="${a.balance}" data-name="${a.name}" title="Set the real balance — books the difference as PnL. For when you bet a lot on a book but don't log the individual bets.">＄ bal</button>
-           <button class="settle-btn" data-cap="setexp" data-id="${a.id}" data-exp="${a.manual_open_stake || 0}" data-name="${a.name}" title="Set money tied up in OPEN bets (exposure). Moves it out of the free balance — not PnL. Lower it again when those bets settle.">⧗ exp</button>
+        : `<button class="settle-btn" data-cap="setbal" data-id="${a.id}" data-bal="${a.balance}" data-exp="${a.manual_open_stake || 0}" data-name="${a.name}" title="Enter the account's real balance + open-bet exposure; it computes the PnL itself. For manual tracking when you bet a lot but don't log each bet.">＄ set</button>
            <button class="settle-btn" data-cap="rename" data-id="${a.id}" data-name="${a.name}">✎</button>
            <button class="settle-btn" data-cap="tag" data-id="${a.id}" data-tag="${a.book_tag || ''}" title="Set book tag — a tagged account is a BOOK (charges the withdrawal fee on book→bank); empty = the bank/cash (fee-free)">🏷</button>
            <button class="settle-btn del" data-cap="delete" data-id="${a.id}" title="delete (archives if it has history)">×</button>`;
@@ -977,7 +976,7 @@ async function loadCapital() {
         <td>${a.name}${tagChip}${a.archived ? ' <span class="dim">(archived)</span>' : ""}</td>
         <td class="num">${fmtMoney(a.opening)}</td>
         <td class="num">${fmtMoney(a.ledger_net)}</td>
-        <td class="num ${moneyClass(a.bet_pnl)}">${fmtMoney(a.bet_pnl)}</td>
+        <td class="num ${moneyClass(a.pnl ?? a.bet_pnl)}" title="${a.manual_pnl ? `logged bets ${fmtMoney(a.bet_pnl)} + manual (set-balance) ${fmtMoney(a.manual_pnl)}` : 'settled bet PnL'}">${fmtMoney(a.pnl ?? a.bet_pnl)}</td>
         <td class="num dim">${a.open_stake > 0 ? `<b style="color:var(--text)">${fmtMoney(a.open_stake)}</b>` : fmtMoney(0)} / ${fmtMoney(a.total_stake || 0)}</td>
         <td class="num"><b>${fmtMoney(a.balance)}</b></td>
         <td class="num dim">${a.n_open > 0 ? `<b style="color:var(--text)">${a.n_open}</b> / ` : ""}${a.n_bets}</td>
@@ -1022,28 +1021,24 @@ async function loadCapital() {
         } else if (act === "unarchive") {
           await capFetch(`/api/capital/accounts/${id}`, "PATCH", { unarchive: true });
         } else if (act === "setbal") {
-          const cur = parseFloat(btn.dataset.bal) || 0;
-          const v = prompt(
-            `Set the real balance of "${btn.dataset.name}".\n\n` +
-            `Current tracked balance: ${cur.toFixed(2)}.\n` +
-            `The difference is booked as PnL — settled PnL, ROI, net-PnL and the ` +
-            `curve all update automatically. (Use this instead of logging every bet.)`,
-            cur.toFixed(2));
-          if (v === null) return;
-          const bal = parseFloat(v);
-          if (isNaN(bal)) { alert("Enter a number"); return; }
-          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { balance: bal });
-        } else if (act === "setexp") {
-          const cur = parseFloat(btn.dataset.exp) || 0;
-          const v = prompt(
-            `Money tied up in OPEN bets on "${btn.dataset.name}" (exposure).\n\n` +
-            `This moves out of the free balance (it's not PnL). Lower it again as ` +
-            `those bets settle, then update the balance.`,
-            cur.toFixed(2));
-          if (v === null) return;
-          const exp = parseFloat(v);
-          if (isNaN(exp) || exp < 0) { alert("Enter a non-negative number"); return; }
-          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { open_exposure: exp });
+          const curBal = parseFloat(btn.dataset.bal) || 0;
+          const curExp = parseFloat(btn.dataset.exp) || 0;
+          const b = prompt(
+            `Real FREE balance of "${btn.dataset.name}" (cash you can withdraw now).\n\n` +
+            `The difference is booked as PnL automatically — settled PnL, ROI, ` +
+            `net-PnL and the curve all update. No need to log individual bets.`,
+            curBal.toFixed(2));
+          if (b === null) return;
+          const bal = parseFloat(b);
+          if (isNaN(bal)) { alert("Enter a number for the balance"); return; }
+          const e = prompt(
+            `Money tied up in OPEN (unsettled) bets — leave as-is if none.\n\n` +
+            `This is held out of the free balance (not PnL). Lower it as bets settle.`,
+            curExp.toFixed(2));
+          if (e === null) return;
+          const exp = parseFloat(e);
+          if (isNaN(exp) || exp < 0) { alert("Enter a non-negative exposure"); return; }
+          await capFetch(`/api/capital/accounts/${id}`, "PATCH", { balance: bal, open_exposure: exp });
         } else if (act === "tag") {
           const tag = prompt(
             "Book tag — controls the withdrawal fee.\n\n" +
