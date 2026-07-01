@@ -55,6 +55,19 @@ Environment variables (dashboard mode):
     CB_ANOMALY_TRANSPORT=http anomaly scan transport (default http = browser-free,
                               even when CB_TRANSPORT=playwright). =playwright to force.
 
+    SOFT_SCAN=1               soft-book HT/FT + basketball-favourite sweep →
+                              Anomalies tab, across CB + Betlive + Lider-Bet. Soccer
+                              HT/FT combo >= 1.2x its 1st-half leg (heavy favourite,
+                              non-top league) + basketball favourite disagreement
+                              (2-way/3-way/HT ML). Slow: SOFT_SCAN_SEC=3600 (60 min).
+                              Independent of the CB basketball ladder scan. Heavy per
+                              sweep (~30 MB/40 s); raise SOFT_SCAN_SEC if it bites.
+
+    Full example (browser-free CB + all anomaly checks + multi-book):
+      CB_TRANSPORT=http ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 SOFT_SCAN=1 \
+        SPORTS=basketball:list,soccer:list,tennis:list \
+        LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
+
     SPORTS=                   per-sport mode, one knob to rule them all.
                               Comma-separated 'sport:mode' or 'sport_mode'.
                               Modes:

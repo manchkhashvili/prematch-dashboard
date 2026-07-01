@@ -74,6 +74,32 @@ broke the assumptions baked for FIBA/NBA:
 - `pushed` (and `void`-like) bets are excluded from yield turnover; `Fees paid`
   card = commissions actually paid; PnL shown net of fees.
 
+## Soft-book HT/FT + basketball-favourite sweep (soft_scan.py, SOFT_SCAN=1)
+A slow 60-min filtered sweep across CB + Betlive + Lider-Bet, separate from the
+CB basketball ladder scan.
+- **Soccer HT/FT** (htft_favourite): for a heavy favourite the HT/FT combo (1/1,
+  2/2) is ~1.0× its first-half leg (measured 0.97–1.03 across a live board), so a
+  combo >= **1.2×** the leg is a soft/generous line. Favourite = side < 1.30 OR a
+  side with NO price (an omitted favourite price = an extreme favourite). Skip top
+  leagues (World Cup / UEFA / big-5). Real cases seen at H1 1.1 → HT/FT 1.4 (1.27×).
+- **Basketball favourite disagreement** (basketball_fav): the devigged home-win-prob
+  (draw dropped) must be close across the 2-way (incl-OT), 3-way (regulation) and HT
+  moneylines; a flip or >=15pp spread flags. Extends the betlive OT-fold idea.
+- **Per-book gotchas (validated live 2026-07):**
+  - Betlive labels HT/FT outcomes **"1 / 1" with spaces** (strip spaces before
+    matching "1/1"). Its 3-way basketball result is NOT marketId 1 — match by
+    `{1,X,2}` labels. Exclude **lined markets** (a "Points Spread (OT)" also carries
+    "1"/"2" labels and was masquerading as the moneyline → 7 false flags).
+  - Lider-Bet full ladder is `matchData/details?matchIds=` (the plain `matchData`
+    list is a curated 33-market subset with no HT/FT). It has HT/FT but **no
+    standalone 1st-half result** (only combos: "1st Half Result *or* Match Result",
+    "…/1X2"), so its soccer HT/FT no-ops gracefully; it still contributes basketball.
+  - CB soccer HT/FT title varies — regex broadened to the HT/FT prefix (like bball).
+- **Energy per sweep (filtered):** CB ~17 MB/30 s, Betlive ~7.6 MB/6 s,
+  Lider-Bet ~4.5 MB/0.6 s (batched details). ~30 MB/40 s once an hour.
+- The fuzzy market-name matchers are validated against live data; a book renaming a
+  market would silently miss it — re-run the coverage probe periodically.
+
 ## Arbs/EV — match confidence
 - Soft-book↔Pinnacle pairing is name+time fuzzy (Pinnacle has no SR id), so a
   high name score can still be the wrong game (same-named lower divisions →
