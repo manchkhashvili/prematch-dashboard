@@ -344,6 +344,16 @@ except ValueError:
     BETLIVE_ANOMALY_SPORT_IDS = (6,)
 
 
+# ── Soft-book HT/FT + basketball-favourite sweep (opt-in, slow) ───────────────
+# Filtered soccer HT/FT (>=1.2× the first-half leg) + basketball favourite
+# disagreement (2-way/3-way/HT ML) across CrystalBet, Betlive, Lider-Bet. Heavy
+# per sweep (opens the filtered set's full ladders) but the anomalies persist for
+# hours, so it runs on its own SLOW cadence — default 60 min — independent of the
+# 30-min CB basketball ladder scan (which it does NOT touch). See src/soft_scan.py.
+SOFT_SCAN = os.environ.get("SOFT_SCAN", "").strip().lower() in ("1", "on", "true", "yes")
+SOFT_SCAN_SEC = int(os.environ.get("SOFT_SCAN_SEC", "3600"))
+
+
 # ── Shared state (per-sport namespaced) ───────────────────────────────────────
 def _empty_source_state() -> dict[str, Any]:
     return {"odds": [], "fetched_at": None, "error": None, "count": 0}
@@ -403,6 +413,11 @@ _betlive_watch: dict = {}                    # {event_id: {meta, reg, ot}} from 
 _betlive_computed_at: datetime | None = None  # last discover/watch update
 _betlive_error: str | None = None
 _betlive_energy: dict = {}                    # bytes/time of the last discover sweep
+
+# ── Soft-book HT/FT + basketball-favourite sweep state ────────────────────────
+_soft_scan_flags: list[dict] = []             # consistency rows from soft_scan.scan_all
+_soft_scan_at: datetime | None = None
+_soft_scan_error: str | None = None
 
 
 # ── Background pollers (parameterized over sport) ─────────────────────────────
@@ -1158,6 +1173,36 @@ async def _betlive_watch_loop():
             log.debug("betlive watch refresh failed: %s", e)
 
 
+async def _soft_scan_loop():
+    """Slow (SOFT_SCAN_SEC, default 60 min): filtered soccer HT/FT + basketball
+    favourite disagreement across CB/Betlive/Lider-Bet → Anomalies-tab flags.
+    Runs in a worker thread; carries first_seen across sweeps."""
+    from src import soft_scan
+    global _soft_scan_flags, _soft_scan_at, _soft_scan_error
+    await asyncio.sleep(30)
+    while True:
+        try:
+            flags = await asyncio.to_thread(soft_scan.scan_all)
+            ts = datetime.now(tz=timezone.utc)
+            prev = {(f.get("book"), f.get("book_event_id"), f.get("kind"), f.get("outcome")):
+                    f.get("first_seen") for f in _soft_scan_flags}
+            for f in flags:
+                key = (f.get("book"), f.get("book_event_id"), f.get("kind"), f.get("outcome"))
+                f["first_seen"] = prev.get(key) or ts.isoformat()
+            flags.sort(key=lambda f: f["severity"], reverse=True)
+            async with _state_lock:
+                _soft_scan_flags = flags
+                _soft_scan_at = ts
+                _soft_scan_error = None
+            log.info("soft_scan: %d flags (soccer HT/FT + basketball fav across 3 books)",
+                     len(flags))
+        except Exception as e:
+            log.exception("soft_scan sweep failed")
+            async with _state_lock:
+                _soft_scan_error = str(e)[:200]
+        await asyncio.sleep(SOFT_SCAN_SEC)
+
+
 def _attach_pin_to_anomalies(
     rows: list[dict], cb_odds: list[Odds], pin_odds: list[Odds],
     recent_moves: list[dict],
@@ -1272,6 +1317,10 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
         log.info("betlive favourite-flip watch ENABLED — discover/%ds, refreshOdds/%ds, sports=%s",
                  BETLIVE_DISCOVER_SEC, BETLIVE_WATCH_SEC, BETLIVE_ANOMALY_SPORT_IDS)
+    if SOFT_SCAN:
+        tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
+        log.info("soft-book HT/FT + basketball-favourite sweep ENABLED — every %ds "
+                 "(CB + Betlive + Lider-Bet)", SOFT_SCAN_SEC)
     try:
         yield
     finally:
@@ -1417,11 +1466,11 @@ async def api_anomalies(
     # CB-internal flags + betlive favourite-flip flags share the consistency
     # list; both carry kind/periods/detail/severity so the tab renders them the
     # same way (betlive rows tagged book="betlive").
-    cons = [f for f in (_recent_consistency + _betlive_consistency)
+    cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags)
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
-        "enabled": ANOMALY_SCAN or BETLIVE_ANOMALY,
+        "enabled": ANOMALY_SCAN or BETLIVE_ANOMALY or SOFT_SCAN,
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "cb_fetched_at": _anomalies_cb_fetched_at.isoformat() if _anomalies_cb_fetched_at else None,
         "scan_sec": ANOMALY_SCAN_SEC,
