@@ -488,20 +488,24 @@ def classify_market_title(title: str) -> Optional[MarketClassification]:
     return None
 
 
-_RE_HTFT_TITLE = re.compile(r"^halftime\s*/\s*fulltime$")
+# HT/FT combo — leagues title it "Halftime/Fulltime", "Half Time / Full Time",
+# or "HT/FT …". Prefix-matched (an "Including Overtime"/suffix still counts) but
+# NOT the multi-market combos ("… and Total", "… Correct Score", "… Exact Goals").
+_RE_HTFT_TITLE = re.compile(r"^(?:half\s*time\s*/\s*full\s*time|ht\s*/\s*ft)\b")
+_RE_HTFT_EXCLUDE = re.compile(r"\band\b|&|correct|exact|\btotal\b|score|goals")
 
 
 def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
     """Strict soccer classification PLUS the Halftime/Fulltime combo, for the
-    anomaly scanner's HT/FT consistency checks (htft_combo + ht_vs_ft_divergence).
+    anomaly scanner's HT/FT checks (htft_combo, ht_vs_ft_divergence, soft_scan).
 
-    The strict/+EV path deliberately SKIPS Halftime/Fulltime (it's not matchable
-    against Pinnacle); here we capture it as market_type 'htft' so the engine can
-    compare the 1/1 (and 2/2) combo to its own FT and 1st-half 1X2 legs. Every
-    other in-scope market (FT 1X2, 1st-half result, handicaps, totals) already
-    comes from the strict rules, so we fall through to them."""
+    The strict/+EV path SKIPS Halftime/Fulltime (not matchable against Pinnacle);
+    here we capture it as market_type 'htft' so the engine can compare the 1/1
+    (and 2/2) combo to its FT and 1st-half legs. Every other in-scope market (FT
+    1X2, 1st-half result, handicaps, totals) falls through to the strict rules."""
     if not title:
         return None
-    if _RE_HTFT_TITLE.fullmatch(_normalize_title(title)):
+    norm = _normalize_title(title)
+    if _RE_HTFT_TITLE.match(norm) and not _RE_HTFT_EXCLUDE.search(norm):
         return MarketClassification(market_type="htft", period="FT")
     return classify_market_title(title)
