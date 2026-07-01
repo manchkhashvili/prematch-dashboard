@@ -592,3 +592,17 @@ def test_set_open_exposure_moves_from_balance_not_pnl(clean_db):
     capital.set_balance(acc, 1050)
     t2 = capital.capital_summary()["totals"]
     assert t2["settled_pnl"] == 50.0 and t2["open_exposure"] == 0.0
+
+
+def test_reconcile_account_sets_balance_and_exposure_in_one_step(clean_db):
+    acc = capital.add_account("Betlive", "betlive")
+    capital.add_entry(acc, "opening", 1000)
+    # Read off the book: free balance 850, 200 tied up in open bets → it computes PnL.
+    capital.reconcile_account(acc, balance=850, exposure=200)
+    row = next(a for a in capital.capital_summary()["accounts"] if a["id"] == acc)
+    t = capital.capital_summary()["totals"]
+    assert row["balance"] == 850.0 and row["open_stake"] == 200.0
+    assert t["total_gross"] == 1050.0 and t["settled_pnl"] == 50.0   # 1000→1050 = +50
+    # same numbers again = no-op (no phantom PnL)
+    capital.reconcile_account(acc, balance=850, exposure=200)
+    assert capital.capital_summary()["totals"]["settled_pnl"] == 50.0

@@ -169,6 +169,19 @@ def set_balance(account_id: int, new_balance: float,
     return delta
 
 
+def reconcile_account(account_id: int, balance: float,
+                      exposure: Optional[float] = None,
+                      note: Optional[str] = None) -> float:
+    """Reconcile an account to the CORRECT numbers you read off the book — you
+    input the values, it computes everything itself. Sets the open exposure
+    first (a reclassification, not PnL), THEN books the free-balance delta as
+    PnL. Doing both in one step makes the result order-independent: you always
+    end at exactly (free balance, exposure) you gave. Returns the PnL delta."""
+    if exposure is not None:
+        set_open_exposure(account_id, exposure)
+    return set_balance(account_id, balance, note)
+
+
 def set_open_exposure(account_id: int, amount: float) -> bool:
     """Set an account's manually-tracked open-bet exposure (money tied up in
     unsettled bets you didn't log). It adds to open_stake and reduces the free
@@ -424,7 +437,7 @@ def capital_summary(since: Optional[str] = None) -> dict:
 
     def bucket(acct_id: Optional[int]) -> dict[str, float]:
         return per.setdefault(acct_id, {
-            "opening": 0.0, "ledger_net": 0.0,
+            "opening": 0.0, "ledger_net": 0.0, "manual_pnl": 0.0,
             "bet_pnl": 0.0, "open_stake": 0.0, "total_stake": 0.0,
             "n_bets": 0, "n_open": 0,
         })
@@ -433,13 +446,18 @@ def capital_summary(since: Optional[str] = None) -> dict:
     pnl_events: list[tuple[str, int, float]] = []   # manual 'set balance' PnL rows
     for e in entries:
         b = bucket(e["account_id"])
+        # 'pnl' rows (manual set-balance) are PnL, NOT capital moved — keep them
+        # out of ledger_net so the account's PnL column reflects them (not the
+        # Ledger-net column). They still hit the balance via manual_pnl.
+        if e["kind"] == "pnl":
+            b["manual_pnl"] += e["amount"]
+            pnl_events.append((e["ts"], e["id"], e["amount"]))
+            continue
         b["ledger_net"] += e["amount"]
         if e["kind"] == "opening":
             b["opening"] += e["amount"]
         elif e["kind"] == "commission" and (since is None or e["ts"] >= since):
             commission_paid -= e["amount"]   # amount is negative; paid is positive
-        elif e["kind"] == "pnl":
-            pnl_events.append((e["ts"], e["id"], e["amount"]))
 
     # (settled_at, id, pnl, stake, status) — windowed perf is filtered from this.
     settled_events: list[tuple[str, int, float, float, str]] = []
@@ -472,11 +490,13 @@ def capital_summary(since: Optional[str] = None) -> dict:
             "opening": round(b["opening"], 2),
             "ledger_net": round(b["ledger_net"], 2),
             "bet_pnl": round(b["bet_pnl"], 2),
+            "manual_pnl": round(b["manual_pnl"], 2),
+            "pnl": round(b["bet_pnl"] + b["manual_pnl"], 2),   # logged + manual
             "open_stake": round(open_stake, 2),
             "total_stake": round(b["total_stake"], 2),
             "n_bets": int(b["n_bets"]),
             "n_open": int(b["n_open"]),
-            "balance": round(b["ledger_net"] + b["bet_pnl"] - open_stake, 2),
+            "balance": round(b["ledger_net"] + b["bet_pnl"] + b["manual_pnl"] - open_stake, 2),
         })
     un = per.get(None)
     if un and (un["n_bets"] or un["ledger_net"]):
@@ -486,11 +506,13 @@ def capital_summary(since: Optional[str] = None) -> dict:
             "opening": round(un["opening"], 2),
             "ledger_net": round(un["ledger_net"], 2),
             "bet_pnl": round(un["bet_pnl"], 2),
+            "manual_pnl": round(un["manual_pnl"], 2),
+            "pnl": round(un["bet_pnl"] + un["manual_pnl"], 2),
             "open_stake": round(un["open_stake"], 2),
             "total_stake": round(un["total_stake"], 2),
             "n_bets": int(un["n_bets"]),
             "n_open": int(un["n_open"]),
-            "balance": round(un["ledger_net"] + un["bet_pnl"] - un["open_stake"], 2),
+            "balance": round(un["ledger_net"] + un["bet_pnl"] + un["manual_pnl"] - un["open_stake"], 2),
         })
 
     # "Current capital": realistic cash-out value =

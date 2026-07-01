@@ -2187,7 +2187,10 @@ async def api_patch_account(account_id: int, payload: dict) -> dict:
         if payload.get("unarchive"):
             ok = capital.unarchive_account(account_id)
         elif "balance" in payload:
-            capital.set_balance(account_id, float(payload["balance"]), payload.get("note"))
+            exp = (float(payload["open_exposure"])
+                   if payload.get("open_exposure") not in (None, "") else None)
+            capital.reconcile_account(account_id, float(payload["balance"]),
+                                      exp, payload.get("note"))
             ok = True
         elif "open_exposure" in payload:
             ok = capital.set_open_exposure(account_id, float(payload["open_exposure"]))
