@@ -286,14 +286,42 @@ On RAW posted odds, keyed with the model's scheme:
   AH + totals ladders; if they diverge by ≥ 0.15 goals (S) or ≥ 0.25 goals (T),
   one family is stale — diagnostic, with a timestamp guess at which moved last.
 
-### E-pending (Modules 4–5, NOT built)
-EV = `posted × fair − 1` against the sheet, gated by a **robustness band**
-(recompute over split ∈ {0.42,0.44,0.48} × {power,shin} — flag only if EV holds
-across the whole band), an **anchor-quality** tag (Pinnacle = sharp, own-book =
-internal-consistency only), and the **staleness modifier** (parent 1X2/total/AH
-moved ≥3% since the derivative last changed → strongest single signal). Plus a
-SQLite flag log + beat-the-close grading. These touch the refresh/scheduler/DB
-and are deferred to a wiring design.
+### E-EV — model EV flagging, WIRED into the sweep (`soccer_ev.py`, Module 4, simplified)
+Runs inside the existing `SOFT_SCAN` sweep (`soft_scan.py`) — no new
+scheduler/DB. Per owner (2026-07-03):
+- **Anchor = the book's OWN 1X2** (own-book, not Pinnacle). Fit λ to the book's
+  devigged 1X2, price the sheet, flag every posted derivative priced LONGER than
+  fair. `kind`s: `soccer_fair` (EV), `soccer_identity` (E-identities),
+  `soccer_curve` (E-curves). The own-book anchor makes these an
+  internal-consistency signal (generous vs the book's own headline).
+- **Devig default = `power`** (env `SOCCER_DEVIG`) — matches the owner's hand
+  validation and surfaces more; `shin` is the conservative alternative (they
+  disagree at extreme prices: Nepean 2/2 reads +7.8% power vs +2.3% shin).
+- **Game gate = a side < 1.5 (or one side priced, the other not), skip top
+  leagues** (`SOCCER_FAV_MAX`, env). Looser than the legacy 1.30 htft gate;
+  basketball keeps 1.30.
+- **Thresholds:** `SOCCER_EV_MIN` (default 3%), tails 8% (`SOCCER_EV_TAIL_MIN`);
+  set `SOCCER_EV_MIN=0` to surface everything above fair. A light **robustness
+  hint** recomputes EV at H1 splits {0.42,0.48}; non-robust hits are tagged
+  `[split-sensitive]` (not gated out).
+- **Market scope (this cut): 1X2 + HT/FT + 1st-half result only**, across all
+  three books. CB's `total`/`spread` market_types also carry corners/cards
+  ladders (an "over 8.5" that devigs to 74% is corners), so **totals & Asian
+  handicaps are deferred** until a goals-only filter + a coverage probe are in —
+  E-curves therefore stay dormant for now. The fit is bounded so a mislabelled
+  1X2 can't produce NaN EV.
+- **Live-validated 2026-07-03:** betlive HT/FT is tight (≈0 EV, identities catch
+  small draw-column inconsistencies); CB leaves real value on obscure leagues
+  (HT/FT 2/2 @1.70 vs fair 1.47 = +15.5%); lider similar. Fixed a latent
+  `_bl_markets` bug — it grabbed "1 - 10 min. Result" (draw @1.24) as the 1X2;
+  now anchored on betlive's `marketId == 1` "Fulltime Result".
+
+### E-dropped (owner 2026-07-03)
+The **staleness modifier**, **Pinnacle/sharp anchor tier**, the full
+split×devig **robustness band**, and the **SQLite flag log + beat-the-close
+grading** (Module 5) were dropped — "just the new math in the anomalies flow."
+B6 soccer path + D1 vs-ML remain in **shadow** (both still emit) rather than
+being graded-then-retired.
 
 ---
 
@@ -308,13 +336,18 @@ and are deferred to a wiring design.
   `quarter_ml_extreme`→"quarter ML extreme", `htft_combo`→"HT/FT combo",
   `htft_fair`→"HT/FT fair (model)", `betlive_flip`→"betlive: favourite flip",
   `betlive_ot_fold`→"betlive: OT-fold", `soccer_htft`→"soccer HT/FT (soft)",
-  `basketball_fav`→"basketball fav disagreement".
+  `basketball_fav`→"basketball fav disagreement", `soccer_fair`→"soccer EV
+  (model)", `soccer_identity`→"soccer identity", `soccer_curve`→"soccer curve"
+  (Family E, in the `SOFT_SCAN` sweep).
 
 ## Env-var quick map
 `ANOMALY_SCAN` (CB ladder + consistency) · `BETLIVE_ANOMALY` (OT-fold watch) ·
 `SOFT_SCAN` + `SOFT_SCAN_SEC` (soft sweep) · `SOFT_HTFT_ML_RATIO` (D1 vs-ML
 threshold, default 1.35) · `CB_TRANSPORT` / `CB_ANOMALY_TRANSPORT` (http vs
 Playwright).
+Family E (soccer, in the `SOFT_SCAN` sweep): `SOCCER_FAV_MAX` (game gate, default
+1.5) · `SOCCER_DEVIG` (anchor devig, default `power`) · `SOCCER_EV_MIN` (default
+0.03; set 0 to see everything above fair) · `SOCCER_EV_TAIL_MIN` (default 0.08).
 
 ## Confidence ranking / triage order (soccer, once Family E is live)
 1. **E-identities & AH(0)≡DNB** (family-A tier) — model-free, hard. Trust most.

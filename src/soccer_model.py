@@ -276,11 +276,16 @@ def fit_lambdas(
         for _ in range(30):
             xn = x + step * dx
             rn_new = np.linalg.norm(resid(xn))
-            if rn_new < rn:
+            if np.isfinite(rn_new) and rn_new < rn:
                 break
             step *= 0.5
         x = x + step * dx
+        # keep lambdas in a sane range so a pathological 1X2 can't run the fit
+        # off to nan (which would poison the whole score matrix).
+        x = np.clip(x, math.log(0.03), math.log(8.0))
         r = resid(x)
+        if not np.all(np.isfinite(r)):
+            break
         if np.linalg.norm(r) < 1e-11:
             converged = True
             break
