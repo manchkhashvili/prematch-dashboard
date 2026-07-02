@@ -87,6 +87,12 @@ legs. Only fires inside the bettable range `1.15 ≤ odds ≤ 4.5`. Two bounds:
   leg. A combo **longer than fair** by ≥ 2% is over-generous.
   - Worked case (River Plate): H1 1.35 × FT 1.07 → fair ≈ 1.44; a 1/1 @ 1.55
     reads ~7% generous, where the raw product 1.539 saw only 0.7% and missed it.
+- 🟡 **SUPERSEDED (shadow, pending validation).** For soccer, the correlation
+  haircut `HT × (1 + (FT−1)/2)` is a crude stand-in for the true joint. Family E
+  (`soccer_model`) prices the same 1/1 & 2/2 off the calibrated goal matrix
+  exactly. B6 stays **on in shadow** until E is graded on beat-the-close; it is
+  the model-light fallback and still owns **basketball** HT/FT combos (E is
+  soccer-only). Retire the soccer path only once E wins the grading.
 
 ### B7. `htft_fair` — HT/FT vs a bivariate-normal model (**basketball only**) · BETTABLE direction exists
 Model-based fair for **every** HT/FT outcome via a bivariate normal on the
@@ -172,6 +178,15 @@ side: given a heavy favourite leads at the break it almost always wins, so
   (Boca, Palmeiras, Middlesbrough), which says it's **normal pricing**, not a
   per-book error. Treat as a screen to eyeball, not an EV claim. Tune
   `SOFT_HTFT_ML_RATIO` up (fewer, sharper) / down (more, noisier).
+- 🟡 **SUPERSEDED (shadow, pending validation).** A *constant* vs-ML ratio has
+  **zero discrimination**: the fair 2/2-to-FT ratio equals `1 / P(led at HT |
+  won FT)`, which is a function of favourite strength and total — ~**1.36** for a
+  1.18 favourite in a 4.2-total game, but ~**1.7–1.9** for a 1.60 favourite in a
+  2.3-total game. A single 1.35 threshold therefore flags normal strong
+  favourites and misses genuine soft lines on tighter games. Family E computes
+  that conditional ratio per game from the goal model, so it replaces this. Keep
+  D1's **vs-first-half mode** (1.2×) as a cheap pre-filter; the vs-ML mode stays
+  on in shadow only until E is graded, then retires.
 
 ### D2. `basketball_fav` — favourite disagreement across markets (`src/basketball_fav.py`)
 The 2-way (incl-OT winner), 3-way (regulation result), HT moneyline, and the
@@ -210,6 +225,78 @@ ladder scan.
 
 ---
 
+## Family E — model-implied soccer fair pricing (`src/soccer_model.py` + `soccer_identities.py` + `soccer_curves.py`) · SOCCER ONLY
+
+The principled replacement for the soccer heuristics (B6's combo formula, D1's
+static ratio). One calibrated goal model fair-prices **every** soccer derivative;
+a set of model-free algebra checks backstop it at family-A confidence. **numpy
+only** — devig, Poisson/Dixon-Coles score matrices, and the fits are hand-rolled
+(no scipy). Status: **library built + unit-tested (Modules 1–3); EV flagging,
+staleness, and logging (Modules 4–5) are pending a wiring design** — not yet
+connected to the refresh loops or the Anomalies tab.
+
+### E-core — the goal model (`soccer_model.py`, Module 1)
+- Everything reduces to `(λ_home, λ_away)` ≡ supremacy `S = λh−λa`, total
+  `T = λh+λa`. `F[i,j] = P(home i, away j)` is an N×N (N=12) independent-Poisson
+  matrix with a **Dixon-Coles** τ-correction on the 0-0/1-0/0-1/1-1 cells
+  (`rho = −0.08`). With `dc_rho = 0` it's pure Poisson, so the two half matrices'
+  convolution equals the FT matrix **exactly** — every cross-half identity then
+  holds to numerical zero (the basis of the property tests).
+- **Devig** (`devig`): `proportional` (baseline only), `power` (solve k with
+  Σpᵢᵏ=1), `shin` (insider-fraction z). Default `auto` = shin for 3-way, power
+  for 2-way. Power/shin shrink longshots harder than proportional — the whole
+  point at lopsided prices (1.18 vs 8.90).
+- **Fit** (`fit_lambdas`): recover `(λh, λa)` by matching devigged home-win + over
+  (if a main total is present) or home-win + draw (1X2 only), via damped Newton
+  in log-λ space.
+- **Half split** (`half_matrices`): `split` of each λ into H1 (~0.44), the rest
+  into H2; per-league configurable (`LEAGUE_SPLIT`).
+- **Price sheet** (`build_model`): one calibration → 1X2, DC, DNB, all 9 HT/FT
+  cells, HT & 2nd-half 1X2, FT/half totals ladders, Asian handicap incl. quarter
+  lines, European 3-way handicap, team totals, BTTS (+ result combos), **result &
+  total combos taken off the joint matrix, not leg products** (the correlation
+  books throw away), correct-score grid, win-to-nil, clean sheet, multigoals,
+  exact goals, odd/even, highest-scoring-half, goal-in-both-halves. All pure
+  functionals of the matrices.
+- **Validated** on the hand-checked Nepean–Mounties fixture: power devig
+  (0.0708/0.1108/0.8184), fit λ≈(0.921, 3.239), T≈4.16, and HT/FT prices
+  (2/2 fair 1.66 vs posted 1.80 = **+8% EV**) reproduce exactly.
+
+### E-identities — model-free algebra (`soccer_identities.py`, Module 2, family-A tier)
+On RAW posted odds, keyed with the model's scheme:
+- **Partition inequality:** for any whole = disjoint union of parts (HT/FT column
+  → FT side; HT/FT row → HT side; DC → its 1X2 legs; totals → exact-goal cells;
+  correct-score cells → 1X2 / unders), `Σ raw(parts) ≥ raw(whole)` normally holds
+  (each part carries vig). Parts summing to **less** ⇒ at least one part
+  over-generous (+EV). Generalises the original HT/FT "/2 column" find; validated
+  on Nepean (/2 column 0.8235 < FT2 0.8475 → fires).
+- **Exact equivalences + intra-book arb:** AH(0) ≡ DNB, AH(∓0.5) ≡ 1X2 side,
+  AH(±0.5) ≡ double chance, quarter ≡ mean of neighbours. A price gap flags; a
+  crossed pair (1/a + 1/b < 1) is a locked arb.
+- A perfectly consistent (vig-free) sheet raises **zero** identity flags — the
+  property test that caught a real sign bug in the AH↔DC mapping.
+
+### E-curves — curve residuals + cross-fit (`soccer_curves.py`, Module 3, upgrade of A)
+- **AH ladder ⇒ Skellam(λh, λa)** (goal difference of two Poissons): fit the
+  ladder, flag any rung ≥ 2pp off the fitted survival curve. Catches
+  monotone-but-wrong-magnitude rungs family A misses.
+- **Totals ladder ⇒ Poisson(T):** same, off-curve rungs (DC is second-order on
+  the aggregate total).
+- **Two-anchor cross-fit:** read `(S, T)` from the 1X2 + main total vs from the
+  AH + totals ladders; if they diverge by ≥ 0.15 goals (S) or ≥ 0.25 goals (T),
+  one family is stale — diagnostic, with a timestamp guess at which moved last.
+
+### E-pending (Modules 4–5, NOT built)
+EV = `posted × fair − 1` against the sheet, gated by a **robustness band**
+(recompute over split ∈ {0.42,0.44,0.48} × {power,shin} — flag only if EV holds
+across the whole band), an **anchor-quality** tag (Pinnacle = sharp, own-book =
+internal-consistency only), and the **staleness modifier** (parent 1X2/total/AH
+moved ≥3% since the derivative last changed → strongest single signal). Plus a
+SQLite flag log + beat-the-close grading. These touch the refresh/scheduler/DB
+and are deferred to a wiring design.
+
+---
+
 ## How they reach the Anomalies tab
 - CB ladder (A) + CB consistency (B) via the main CB scan (`ANOMALY_SCAN=1`).
 - Betlive OT-fold (C) via `BETLIVE_ANOMALY=1` — flags land in the consistency list.
@@ -229,11 +316,21 @@ ladder scan.
 threshold, default 1.35) · `CB_TRANSPORT` / `CB_ANOMALY_TRANSPORT` (http vs
 Playwright).
 
-## Confidence ranking (for research triage)
+## Confidence ranking / triage order (soccer, once Family E is live)
+1. **E-identities & AH(0)≡DNB** (family-A tier) — model-free, hard. Trust most.
+2. **E partition inequality** — model-free, points at the over-generous leg.
+3. **Stale-derivative-tagged EV flags** (E-pending, Module 4) — the parent moved,
+   the derivative didn't; strongest live signal.
+4. **Clean EV flags off the sheet** (E), robustness-band-confirmed, sharp anchor.
+5. **E-curve residuals** (upgrade of A) — off-curve rungs, magnitude errors.
+6. **Cross-fit divergence** — diagnostic ("one family is stale"), not EV.
+
+## Confidence ranking (all families, current)
 1. **A (ladder monotonicity)** — hard, bettable, single-book. Trust most.
 2. **C (Betlive OT-fold)** — hard structural bound, single-book, but short-lived.
-3. **B6/B7 (HT/FT combo & model)** — model-light→model-heavy EV claims; the
-   research core.
-4. **B1–B5 (consistency diagnostics)** — "go look", not EV.
-5. **D2 (basketball fav)** — structural disagreement, promising, needs outcome data.
-6. **D1 vs-ML (soccer HT/FT)** — exploratory screen; likely normal pricing.
+3. **E (soccer model + identities + curves)** — the soccer research core;
+   supersedes B6/D1 (both now shadow, pending grading).
+4. **B7 (basketball HT/FT model)** — the basketball analogue of E; EV claims.
+5. **B1–B5 (consistency diagnostics)** — "go look", not EV.
+6. **D2 (basketball fav)** — structural disagreement, promising, needs outcome data.
+7. 🟡 **B6 soccer path / D1 vs-ML** — SUPERSEDED by E; kept in shadow only.
