@@ -6,6 +6,7 @@ playwright
 beautifulsoup4
 curl_cffi      # CB_TRANSPORT=http — browser-free CB postbacks
 html5lib       # browser-equivalent HTML repair for raw ASP.NET panels
+numpy          # soccer_model — Poisson score matrices, devig, fair-price sheet
 fastapi
 uvicorn[standard]
 jinja2
