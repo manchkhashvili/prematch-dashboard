@@ -1179,11 +1179,18 @@ async def _soft_scan_loop():
     Runs in a worker thread; carries first_seen across sweeps."""
     from src import soft_scan
     global _soft_scan_flags, _soft_scan_at, _soft_scan_error
+    # A scanner that errors keeps its last-good flags for up to this long (so a
+    # transient network/DNS blip doesn't blank the tab), but no longer — a book
+    # that's genuinely down for hours shouldn't show stale lines forever.
+    stale_max = max(3 * SOFT_SCAN_SEC, 3 * 3600)
     await asyncio.sleep(30)
     while True:
         try:
-            flags = await asyncio.to_thread(soft_scan.scan_all)
+            flags, failed = await asyncio.to_thread(soft_scan.scan_all)
             ts = datetime.now(tz=timezone.utc)
+            # Carry over previous flags for scanners that FAILED this sweep (a book
+            # we couldn't reach) so a transient blip doesn't wipe them.
+            flags = _carry_stale_flags(_soft_scan_flags, flags, failed, ts, stale_max)
             prev = {(f.get("book"), f.get("book_event_id"), f.get("kind"), f.get("outcome")):
                     f.get("first_seen") for f in _soft_scan_flags}
             for f in flags:
@@ -1193,14 +1200,56 @@ async def _soft_scan_loop():
             async with _state_lock:
                 _soft_scan_flags = flags
                 _soft_scan_at = ts
-                _soft_scan_error = None
-            log.info("soft_scan: %d flags (soccer HT/FT + basketball fav across 3 books)",
-                     len(flags))
+                _soft_scan_error = (f"{len(failed)} scanner(s) unreachable; kept last-good"
+                                    if failed else None)
+            log.info("soft_scan: %d flags (%d fresh, %d failed scanner(s) carried)",
+                     len(flags), len(flags) - sum(1 for f in flags if f.get("stale")),
+                     len(failed))
         except Exception as e:
             log.exception("soft_scan sweep failed")
             async with _state_lock:
                 _soft_scan_error = str(e)[:200]
         await asyncio.sleep(SOFT_SCAN_SEC)
+
+
+def _carry_stale_flags(prev: list[dict], fresh: list[dict], failed: set,
+                       now: datetime, stale_max: float) -> list[dict]:
+    """Keep last-good flags for (book, sport) scanners that failed this sweep, so
+    an unreachable book doesn't blank the tab. Carried flags are marked stale and
+    dropped once the game kicks off or they've been stale too long. Scanners that
+    SUCCEEDED (even with 0 flags) are not carried — that anomaly genuinely cleared."""
+    if not failed:
+        return fresh
+    out = list(fresh)
+    for pf in prev:
+        if (pf.get("book"), pf.get("sport")) not in failed:
+            continue
+        sf = dict(pf)
+        sf["stale"] = True
+        sf["stale_since"] = pf.get("stale_since") or now.isoformat()
+        if not _flag_expired(sf, now, stale_max):
+            out.append(sf)
+    return out
+
+
+def _flag_expired(f: dict, now: datetime, stale_max: float) -> bool:
+    """True if a carried-over stale flag should be dropped: its game has kicked
+    off, or it's been stale longer than stale_max seconds."""
+    st = f.get("start_time")
+    if st:
+        try:
+            if datetime.fromisoformat(st) <= now:
+                return True
+        except (ValueError, TypeError):
+            pass
+    ss = f.get("stale_since")
+    if ss:
+        try:
+            if (now - datetime.fromisoformat(ss)).total_seconds() > stale_max:
+                return True
+        except (ValueError, TypeError):
+            pass
+    return False
 
 
 def _attach_pin_to_anomalies(
