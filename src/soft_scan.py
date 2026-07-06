@@ -463,17 +463,23 @@ def _f(v):
         return None
 
 
-def scan_all() -> list[dict]:
+def scan_all() -> tuple[list[dict], set]:
     """Every book × the sport its check applies to. Resilient: a book failing
-    doesn't sink the rest."""
+    doesn't sink the rest. Returns (flags, failed) where `failed` is the set of
+    (book, sport) scanners that errored this sweep — so the caller can keep their
+    last-good flags instead of wiping them on a transient outage (a DNS blip that
+    hits all books used to zero out the whole tab)."""
     out: list[dict] = []
+    failed: set[tuple[str, str]] = set()
     for name, fn, arg in (
         ("cb soccer", scan_cb, "soccer"), ("cb basketball", scan_cb, "basketball"),
         ("betlive soccer", scan_betlive, "soccer"), ("betlive basketball", scan_betlive, "basketball"),
         ("liderbet soccer", scan_liderbet, "soccer"), ("liderbet basketball", scan_liderbet, "basketball"),
     ):
+        book, sport = name.split()
         try:
             out += fn(arg)
         except Exception as e:
             log.warning("soft_scan %s failed: %s", name, e)
-    return out
+            failed.add((book, sport))
+    return out, failed

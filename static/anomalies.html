@@ -239,13 +239,13 @@ function renderConsistency(flags) {
     body.innerHTML = `<tr><td colspan="7" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
-    <tr>
-      <td class="mono dim">${fmtTime(f.first_seen)}</td>
+    <tr${f.stale ? ' style="opacity:.5"' : ''}>
+      <td class="mono dim">${fmtTime(f.first_seen)}${f.stale ? ' ⚠︎' : ''}</td>
       <td>${f.match_label}</td>
       <td class="dim">${f.league || ""}</td>
       <td>${KIND_LABEL[f.kind] || f.kind}</td>
       <td class="dim mono">${f.periods}</td>
-      <td>${f.detail}</td>
+      <td>${f.detail}${f.stale ? ' <span class="dim">(stale — book unreachable last sweep)</span>' : ''}</td>
       <td class="num ${consClass(f.severity)}">${Number(f.severity).toFixed(1)}</td>
     </tr>
   `).join("");
