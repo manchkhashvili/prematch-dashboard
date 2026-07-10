@@ -249,6 +249,7 @@ SPORT_NAMES = tuple(s.sport_name for s in SPORTS)
 # poll cadence for these JSON books (cheaper than CB; default 120s).
 from src.scrapers import betlive as _betlive  # noqa: E402
 from src.scrapers import liderbet as _liderbet  # noqa: E402
+from src.scrapers import crocobet as _crocobet  # noqa: E402
 
 _BOOK_FETCHERS: dict[str, dict[str, Any]] = {
     "liderbet": {
@@ -261,6 +262,11 @@ _BOOK_FETCHERS: dict[str, dict[str, Any]] = {
         "basketball": _betlive.fetch_betlive_basketball,
         "tennis":     _betlive.fetch_betlive_tennis,
     },
+    "crocobet": {
+        "soccer":     _crocobet.fetch_crocobet_soccer,
+        "basketball": _crocobet.fetch_crocobet_basketball,
+        "tennis":     _crocobet.fetch_crocobet_tennis,
+    },
 }
 
 
@@ -269,7 +275,7 @@ def _book_enabled(name: str) -> bool:
     return val in ("1", "on", "true", "yes")
 
 
-EXTRA_BOOKS: tuple[str, ...] = tuple(b for b in ("liderbet", "betlive") if _book_enabled(b))
+EXTRA_BOOKS: tuple[str, ...] = tuple(b for b in ("liderbet", "betlive", "crocobet") if _book_enabled(b))
 # All soft books in priority order — CB first (the original), then any enabled
 # extras. Pinnacle is the sharp reference, never in this list.
 SOFT_BOOKS: tuple[str, ...] = ("cb", *EXTRA_BOOKS)
