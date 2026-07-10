@@ -31,6 +31,15 @@ log = logging.getLogger(__name__)
 # top league. Looser than the legacy 1.30 htft gate; basketball keeps 1.30.
 SOCCER_FAV_MAX = float(os.environ.get("SOCCER_FAV_MAX", "1.5"))
 
+# Soccer soft-scan is OFF by default (owner call 2026-07-11): the soccer HT/FT +
+# fair + identity checks are dominated by low-value / esports-style fixtures
+# (parenthesised player names like "United States (Legion)") and were adding
+# hundreds of rows of noise to the Anomalies tab. The scanners are kept intact
+# (shadow research — soccer fair-pricing engine) and re-enabled with
+# SOFT_SCAN_SOCCER=1. Basketball soft-scan is unaffected.
+SOFT_SCAN_SOCCER = os.environ.get("SOFT_SCAN_SOCCER", "").strip().lower() in (
+    "1", "on", "true", "yes")
+
 
 def _open(sport: str, h, a, league) -> bool:
     if sport != "soccer":
@@ -471,11 +480,18 @@ def scan_all() -> tuple[list[dict], set]:
     hits all books used to zero out the whole tab)."""
     out: list[dict] = []
     failed: set[tuple[str, str]] = set()
-    for name, fn, arg in (
-        ("cb soccer", scan_cb, "soccer"), ("cb basketball", scan_cb, "basketball"),
-        ("betlive soccer", scan_betlive, "soccer"), ("betlive basketball", scan_betlive, "basketball"),
-        ("liderbet soccer", scan_liderbet, "soccer"), ("liderbet basketball", scan_liderbet, "basketball"),
-    ):
+    scanners = [
+        ("cb basketball", scan_cb, "basketball"),
+        ("betlive basketball", scan_betlive, "basketball"),
+        ("liderbet basketball", scan_liderbet, "basketball"),
+    ]
+    if SOFT_SCAN_SOCCER:
+        scanners += [
+            ("cb soccer", scan_cb, "soccer"),
+            ("betlive soccer", scan_betlive, "soccer"),
+            ("liderbet soccer", scan_liderbet, "soccer"),
+        ]
+    for name, fn, arg in scanners:
         book, sport = name.split()
         try:
             out += fn(arg)

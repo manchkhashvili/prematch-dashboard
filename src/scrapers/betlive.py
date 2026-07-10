@@ -126,6 +126,24 @@ def _leaf_leagues(nodes: list) -> list[dict]:
     return out
 
 
+# A prematch getLeagueEvents response occasionally carries already-started /
+# in-play fixtures. Betlive marks those with eventType == 2 (verified live
+# 2026-07-11: eventType==2 exactly equalled the set of events whose startDate
+# was in the past — soccer 6/6, basketball 0/0). We drop them two ways for
+# safety: the explicit live marker AND a start-time-in-the-past check with a
+# small grace for clock skew. Prematch odds must never carry a live game — its
+# price has moved off the pre-game number and would fire phantom edges/arbs.
+_LIVE_GRACE_SEC = 120
+
+
+def _is_live(ev: dict, start_time: datetime | None, now: datetime) -> bool:
+    if ev.get("eventType") == 2:
+        return True
+    if start_time is not None and start_time < now - timedelta(seconds=_LIVE_GRACE_SEC):
+        return True
+    return False
+
+
 def _parse_event(ev: dict, sport_name: str, fetched_at: datetime) -> list[Odds]:
     home = (ev.get("homeTeamName") or "").strip()
     away = (ev.get("awayTeamName") or "").strip()
@@ -133,6 +151,8 @@ def _parse_event(ev: dict, sport_name: str, fetched_at: datetime) -> list[Odds]:
         return []
     league = ev.get("leagueName")
     start_time = ticks_to_utc(ev.get("startDate"))
+    if _is_live(ev, start_time, fetched_at):
+        return []                       # in-play leak — not a prematch price
     event_id = ev.get("id")
 
     sr_match_id = None
