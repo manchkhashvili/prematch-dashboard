@@ -80,7 +80,58 @@ TIME_TIGHT_SECONDS = 3600   # ±1 h (was 300 = ±5  min — Phase 3.10; both tie
 # Backwards-compat alias (one legacy reference may still import this name).
 SCORE_THRESHOLD = SCORE_LOOSE
 
+# ── Wrong-fixture guards (2026-07-11 — the 1xbet arbs false-positive audit) ───
+# Three failure modes found live, each with its own guard:
+#   1. One-sided matches: croco "tps/oulu" ↔ 1xbet "VJS Vantaa/OLS Oulu" —
+#      away scored 100, home 31, mean 65 passed the medium tier. Guard:
+#      BOTH sides must clear MIN_SIDE_SCORE.
+#   2. Same-city different clubs: "Gold Coast Knights/Brisbane City" ↔
+#      "Gold Coast United/Brisbane Olympic" (mean 78, min 76!). Shared city
+#      tokens inflate both sides while the DISTINCTIVE tokens contradict
+#      (Knights≠United, City≠Olympic). Guard: when both names keep leftover
+#      tokens after removing common ones and no leftover pair fuzzy-agrees,
+#      demand a near-perfect mean (CONTRADICTION_MEAN).
+#   3. Reversed fixtures: 1xbet lists "Tallinna Kalev U21 v Levadia U19" where
+#      the softs list Levadia home (direct 65, SWAPPED 100). Cross-priced
+#      home/away → phantom 88% edges. Guard/feature: score both orientations;
+#      when swapped wins decisively, MATCH IT with the reference odds flipped
+#      (selections home↔away, spread lines negated, team_side swapped).
+MIN_SIDE_SCORE = 50.0
+CONTRADICTION_MEAN = 88.0
+FLIP_MIN_MEAN = 85.0
+FLIP_MARGIN = 15.0
+FLIP_MIN_SIDE = 70.0
+_TOKEN_PAIR_OK = 70.0     # leftover-token partial_ratio to count as agreeing
+
 UNMATCHED_LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "unmatched_log.csv"
+
+
+def _tokens_contradict(a_norm: str, b_norm: str) -> bool:
+    """True when both names have leftover distinctive tokens and none of them
+    fuzzy-agree — the same-city-different-club tell. Abbreviations survive via
+    partial_ratio ("man"→"manchester"=100, "utd"→"united"≥70)."""
+    at, bt = set(a_norm.split()), set(b_norm.split())
+    a_left, b_left = at - bt, bt - at
+    if not a_left or not b_left:
+        return False
+    for x in a_left:
+        for y in b_left:
+            if fuzz.partial_ratio(x, y) >= _TOKEN_PAIR_OK:
+                return False
+    return True
+
+
+def _flip_odds(o: Odds) -> Odds:
+    """Home/away-swapped view of a reference Odds row (reversed fixture)."""
+    import dataclasses
+    sel = dict(o.selections)
+    if "home" in sel or "away" in sel:
+        sel["home"], sel["away"] = sel.get("away"), sel.get("home")
+        sel = {k: v for k, v in sel.items() if v is not None}
+    line = -o.line if (o.market_type == "spread" and o.line is not None) else o.line
+    team_side = {"home": "away", "away": "home"}.get(o.team_side, o.team_side)
+    return dataclasses.replace(o, home=o.away, away=o.home, selections=sel,
+                               line=line, team_side=team_side)
 
 
 class MatchedEvent(NamedTuple):
@@ -137,15 +188,37 @@ def match_with_diagnostics(
     # Enumerate EVERY (cb, pin) pair with its score — no time filter at this
     # stage. The tiered _accept() applies time as part of the threshold rule
     # so we can't pre-filter on time without knowing the score first.
-    scored: list[tuple[float, tuple[str, str, bool], tuple[str, str, bool]]] = []
+    # Each entry: (score, cb_key, pin_key, flipped) — `flipped` marks a
+    # reversed-fixture match whose reference odds must be home/away-swapped.
+    scored: list[tuple[float, tuple, tuple, bool]] = []
     for cb_key, (ch_n, ca_n) in cb_norm.items():
-        cb_time = cb_events[cb_key][0].start_time
         for pin_key, (ph_n, pa_n) in pin_norm.items():
-            pin_time = pin_events[pin_key][0].start_time
             score_h = fuzz.token_set_ratio(ch_n, ph_n)
             score_a = fuzz.token_set_ratio(ca_n, pa_n)
             score = (score_h + score_a) / 2.0
-            scored.append((score, cb_key, pin_key))
+            # Orientation check: the reference book sometimes lists the same
+            # fixture with home/away reversed. When the swapped orientation
+            # wins decisively, match it flipped instead of cross-priced.
+            sw_h = fuzz.token_set_ratio(ch_n, pa_n)
+            sw_a = fuzz.token_set_ratio(ca_n, ph_n)
+            sw = (sw_h + sw_a) / 2.0
+            flipped = (sw >= FLIP_MIN_MEAN and sw >= score + FLIP_MARGIN
+                       and min(sw_h, sw_a) >= FLIP_MIN_SIDE)
+            if flipped:
+                score, score_h, score_a = sw, sw_h, sw_a
+                ph_eff, pa_eff = pa_n, ph_n
+            else:
+                ph_eff, pa_eff = ph_n, pa_n
+            # Guard 1: both sides must independently look like the same team.
+            # Guard 2: same-city-different-club — distinctive tokens disagree
+            # on either side → only a near-perfect mean may pass.
+            # Guard failures stay in `scored` (the unmatched-diagnostics loop
+            # wants the best candidate regardless) but are match-ineligible.
+            eligible = min(score_h, score_a) >= MIN_SIDE_SCORE and not (
+                score < CONTRADICTION_MEAN and (
+                    _tokens_contradict(ch_n, ph_eff)
+                    or _tokens_contradict(ca_n, pa_eff)))
+            scored.append((score, cb_key, pin_key, flipped, eligible))
 
     # Hard youth guard (v2 finding #3): a U16–U23 side must never pair with a
     # senior side — fuzzy scoring can't be trusted here because
@@ -162,7 +235,10 @@ def match_with_diagnostics(
     candidates = sorted(
         (
             c for c in scored
-            if cb_youth[c[1]] == pin_youth[c[2]]
+            if c[4]                                # wrong-fixture guards passed
+            # youth guard: compare per-side in MATCHED orientation (flip-aware)
+            and cb_youth[c[1]] == (
+                (pin_youth[c[2]][1], pin_youth[c[2]][0]) if c[3] else pin_youth[c[2]])
             and c[1][2] == c[2][2]                 # gender guard: women↔women only
             and _accept(
                 c[0],
@@ -176,14 +252,19 @@ def match_with_diagnostics(
     used_pin: set[tuple[str, str, bool]] = set()
     matched: list[MatchedEvent] = []
 
-    for score, cb_key, pin_key in candidates:
+    for score, cb_key, pin_key, flipped, _eligible in candidates:
         if cb_key in used_cb or pin_key in used_pin:
             continue
         used_cb.add(cb_key)
         used_pin.add(pin_key)
+        pin_rows = pin_events[pin_key]
+        if flipped:
+            pin_rows = [_flip_odds(o) for o in pin_rows]
+            log.info("matched FLIPPED (%.0f) %s vs %s ↔ reference had %s vs %s",
+                     score, cb_key[0], cb_key[1], pin_key[0], pin_key[1])
         matched.append(MatchedEvent(
             cb=cb_events[cb_key],
-            pin=pin_events[pin_key],
+            pin=pin_rows,
             home=cb_key[0],
             away=cb_key[1],
             score=score,
@@ -197,7 +278,7 @@ def match_with_diagnostics(
     # regardless of threshold — for the curation loop.
     unmatched: list[UnmatchedEvent] = []
     best_by_cb: dict[tuple[str, str, bool], tuple[float, tuple[str, str, bool]]] = {}
-    for score, cb_key, pin_key in scored:
+    for score, cb_key, pin_key, _flipped, _eligible in scored:
         if pin_key in used_pin:
             continue  # already taken by another CB event
         prev = best_by_cb.get(cb_key)

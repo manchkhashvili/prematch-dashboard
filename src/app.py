@@ -321,6 +321,10 @@ ANOMALY_SCAN = _anomaly_enabled()
 # ~60-90s of postback+parse work, so 15 min keeps the heat manageable. Only
 # sports actually enabled in SPORTS= are scanned.
 ANOMALY_EXTRA_SEC = int(os.environ.get("ANOMALY_EXTRA_SEC", "900"))
+# Only expand games starting within this many hours (a FULL soccer sweep is
+# ~14 min and never completed a pass; near-kickoff ladders are the ones that
+# matter). Basketball keeps its whole-board scan.
+ANOMALY_EXTRA_HORIZON_H = float(os.environ.get("ANOMALY_EXTRA_HORIZON_H", "12"))
 _ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS", "soccer,tennis")
 # CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
 # (it's the heaviest book — ~65s+CPU for a full board), other books every 2.5
@@ -1226,8 +1230,9 @@ async def _anomaly_extra_loop():
     while True:
         for sport in sports:
             try:
-                odds = await fetch_crystalbet_anomaly_ladders(sport,
-                                                              headed=not CB_HEADLESS)
+                odds = await fetch_crystalbet_anomaly_ladders(
+                    sport, headed=not CB_HEADLESS,
+                    start_within_hours=ANOMALY_EXTRA_HORIZON_H)
                 anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
                 rows = [_anomaly_base_row(a) for a in anoms]
                 ts = datetime.now(tz=timezone.utc)
