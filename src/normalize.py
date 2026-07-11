@@ -275,3 +275,25 @@ def normalize_team(name: str) -> str:
     alnum_only = _NON_ALNUM.sub(" ", lower)
     tokens = [t for t in alnum_only.split() if t not in _DROP_TOKENS]
     return _WHITESPACE.sub(" ", " ".join(tokens)).strip()
+
+
+# ── Simulated / esports league guard (2026-07-11) ─────────────────────────────
+# Every Georgian book lists SIMULATED competitions inside the real-sport
+# sections: Betlive "e-Sports Battle" + "Simulated Reality League (SRL)",
+# Crocobet "K liga 1 SRL", Lider "Cyberfootball" + "K-League 1 SRL". Their
+# fixtures reuse REAL team names ("K-League 1 SRL" vs the real K-League), so
+# they fuzzy-match genuine fixtures on the reference books and fire phantom
+# edges/arbs/anomalies. One shared token list so every scraper drops them
+# identically. Tokens are matched as substrings of the lowercased (and, for
+# Georgian, transliterated) league/tournament name.
+SIM_LEAGUE_TOKENS = (
+    "srl", "simulated", "cyber", "esoccer", "e-soccer", "esports", "e-sports",
+    "ebasket", "e-basket", "volta", "setka", "liga pro", "battle",
+    "8 minutes", "2x6", "2х6",   # e-Sports Battle formats (latin + cyrillic х)
+)
+
+
+def is_simulated_league(name: str | None) -> bool:
+    """True when a league/tournament name marks a simulated/esports shelf."""
+    low = transliterate(name or "").lower()
+    return any(tok in low for tok in SIM_LEAGUE_TOKENS)
