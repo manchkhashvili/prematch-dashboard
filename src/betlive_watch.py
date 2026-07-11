@@ -28,6 +28,7 @@ import time
 from datetime import datetime, timezone
 
 from src.betlive_anomalies import anomalies_for_event, pick_ml_markets
+from src.scrapers.betlive import _is_live, ticks_to_utc
 
 log = logging.getLogger(__name__)
 
@@ -115,8 +116,16 @@ def discover(sport_ids=DEFAULT_SPORT_IDS, *, max_events: int | None = None):
                        headers=HEADERS, timeout=_TIMEOUT)
             energy["list_calls"] += 1
             energy["list_bytes"] += len(lr.content)
+            now = datetime.now(tz=timezone.utc)
             for w in lr.json() or []:
                 for ev in w.get("events") or []:
+                    # Skip in-play events: getLeagueEvents mixes started/live
+                    # fixtures (eventType==2) into the prematch line. Their
+                    # incl-OT vs regulation moneyline has already diverged from
+                    # the pre-game number, firing FALSE anomaly flags. Same
+                    # filter the main scraper uses (src/scrapers/betlive.py).
+                    if _is_live(ev, ticks_to_utc(ev.get("startDate")), now):
+                        continue
                     if ev.get("id") and _has_2way(ev):
                         candidates.append(ev["id"])
     if max_events:

@@ -28,9 +28,11 @@ gameType codes) are deliberately NOT emitted yet — add per code only after a
 cross-price check (keep the 0.00pp discipline; see notes/build_log.md).
 
 sr_match_id = the event's `remoteId` (bare SR id) → exact cross-book join to
-Lider/Betlive. Home/away come from `participants` (number 1 = home, 2 = away);
-names are Georgian — fine for the SR-id join, transliteration is a later task
-for the name-matched Pinnacle leg.
+Lider/Betlive. Home/away come from `participants` (number 1 = home, 2 = away).
+The gateway serves names in GEORGIAN only (the site's EN toggle translates
+client-side; no server English exists), so we romanize to Latin via the shared
+transliterate() — readable English-ish names that also fuzzy-match the
+reference books.
 """
 from __future__ import annotations
 
@@ -40,6 +42,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from src.models import Odds
+from src.normalize import transliterate
 
 log = logging.getLogger(__name__)
 
@@ -99,14 +102,20 @@ def _prices(game: dict) -> dict[str, float]:
 def _parse_event(ev: dict, games: list[dict], sport: str,
                  fetched_at: datetime) -> list[Odds]:
     parts = {p.get("number"): p for p in ev.get("participants") or []}
-    home = (parts.get(1) or {}).get("name") or ""
-    away = (parts.get(2) or {}).get("name") or ""
+    # Crocobet's sport gateway serves names in GEORGIAN only (the site's EN
+    # toggle translates client-side via ngx-translate; no server English
+    # exists — verified: /sport/{ka,en,ru,tr}/ all return Georgian). We
+    # romanize to Latin with the shared transliterate() so names read in
+    # English and fuzzy-match the reference books. (mkhedruli → national
+    # romanization, e.g. "მემფისი" → "mempisi".)
+    home = transliterate(((parts.get(1) or {}).get("name") or "").strip())
+    away = transliterate(((parts.get(2) or {}).get("name") or "").strip())
     if not home or not away:
         return []
     start = ev.get("eventStart")
     start_time = (datetime.fromtimestamp(start / 1000, tz=timezone.utc)
                   if start else None)
-    league = ev.get("category3Name") or ev.get("category2Name")
+    league = transliterate(ev.get("category3Name") or ev.get("category2Name") or "") or None
     sr = ev.get("remoteId")
     sr_match_id = str(sr) if sr else None
     table = _GAMETYPE.get(sport, {})
@@ -138,7 +147,7 @@ def _parse_event(ev: dict, games: list[dict], sport: str,
             continue
         try:
             rows.append(Odds(
-                source="crocobet", sport=sport, home=home.strip(), away=away.strip(),
+                source="crocobet", sport=sport, home=home, away=away,
                 market_type=market_type, period=period, selections=sel,
                 fetched_at=fetched_at,
                 line=float(line) if line is not None else None,
