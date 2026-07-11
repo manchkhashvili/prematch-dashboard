@@ -18,6 +18,8 @@
       <a href="/matches.html">Matches</a>
       <a href="/arbs.html" class="active">Arbs / +EV</a>
       <a href="/moves.html">Top Moves</a>
+      <a href="/arbs.html?ref=xbet" id="nav-xarbs">1xbet Arbs</a>
+      <a href="/moves.html?ref=xbet" id="nav-xmoves">1xbet Moves</a>
       <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
@@ -85,6 +87,14 @@
   </div>
 
 <script>
+// Reference book: default Pinnacle; ?ref=xbet → the 1xbet Arbs tab.
+const REF = new URLSearchParams(location.search).get("ref") === "xbet" ? "xbet" : "pin";
+if (REF === "xbet") {
+  document.querySelector('nav a[href="/arbs.html"]').classList.remove("active");
+  document.getElementById("nav-xarbs").classList.add("active");
+  document.querySelector("h1").textContent = "Prematch Dashboard — 1xbet reference";
+  document.querySelectorAll('#book-filter .chip[data-book="cb"]').forEach(() => {});
+}
 const POLL_MS = 30_000;
 let cache = [];
 let kindFilter = "all";
@@ -283,6 +293,7 @@ async function fetchAndRender() {
   const params = new URLSearchParams({ min_edge: minEdge });
   if (kindFilter !== "all") params.set("kind", kindFilter);
   if (bookFilter !== "all") params.set("book", bookFilter);
+  if (REF === "xbet") params.set("ref", "xbet");   // 1xbet Arbs tab
   try {
     // Fetch opportunities and bet list in parallel — both are needed before render.
     const [oppsRes] = await Promise.all([

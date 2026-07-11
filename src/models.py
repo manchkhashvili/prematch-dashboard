@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-Source     = Literal["crystalbet", "pinnacle", "liderbet", "betlive", "crocobet"]
+Source     = Literal["crystalbet", "pinnacle", "xbet", "liderbet", "betlive", "crocobet"]
 # "htft" = the 9-way Halftime/Fulltime combo market (selections keyed "1/1",
 # "1/X", ..., "2/2"). Captured only by the permissive (anomaly-scan) classifier
 # for CB-internal consistency checks — never matched against Pinnacle.

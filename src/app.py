@@ -78,6 +78,7 @@ from src.scrapers.pinnacle import (
     fetch_pinnacle_soccer,
     fetch_pinnacle_tennis,
 )
+from src.scrapers import xbet as _xbet
 from src.vig import devig_2way, devig_3way
 
 log = logging.getLogger(__name__)
@@ -105,6 +106,9 @@ class SportConfig:
     pin_fetcher: Callable[..., Awaitable[list[Odds]]]
     cb_sample_path: Path
     cb_parse_html: Callable[[str, datetime], list[Odds]]
+    # 1xbet is a SECOND sharp reference (opt-in, XBET=1). One poll feeds both
+    # the 1xbet Arbs and 1xbet Moves tabs. None → sport not covered by 1xbet.
+    xbet_fetcher: Callable[..., Awaitable[list[Odds]]] | None = None
 
 
 _ALL_SPORTS: list[SportConfig] = [
@@ -114,6 +118,7 @@ _ALL_SPORTS: list[SportConfig] = [
         pin_fetcher=fetch_pinnacle_basketball,
         cb_sample_path=CB_SAMPLE_PATH,
         cb_parse_html=parse_cb_html,
+        xbet_fetcher=_xbet.fetch_xbet_basketball,
     ),
     SportConfig(
         sport_name="soccer",
@@ -121,6 +126,7 @@ _ALL_SPORTS: list[SportConfig] = [
         pin_fetcher=fetch_pinnacle_soccer,
         cb_sample_path=CB_SAMPLE_PATH_SOCCER,
         cb_parse_html=parse_cb_html_soccer,
+        xbet_fetcher=_xbet.fetch_xbet_soccer,
     ),
     SportConfig(
         sport_name="tennis",
@@ -128,6 +134,7 @@ _ALL_SPORTS: list[SportConfig] = [
         pin_fetcher=fetch_pinnacle_tennis,
         cb_sample_path=CB_SAMPLE_PATH_TENNIS,
         cb_parse_html=parse_cb_html_tennis,
+        xbet_fetcher=_xbet.fetch_xbet_tennis,
     ),
     SportConfig(
         sport_name="mma",
@@ -135,6 +142,7 @@ _ALL_SPORTS: list[SportConfig] = [
         pin_fetcher=fetch_pinnacle_mma,
         cb_sample_path=CB_SAMPLE_PATH_MMA,
         cb_parse_html=parse_cb_html_mma,
+        xbet_fetcher=_xbet.fetch_xbet_mma,
     ),
 ]
 
@@ -369,11 +377,21 @@ def _empty_source_state() -> dict[str, Any]:
     return {"odds": [], "fetched_at": None, "error": None, "count": 0}
 
 
+# ── 1xbet as a second reference (opt-in) ──────────────────────────────────────
+# XBET=1 turns on the 1xbet poll + its two tabs (1xbet Arbs / 1xbet Moves). One
+# poll per sport feeds both (no separate anomaly/arbs polls). Default-off keeps
+# the Pinnacle-only pipeline byte-identical.
+XBET = os.environ.get("XBET", "").strip().lower() in ("1", "on", "true", "yes")
+XBET_POLL_SEC = int(os.environ.get("XBET_POLL_SEC", "120"))
+
+
 def _empty_sport_state() -> dict[str, Any]:
     # cb + pin always; one slot per enabled extra book (none by default).
     st = {"cb": _empty_source_state(), "pin": _empty_source_state()}
     for book in EXTRA_BOOKS:
         st[book] = _empty_source_state()
+    if XBET:
+        st["xbet"] = _empty_source_state()
     return st
 
 
@@ -400,6 +418,11 @@ _MOVE_RETENTION_SEC = 600  # keep moves for this long (10 min) on the Top Moves 
 # [(ts_iso, fair_prob_dict, odds_dict), ...]}. Pruned to _HOUR_WINDOW_SEC.
 _pin_ml_series: dict[str, dict] = {sport: {} for sport in SPORT_NAMES}
 _HOUR_WINDOW_SEC = 3600  # cumulative-moves lookback window (1 hour)
+
+# Parallel 1xbet move-detection stores (same shapes; only used when XBET=1).
+_xbet_prev_fair: dict[str, dict] = {sport: {} for sport in SPORT_NAMES}
+_recent_xbet_moves: dict[str, list[dict]] = {sport: [] for sport in SPORT_NAMES}
+_xbet_ml_series: dict[str, dict] = {sport: {} for sport in SPORT_NAMES}
 
 # ── Anomaly scan state (Phase 6) ──────────────────────────────────────────────
 # Filled by the hourly _anomaly_loop. `_anomaly_cb_odds` keeps the full CB odds
@@ -486,6 +509,46 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
             except Exception:
                 pass
         await asyncio.sleep(PINNACLE_POLL_SEC)
+
+
+async def _xbet_loop_for_sport(cfg: SportConfig):
+    """Poll 1xbet (second reference) for one sport → _state[sport]['xbet'].
+
+    ONE poll feeds both 1xbet tabs: /api/opportunities?ref=xbet (1xbet Arbs)
+    and /api/moves?ref=xbet (1xbet Moves). Same steam detection as Pinnacle,
+    writing the parallel _xbet_* stores. Opt-in (XBET=1); a fetch failure only
+    marks this slot's error and never touches the Pinnacle path."""
+    sport = cfg.sport_name
+    if cfg.xbet_fetcher is None:
+        return
+    while True:
+        try:
+            t0 = time.monotonic()
+            odds = await cfg.xbet_fetcher()
+            dt = time.monotonic() - t0
+            async with _state_lock:
+                _state[sport]["xbet"]["odds"] = odds
+                _state[sport]["xbet"]["fetched_at"] = datetime.now(tz=timezone.utc)
+                _state[sport]["xbet"]["error"] = None
+                _state[sport]["xbet"]["count"] = len(odds)
+            log.info("xbet %s: %d Odds rows in %.1fs", sport, len(odds), dt)
+            try:
+                await asyncio.to_thread(
+                    ticks.get_store().record_cycle, "xbet", sport,
+                    ticks.rows_from_odds(odds), dur_ms=int(dt * 1000),
+                )
+            except Exception as e:
+                log.warning("tick store write failed (xbet %s): %s", sport, e)
+            try:
+                _compute_pin_moves(sport, odds, _xbet_prev_fair,
+                                   _recent_xbet_moves, _xbet_ml_series)
+            except Exception as e:
+                log.warning("xbet move detection failed (%s): %s", sport, e)
+        except Exception as e:
+            log.exception("xbet %s fetch failed", sport)
+            async with _state_lock:
+                _state[sport]["xbet"]["error"] = str(e)[:200]
+        await asyncio.sleep(XBET_POLL_SEC)
 
 
 async def _extra_book_loop_for_sport(book: str, sport: str):
@@ -576,8 +639,15 @@ def _move_market_label(o: Odds) -> str:
     return label
 
 
-def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
-    """Detect Pinnacle moves against CHANGE-ANCHORED baselines.
+def _compute_pin_moves(sport: str, odds: list[Odds],
+                       prev_fair: dict | None = None,
+                       recent_moves: dict | None = None,
+                       ml_series: dict | None = None) -> None:
+    """Detect reference-book moves against CHANGE-ANCHORED baselines.
+
+    Defaults operate on the Pinnacle stores (_pin_prev_fair / _recent_moves /
+    _pin_ml_series) — byte-identical to before. Pass the 1xbet stores to reuse
+    the exact same steam detection for the 1xbet Moves tab.
 
     A "move" is a side whose fair probability ROSE by >= _MOVE_MIN_PP points
     since its BASELINE — the snapshot where this market last moved (or was
@@ -592,6 +662,11 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
     Stores the move list in _recent_moves[sport] and the baselines in
     _pin_prev_fair[sport].
     """
+    # Resolve which stores to write (Pinnacle by default; 1xbet when passed).
+    prev_fair = _pin_prev_fair if prev_fair is None else prev_fair
+    recent_moves = _recent_moves if recent_moves is None else recent_moves
+    ml_series = _pin_ml_series if ml_series is None else ml_series
+
     # Build current fair-prob + posted-odds map keyed by market.
     current: dict[tuple, dict] = {}
     for o in odds:
@@ -618,7 +693,7 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
             "team_side": o.team_side,
         }
 
-    baselines = _pin_prev_fair.get(sport, {})
+    baselines = prev_fair.get(sport, {})
     now = datetime.now(tz=timezone.utc)
     now_iso = now.isoformat()
     moves: list[dict] = []
@@ -700,19 +775,19 @@ def _compute_pin_moves(sport: str, odds: list[Odds]) -> None:
     # window, then drop anything older than _MOVE_RETENTION_SEC.
     cutoff = now - timedelta(seconds=_MOVE_RETENTION_SEC)
     kept: list[dict] = []
-    for m in _recent_moves.get(sport, []) + moves:
+    for m in recent_moves.get(sport, []) + moves:
         try:
             if datetime.fromisoformat(m["recorded_at"]) >= cutoff:
                 kept.append(m)
         except (ValueError, KeyError):
             continue  # malformed timestamp — drop it
-    _recent_moves[sport] = kept
-    _pin_prev_fair[sport] = new_baselines
+    recent_moves[sport] = kept
+    prev_fair[sport] = new_baselines
 
     # Phase 5.6: append this cycle's MONEYLINE fair/odds to the 1h series,
     # then prune. Used by the cumulative ("net over 1h") view.
     hr_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=_HOUR_WINDOW_SEC)
-    series_map = _pin_ml_series.setdefault(sport, {})
+    series_map = ml_series.setdefault(sport, {})
     seen_keys: set = set()
     for key, cur in current.items():
         if key[1] != "moneyline":   # key = (eid, market_type, period, line, sub, team)
@@ -1358,9 +1433,16 @@ async def lifespan(app: FastAPI):
                 _extra_book_loop_for_sport(book, cfg.sport_name),
                 name=f"{book}_loop_{cfg.sport_name}",
             ))
+        if XBET and cfg.xbet_fetcher is not None:
+            tasks.append(asyncio.create_task(
+                _xbet_loop_for_sport(cfg), name=f"xbet_loop_{cfg.sport_name}",
+            ))
     if EXTRA_BOOKS:
         log.info("extra books ENABLED: %s (poll %ds)", ", ".join(EXTRA_BOOKS),
                  EXTRA_BOOK_POLL_SEC)
+    if XBET:
+        log.info("1xbet reference ENABLED (poll %ds) — 1xbet Arbs + 1xbet Moves tabs",
+                 XBET_POLL_SEC)
     if ANOMALY_SCAN:
         tasks.append(asyncio.create_task(_anomaly_loop(), name="anomaly_loop"))
         log.info(
@@ -1426,6 +1508,15 @@ async def api_status() -> dict:
                 "error":      pin["error"],
             },
         }
+        for extra in (*EXTRA_BOOKS, *(("xbet",) if XBET else ())):
+            slot = _state[sport].get(extra)
+            if slot is not None:
+                sports_status[sport][extra] = {
+                    "count":      slot["count"],
+                    "fetched_at": slot["fetched_at"].isoformat() if slot["fetched_at"] else None,
+                    "age_sec":    _age_sec(slot["fetched_at"]),
+                    "error":      slot["error"],
+                }
     return {
         "sports": sports_status,
         "config": {
@@ -1473,14 +1564,17 @@ async def api_matches() -> list[dict]:
 async def api_moves(
     min_move: float = Query(2.0, ge=0.0, le=100.0,
                             description="Minimum fair-prob shift (percentage points)"),
+    ref: str = Query("pin",
+                     description="Reference book: 'pin' (Pinnacle) or 'xbet' (1xbet)"),
 ) -> list[dict]:
-    """Pinnacle line moves from the last ~5 minutes (Phase 5.3 rolling window),
-    across all sports. Each row is a side whose no-vig fair probability rose —
-    the side sharp money came in on. Sorted newest-first, then by magnitude
-    within the same cycle, so the feed reads as 'what just moved'."""
+    """Reference-book line moves from the last ~10 minutes, across all sports.
+    Each row is a side whose no-vig fair probability rose — the side sharp
+    money came in on. `?ref=xbet` shows 1xbet's moves (the 1xbet Moves tab)."""
+    ref = ref if isinstance(ref, str) and ref in ("pin", "xbet") else "pin"
+    store = _recent_xbet_moves if ref == "xbet" else _recent_moves
     all_moves: list[dict] = []
     for sport in SPORT_NAMES:
-        for m in _recent_moves.get(sport, []):
+        for m in store.get(sport, []):
             if m["delta_pp"] >= min_move:
                 all_moves.append(m)
     # Newest first; within the same recorded_at (one cycle) biggest mover first.
@@ -1492,12 +1586,16 @@ async def api_moves(
 async def api_moves_cumulative(
     min_move: float = Query(2.0, ge=0.0, le=100.0,
                             description="Minimum |net fair-prob shift| (pp) over the 1h window"),
+    ref: str = Query("pin",
+                     description="Reference book: 'pin' (Pinnacle) or 'xbet' (1xbet)"),
 ) -> list[dict]:
     """Net moneyline drift over the last hour, per market, across all sports.
     Sorted by absolute net shift desc. Moneyline only (Phase 5.6)."""
+    ref = ref if isinstance(ref, str) and ref in ("pin", "xbet") else "pin"
+    series = _xbet_ml_series if ref == "xbet" else _pin_ml_series
     all_moves: list[dict] = []
     for sport in SPORT_NAMES:
-        all_moves.extend(_compute_cumulative_moves(sport, min_move))
+        all_moves.extend(_compute_cumulative_moves(sport, min_move, series))
     all_moves.sort(key=lambda m: -abs(m["net_pp"]))
     return all_moves
 
@@ -1605,21 +1703,23 @@ async def api_opportunities(
     book: str | None = Query(None,
                              description="Filter to one soft book (cb/liderbet/"
                                          "betlive); default all enabled books"),
+    ref: str = Query("pin",
+                     description="Reference book: 'pin' (Pinnacle) or 'xbet' (1xbet)"),
 ) -> list[dict]:
-    """+EV + ARB opportunities (each soft book vs Pinnacle) across all sports.
+    """+EV + ARB opportunities (each soft book vs the reference) across sports.
 
-    Every row carries `book` (cb / liderbet / betlive). With only CB enabled
-    this is byte-identical to the original CB-vs-Pin feed plus a constant
-    book="cb". `?book=` filters to one book.
+    Every row carries `book` (cb / liderbet / betlive). `?ref=xbet` prices the
+    soft books against 1xbet instead of Pinnacle (the 1xbet Arbs tab); default
+    ref=pin is byte-identical to the original CB-vs-Pin feed.
     """
-    # isinstance guard: when this coroutine is called directly (tests, not via
-    # HTTP) an unpassed `book` is the FastAPI Query() sentinel, not a str.
-    books = list(SOFT_BOOKS)
+    ref = ref if isinstance(ref, str) and ref in ("pin", "xbet") else "pin"
+    # 1xbet is a reference, never a soft book to price against itself.
+    books = [b for b in SOFT_BOOKS if b != ref]
     if isinstance(book, str) and book and book != "all":
-        books = [book] if book in SOFT_BOOKS else []
+        books = [book] if book in books else []
     all_opps: list[dict] = []
     for sport in SPORT_NAMES:
-        pin_odds = _state[sport]["pin"]["odds"]
+        pin_odds = _state[sport].get(ref, {}).get("odds")
         if not pin_odds:
             continue
         for bk in books:
@@ -1885,7 +1985,7 @@ async def api_cross_book(
     return rows
 
 
-def _compute_cumulative_moves(sport: str, min_move: float) -> list[dict]:
+def _compute_cumulative_moves(sport: str, min_move: float, ml_series: dict | None = None) -> list[dict]:
     """Net moneyline fair-prob drift over the 1h window, per market.
 
     For each market series with >= 2 points, find the side with the largest
@@ -1895,8 +1995,9 @@ def _compute_cumulative_moves(sport: str, min_move: float) -> list[dict]:
     over the hour — surfaces here as that side with a negative net_pp and
     first_odds 1.5 → last_odds 1.9.
     """
+    ml_series = _pin_ml_series if ml_series is None else ml_series
     out: list[dict] = []
-    for entry in _pin_ml_series.get(sport, {}).values():
+    for entry in ml_series.get(sport, {}).values():
         pts = entry["points"]
         if len(pts) < 2:
             continue

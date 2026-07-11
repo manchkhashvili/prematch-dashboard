@@ -24,6 +24,8 @@
       <a href="/matches.html">Matches</a>
       <a href="/arbs.html">Arbs / +EV</a>
       <a href="/moves.html" class="active">Top Moves</a>
+      <a href="/arbs.html?ref=xbet" id="nav-xarbs">1xbet Arbs</a>
+      <a href="/moves.html?ref=xbet" id="nav-xmoves">1xbet Moves</a>
       <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
@@ -84,6 +86,13 @@
   </div>
 
 <script>
+// Reference book: default Pinnacle; ?ref=xbet → the 1xbet Moves tab.
+const REF = new URLSearchParams(location.search).get("ref") === "xbet" ? "xbet" : "pin";
+if (REF === "xbet") {
+  document.querySelector('nav a[href="/moves.html"]').classList.remove("active");
+  document.getElementById("nav-xmoves").classList.add("active");
+  document.querySelector("h1").textContent = "Top Moves — 1xbet";
+}
 const POLL_MS = 30_000;
 let cache = [];
 let mode = "cycle";   // "cycle" (per-cycle, 10m) | "cumulative" (net, 1h)
@@ -218,9 +227,10 @@ async function refreshLoggedBets() {
 
 async function fetchAndRender() {
   const minMove = parseFloat(minMoveInput.value || "2");
+  const refQ = (REF === "xbet") ? "&ref=xbet" : "";
   const url = (mode === "cumulative")
-    ? "/api/moves/cumulative?min_move=" + minMove
-    : "/api/moves?min_move=" + minMove;
+    ? "/api/moves/cumulative?min_move=" + minMove + refQ
+    : "/api/moves?min_move=" + minMove + refQ;
   try {
     const [res] = await Promise.all([fetch(url), refreshLoggedBets()]);
     cache = await res.json();
