@@ -304,7 +304,10 @@ def _anomaly_enabled() -> bool:
 
 
 ANOMALY_SCAN = _anomaly_enabled()
-ANOMALY_SCAN_SEC = int(os.environ.get("ANOMALY_SCAN_SEC", "1800"))  # fixed-interval fallback
+# CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
+# (it's the heaviest book — ~65s+CPU for a full board), other books every 2.5
+# min (see BETLIVE_DISCOVER_SEC / EXTRA_BOOK_POLL_SEC). List-mode polls unchanged.
+ANOMALY_SCAN_SEC = int(os.environ.get("ANOMALY_SCAN_SEC", "300"))  # fixed-interval fallback
 ANOMALY_MARKETS = ("spread", "total")
 # Fast "watch" loop: re-scrape ONLY games that already have >=1 anomaly, this
 # often (default every 5 min), so flagged games refresh faster than the 30-min
@@ -339,7 +342,8 @@ def _betlive_anomaly_enabled() -> bool:
 
 
 BETLIVE_ANOMALY = _betlive_anomaly_enabled()
-BETLIVE_DISCOVER_SEC = int(os.environ.get("BETLIVE_DISCOVER_SEC", "600"))  # heavy sweep cadence
+# Betlive extended sweep — a non-CB book → 2.5 min (owner call 2026-07-11).
+BETLIVE_DISCOVER_SEC = int(os.environ.get("BETLIVE_DISCOVER_SEC", "150"))  # heavy sweep cadence
 BETLIVE_WATCH_SEC = int(os.environ.get("BETLIVE_WATCH_SEC", "8"))          # cheap refreshOdds cadence
 BETLIVE_MIN_GAP_PP = float(os.environ.get("BETLIVE_MIN_GAP_PP", "2.0"))    # report >= this many pp
 try:
