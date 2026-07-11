@@ -983,7 +983,7 @@ async def _refresh_list_html_for_sport(
 async def _fetch_for_sport(
     sport: Any, *, headed: bool, force_detail: bool = False,
     classify_override: Any = None, bypass_cache: bool = False,
-    use_http: bool | None = None,
+    use_http: bool | None = None, start_within_hours: float | None = None,
 ) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
@@ -1048,6 +1048,21 @@ async def _fetch_for_sport(
         # guarantees the ladders are current each scan. Falls back to list-view
         # Odds for any game that fails to expand.
         if bypass_cache:
+            # Horizon filter (2026-07-11): a FULL soccer expansion is ~956
+            # games x ~0.85s = ~14 min while HOLDING the sport lock — the
+            # extra-sport anomaly scan never completed a pass. Ladder
+            # anomalies are most actionable near kickoff anyway, so expand
+            # only games starting within the horizon, soonest first (partial
+            # progress covers the nearest games). None = whole board
+            # (basketball keeps that: ~100 games is fine).
+            if start_within_hours is not None:
+                cutoff = fetched_at + timedelta(hours=start_within_hours)
+                in_h = [g for g in games
+                        if g.start_time is not None and g.start_time <= cutoff]
+                in_h.sort(key=lambda g: g.start_time)
+                log.info("CB %s anomaly scan horizon %.0fh: %d/%d games",
+                         sport_name, start_within_hours, len(in_h), len(games))
+                games = in_h
             all_odds: list[Odds] = []
             n_ok = n_fail = 0
             for i, game in enumerate(games, 1):
@@ -1190,6 +1205,7 @@ _ANOMALY_SPORT_TABLE = {
 
 async def fetch_crystalbet_anomaly_ladders(
     sport_name: str, *, headed: bool = False,
+    start_within_hours: float | None = None,
 ) -> list[Odds]:
     """Full-detail anomaly scrape for ANY supported sport (2026-07-11 —
     the scan was basketball-only before). Same semantics as the basketball
@@ -1199,6 +1215,7 @@ async def fetch_crystalbet_anomaly_ladders(
     return await _fetch_for_sport(
         mod, headed=headed, force_detail=True,
         classify_override=clf, bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
+        start_within_hours=start_within_hours,
     )
 
 
