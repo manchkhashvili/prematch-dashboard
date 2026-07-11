@@ -369,7 +369,9 @@ except ValueError:
 # hours, so it runs on its own SLOW cadence — default 60 min — independent of the
 # 30-min CB basketball ladder scan (which it does NOT touch). See src/soft_scan.py.
 SOFT_SCAN = os.environ.get("SOFT_SCAN", "").strip().lower() in ("1", "on", "true", "yes")
-SOFT_SCAN_SEC = int(os.environ.get("SOFT_SCAN_SEC", "3600"))
+# Lider-only extended sweep since the single-poll change (CB/Betlive flags
+# ride their own loops now) → non-CB books every 2.5 min (owner call).
+SOFT_SCAN_SEC = int(os.environ.get("SOFT_SCAN_SEC", "150"))
 
 
 # ── Shared state (per-sport namespaced) ───────────────────────────────────────
@@ -451,6 +453,21 @@ _betlive_energy: dict = {}                    # bytes/time of the last discover 
 _soft_scan_flags: list[dict] = []             # consistency rows from soft_scan.scan_all
 _soft_scan_at: datetime | None = None
 _soft_scan_error: str | None = None
+# Single-poll rule (2026-07-11): the CB and Betlive favourite flags are now
+# computed from data OTHER loops already fetch (anomaly scan / betlive
+# discover), stored here and merged into /api/anomalies `consistency`.
+_cb_soft_flags: list[dict] = []
+_betlive_soft_flags: list[dict] = []
+
+
+def _carry_first_seen(prev: list[dict], fresh: list[dict], ts_iso: str) -> list[dict]:
+    """Preserve first_seen across recomputes (same key logic as _soft_scan_loop)."""
+    prev_map = {(f.get("book"), f.get("book_event_id"), f.get("kind"),
+                 f.get("outcome")): f.get("first_seen") for f in prev}
+    for f in fresh:
+        key = (f.get("book"), f.get("book_event_id"), f.get("kind"), f.get("outcome"))
+        f["first_seen"] = prev_map.get(key) or ts_iso
+    return fresh
 
 
 # ── Background pollers (parameterized over sport) ─────────────────────────────
@@ -959,6 +976,18 @@ async def _compute_anomalies() -> bool:
         _anomalies_computed_at = ts
         _anomalies_cb_fetched_at = ts
         _anomalies_error = None
+    # Single-poll rule: the CB basketball-favourite soft flags reuse THIS
+    # board snapshot (was a second full CB sweep in soft_scan.scan_all).
+    if SOFT_SCAN:
+        try:
+            from src import soft_scan as _ss
+            global _cb_soft_flags
+            fresh = _ss.scan_cb_odds("basketball", cb_odds)
+            async with _state_lock:
+                _cb_soft_flags = _carry_first_seen(_cb_soft_flags, fresh,
+                                                   ts.isoformat())
+        except Exception:
+            log.exception("cb soft-flag detection failed")
     # Append a point-in-time snapshot to the history logs. Pin is attached at
     # scan time so the history can later answer "did any flagged rung beat
     # Pinnacle". Best-effort — never let logging break the scan.
@@ -1213,17 +1242,30 @@ async def _betlive_discover_loop():
     outcomeIds) and re-detects from full ladders. Heavy but infrequent; runs in
     a worker thread so it never blocks the event loop."""
     from src import betlive_watch as bw
-    global _betlive_watch, _betlive_error, _betlive_energy
+    from src import soft_scan as _ss
+    global _betlive_watch, _betlive_error, _betlive_energy, _betlive_soft_flags
     await asyncio.sleep(20)   # let the cheap pollers init first
     while True:
         try:
-            watch, anomalies, energy = await asyncio.to_thread(
+            watch, anomalies, energy, full_events = await asyncio.to_thread(
                 bw.discover, BETLIVE_ANOMALY_SPORT_IDS)
             async with _state_lock:
                 _betlive_watch = watch
                 _betlive_energy = energy
                 _betlive_error = None
             await _betlive_set_flags(anomalies)
+            # Single-poll rule: reuse THIS sweep's full ladders for the
+            # basketball-favourite soft flags (was a second Betlive sweep in
+            # soft_scan.scan_all).
+            if SOFT_SCAN:
+                try:
+                    fresh = _ss.scan_betlive_events("basketball", full_events)
+                    ts_iso = datetime.now(tz=timezone.utc).isoformat()
+                    async with _state_lock:
+                        _betlive_soft_flags = _carry_first_seen(
+                            _betlive_soft_flags, fresh, ts_iso)
+                except Exception:
+                    log.exception("betlive soft-flag detection failed")
             log.info("betlive discover: watching %d events, %d flip(s) "
                      "(%.1f MB extended)", len(watch),
                      len(_betlive_consistency), energy.get("ext_bytes", 0) / 1e6)
@@ -1623,7 +1665,8 @@ async def api_anomalies(
     # CB-internal flags + betlive favourite-flip flags share the consistency
     # list; both carry kind/periods/detail/severity so the tab renders them the
     # same way (betlive rows tagged book="betlive").
-    cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags)
+    cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags
+                        + _cb_soft_flags + _betlive_soft_flags)
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
@@ -1671,7 +1714,8 @@ async def api_anomalies_status() -> dict:
             if ANOMALY_SCAN_AT_MINUTES is not None else None
         ),
         "anomalies": len(_recent_anomalies),
-        "consistency": len(_recent_consistency) + len(_betlive_consistency),
+        "consistency": (len(_recent_consistency) + len(_betlive_consistency)
+                        + len(_cb_soft_flags) + len(_betlive_soft_flags)),
         "coverage": _anomaly_coverage,
     }
 
@@ -2337,6 +2381,7 @@ async def api_chart(
     team_side: str | None = Query(None),
     submarket: str | None = Query(None),
     hours: float = Query(24.0, gt=0, le=24 * 14),
+    ref: str = Query("pin", description="Reference book for pin_src: 'pin' or 'xbet'"),
 ) -> dict:
     """Tick series for one market on BOTH books — feeds the matches-page chart.
     Selections map to step lines; a NULL tick means the market vanished."""
@@ -2344,8 +2389,11 @@ async def api_chart(
     since = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)) \
         .isoformat(timespec="seconds")
     mtype = f"{submarket}_{market_type}" if submarket else market_type
+    ref_book = "xbet" if (isinstance(ref, str) and ref == "xbet") else "pin"
+    # the reference series still returns under the "pin" key — the chart UI
+    # only knows two sides (soft book vs reference)
     out: dict = {"since": since, "cb": {}, "pin": {}}
-    for book, src in (("cb", cb_src), ("pin", pin_src)):
+    for book, src in (("cb", cb_src), (ref_book, pin_src)):
         if not src:
             continue
         eid = store.event_id(book, sport, src)
@@ -2355,7 +2403,7 @@ async def api_chart(
             store.series, eid, mtype, period, line, team_side, since,
         )
         if series:
-            out[book] = series
+            out["pin" if book == ref_book else book] = series
     return out
 
 

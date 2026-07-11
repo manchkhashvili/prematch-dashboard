@@ -93,12 +93,16 @@ def _ml_outcome_ids(raw_market: dict) -> dict[str, int]:
 
 
 def discover(sport_ids=DEFAULT_SPORT_IDS, *, max_events: int | None = None):
-    """Full sweep. Returns (watch, anomalies, energy):
+    """Full sweep. Returns (watch, anomalies, energy, full_events):
 
-      watch     : {event_id: {meta, reg, ot}} — reg/ot are the raw moneyline
-                  market dicts (with outcome ids), ready for refresh().
-      anomalies : list[BetliveAnomaly] detected from the full ladders.
-      energy    : byte/time/call tallies for the run.
+      watch      : {event_id: {meta, reg, ot}} — reg/ot are the raw moneyline
+                   market dicts (with outcome ids), ready for refresh().
+      anomalies  : list[BetliveAnomaly] detected from the full ladders.
+      energy     : byte/time/call tallies for the run.
+      full_events: the raw getPrematchEvent payloads — handed to
+                   soft_scan.scan_betlive_events so the favourite detector
+                   reuses THIS sweep instead of fetching its own (single-poll
+                   rule, 2026-07-11).
     """
     s = session()
     energy = {"list_bytes": 0, "list_calls": 0, "ext_bytes": 0, "ext_calls": 0,
@@ -162,7 +166,7 @@ def discover(sport_ids=DEFAULT_SPORT_IDS, *, max_events: int | None = None):
     log.info("betlive discover: %d candidates, %d watchable, %d anomalies "
              "(%.1f MB / %.1fs extended)", len(candidates), len(watch),
              len(anomalies), energy["ext_bytes"] / 1e6, energy["ext_time"])
-    return watch, anomalies, energy
+    return watch, anomalies, energy, full_events
 
 
 def _refresh_payload(watch: dict) -> list[dict]:

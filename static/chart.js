@@ -98,6 +98,7 @@
     });
     if (chartCtx.cb_src)  q.set("cb_src", chartCtx.cb_src);
     if (chartCtx.pin_src) q.set("pin_src", chartCtx.pin_src);
+    if (chartCtx.ref)     q.set("ref", chartCtx.ref);   // 1xbet moves rows
     if (chartCtx.line !== null && chartCtx.line !== undefined && chartCtx.line !== "")
       q.set("line", chartCtx.line);
     if (chartCtx.team_side) q.set("team_side", chartCtx.team_side);
