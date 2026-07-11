@@ -149,6 +149,49 @@ def _cb_extract(odds):
     return ft2, ft3, h1_3, h1_2, htft
 
 
+def scan_cb_odds(sport_name: str, odds) -> list[dict]:
+    """Favourite-disagreement detectors on ALREADY-FETCHED CB detail odds.
+
+    Single-poll rule (owner, 2026-07-11): the anomaly loop already pulls the
+    full CB basketball board every ANOMALY_SCAN_SEC — this consumes that
+    snapshot instead of scan_cb() doing a SECOND full CB sweep. Pure
+    computation, no network."""
+    by_event: dict[str, list] = {}
+    for o in odds or []:
+        by_event.setdefault(o.raw_event_id or f"{o.home}|{o.away}", []).append(o)
+    flags: list[dict] = []
+    for eid, ev_odds in by_event.items():
+        ft2, ft3, h1_3, h1_2, htft = _cb_extract(ev_odds)
+        ml_sel = ft2 or ft3
+        if not ml_sel:
+            continue
+        ml = (ml_sel.get("home"), ml_sel.get("away"))
+        o0 = ev_odds[0]
+        if not _open(sport_name, ml[0], ml[1], o0.league):
+            continue
+        flags += _one(sport_name, "cb", o0.home, o0.away, o0.league, eid,
+                      ml, ft3, ft2, h1_3 or h1_2, htft, o0.start_time)
+    return flags
+
+
+def scan_betlive_events(sport_name: str, full_events: list[dict]) -> list[dict]:
+    """Same detectors on ALREADY-FETCHED Betlive getPrematchEvent payloads
+    (the favourite-flip discover sweep fetches these every
+    BETLIVE_DISCOVER_SEC) — no second Betlive sweep. Pure computation."""
+    flags: list[dict] = []
+    for fe in full_events or []:
+        if not isinstance(fe, dict):
+            continue
+        ft_ml, ft3, ft2, h1, htft = _bl_markets(fe)
+        h, a = ft_ml if isinstance(ft_ml, tuple) else (None, None)
+        if not _open(sport_name, h, a, fe.get("leagueName")):
+            continue
+        flags += _one(sport_name, "betlive", fe.get("homeTeamName"),
+                      fe.get("awayTeamName"), fe.get("leagueName"), fe.get("id"),
+                      (h, a), ft3, ft2, h1, htft, None)
+    return flags
+
+
 def scan_cb(sport_name: str, min_gap_pp: float = hf.RATIO) -> list[dict]:
     import asyncio
     from src.scrapers import crystalbet as cb, cb_http, cb_detail
@@ -480,9 +523,11 @@ def scan_all() -> tuple[list[dict], set]:
     hits all books used to zero out the whole tab)."""
     out: list[dict] = []
     failed: set[tuple[str, str]] = set()
+    # Single-poll rule: CB basketball flags come from the anomaly loop's board
+    # snapshot (scan_cb_odds) and Betlive basketball flags from the discover
+    # sweep's payloads (scan_betlive_events) — neither is fetched here anymore.
+    # This loop only fetches books nothing else polls in extended mode: Lider.
     scanners = [
-        ("cb basketball", scan_cb, "basketball"),
-        ("betlive basketball", scan_betlive, "basketball"),
         ("liderbet basketball", scan_liderbet, "basketball"),
     ]
     if SOFT_SCAN_SOCCER:

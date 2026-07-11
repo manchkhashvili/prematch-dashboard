@@ -20,12 +20,19 @@ basketball events) and comparing devigged prices — the mappings below agreed
 to a **0.00pp median** gap. Outcome labels are mapped by their own Georgian
 text (also stable), never by array position (which varies across events).
 
-Verified gameType → market (FT = full match, incl OT for basketball):
-  basketball  -2527 moneyline(1/2)  -2966 total(under/over,@arg)  -2950 spread(1/2,@home line)
-  soccer       1    moneyline(1/X/2)  8    total(under/over,@arg)  -458  spread(1/2,@home line)
-Team totals (bb 182/183) and period markets (quarters/halves have their own
-gameType codes) are deliberately NOT emitted yet — add per code only after a
-cross-price check (keep the 0.00pp discipline; see notes/build_log.md).
+Verified gameType → market (FT = full match, incl OT for basketball). Every
+code below cross-priced vs Lider via SR-id join at 0.00pp median (2026-07-11):
+  basketball FT : -2527 moneyline(1/2)   -2966 total   -2950 spread
+                  182 team_total home    183 team_total away
+  basketball H1 : -2541 total            -6008 spread
+  basketball Qn : 33/-421/-422/-423 totals Q1..Q4
+                  -430/-2502/-5004/-5006 spreads Q1..Q4
+  soccer FT     : 1 moneyline(1/X/2)     8 total       -458 spread
+Known-but-not-shipped: -2542/-6009 = 2nd-half total/handicap REGULAR TIME
+(verified 0.00pp, but the v1 Period model has no H2 — add if H2 lands).
+Tennis has NO verified codes (its events carry no remoteId → SR join
+impossible; needs a name+time verification pass) — the scraper returns []
+for tennis WITHOUT fetching anything.
 
 sr_match_id = the event's `remoteId` (bare SR id) → exact cross-book join to
 Lider/Betlive. Home/away come from `participants` (number 1 = home, 2 = away).
@@ -61,19 +68,32 @@ SPORT_ID = {"soccer": 1, "basketball": 2, "tennis": 3}
 _OUT = {"1": "home", "2": "away", "X": "draw",
         "მეტი": "over", "ნაკლები": "under"}
 
-# gameType → (market_type, period, n_way). VERIFIED subset only (see docstring).
+# gameType → (market_type, period, n_way, team_side). VERIFIED subset only
+# (docstring). team_side is None except for team totals.
 _GAMETYPE = {
     "basketball": {
-        -2527: ("moneyline", "FT", 2),
-        -2966: ("total", "FT", 2),
-        -2950: ("spread", "FT", 2),
+        -2527: ("moneyline", "FT", 2, None),
+        -2966: ("total", "FT", 2, None),
+        -2950: ("spread", "FT", 2, None),
+        182:   ("team_total", "FT", 2, "home"),
+        183:   ("team_total", "FT", 2, "away"),
+        -2541: ("total", "H1", 2, None),
+        -6008: ("spread", "H1", 2, None),
+        33:    ("total", "Q1", 2, None),
+        -421:  ("total", "Q2", 2, None),
+        -422:  ("total", "Q3", 2, None),
+        -423:  ("total", "Q4", 2, None),
+        -430:  ("spread", "Q1", 2, None),
+        -2502: ("spread", "Q2", 2, None),
+        -5004: ("spread", "Q3", 2, None),
+        -5006: ("spread", "Q4", 2, None),
     },
     "soccer": {
-        1:    ("moneyline", "FT", 3),
-        8:    ("total", "FT", 2),
-        -458: ("spread", "FT", 2),
+        1:    ("moneyline", "FT", 3, None),
+        8:    ("total", "FT", 2, None),
+        -458: ("spread", "FT", 2, None),
     },
-    "tennis": {},   # not mapped yet
+    "tennis": {},   # no remoteId on tennis events → unverifiable via SR join yet
 }
 
 
@@ -125,7 +145,7 @@ def _parse_event(ev: dict, games: list[dict], sport: str,
         hit = table.get(g.get("gameType"))
         if hit is None:
             continue
-        market_type, period, n_way = hit
+        market_type, period, n_way, team_side = hit
         p = _prices(g)
         if market_type == "moneyline":
             need = {"home", "draw", "away"} if n_way == 3 else {"home", "away"}
@@ -133,7 +153,7 @@ def _parse_event(ev: dict, games: list[dict], sport: str,
                 continue
             sel = {k: p[k] for k in need}
             line = None
-        elif market_type == "total":
+        elif market_type in ("total", "team_total"):
             if not {"over", "under"} <= set(p):
                 continue
             sel = {"over": p["over"], "under": p["under"]}
@@ -143,7 +163,7 @@ def _parse_event(ev: dict, games: list[dict], sport: str,
                 continue
             sel = {"home": p["home"], "away": p["away"]}
             line = g.get("argument")
-        if market_type in ("total", "spread") and line is None:
+        if market_type != "moneyline" and line is None:
             continue
         try:
             rows.append(Odds(
@@ -151,7 +171,7 @@ def _parse_event(ev: dict, games: list[dict], sport: str,
                 market_type=market_type, period=period, selections=sel,
                 fetched_at=fetched_at,
                 line=float(line) if line is not None else None,
-                start_time=start_time, league=league,
+                start_time=start_time, league=league, team_side=team_side,
                 raw_event_id=str(ev.get("eventId")), sr_match_id=sr_match_id))
         except ValueError as e:
             log.debug("crocobet Odds rejected: %s", e)
@@ -162,6 +182,11 @@ def _fetch_sport_sync(sport: str) -> list[Odds]:
     sport_id = SPORT_ID.get(sport)
     if sport_id is None:
         log.warning("crocobet: unknown sport %r", sport)
+        return []
+    if not _GAMETYPE.get(sport):
+        # No verified market codes for this sport — do NOT waste a board +
+        # per-event ladder sweep to emit nothing (tennis was costing ~75
+        # ladder calls/cycle for zero rows before this guard).
         return []
     s = _session()
     fetched_at = datetime.now(tz=timezone.utc)

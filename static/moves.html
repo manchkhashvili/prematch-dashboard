@@ -280,7 +280,7 @@ function buildMovePrefillUrl(m) {
 function chartCellMove(m) {
   if (!window.chartCtxRegister || !m.pin_event_id) return "";
   const cid = chartCtxRegister({
-    sport: m.sport, pin_src: m.pin_event_id,
+    sport: m.sport, pin_src: m.pin_event_id, ref: REF,
     market_type: m.market_type, period: m.period, line: m.line,
     team_side: m.team_side, submarket: m.submarket, selection: m.side,
     title: m.match_label, sub: m.market,

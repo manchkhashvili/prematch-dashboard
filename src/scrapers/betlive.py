@@ -98,7 +98,11 @@ def _classify_market(raw_name: str, sels: set[str]) -> tuple[str, int] | None:
     if name in ("fulltime result", "full time result", "1x2", "result"):
         return ("moneyline", 3 if "X" in sels else 2)
     if name in ("match winner", "match winner (ot)", "winner", "moneyline",
-                "money line", "to win the match"):
+                "money line", "to win the match",
+                # Betlive basketball's curated ML is literally named "12 (OT)"
+                # (2-way incl overtime; outcomes "1"/"2") — found 2026-07-11
+                # when basketball emitted 0 rows from 140 events.
+                "12 (ot)", "12"):
         return ("moneyline", 2)
     return None
 

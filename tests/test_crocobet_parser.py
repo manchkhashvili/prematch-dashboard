@@ -55,12 +55,31 @@ def test_basketball_ft_families_and_sr_id():
 
 
 def test_only_verified_gametypes_emitted():
-    """Unmapped gameTypes (team totals, quarters, exotics) must be skipped —
-    the 'avoid confusion' rule: emit only cross-verified codes."""
+    """Unmapped gameTypes (exotics, 2nd-half, odd/even, race-to…) must be
+    skipped — the 'avoid confusion' rule: emit only cross-verified codes.
+    Verified set as of 2026-07-11: ML/spread/total/team_total across
+    FT + H1 + Q1..Q4 (all 0.00pp vs Lider via SR join)."""
     ev, full = _load_event()
     rows = _parse_event(ev, full.get("eventGames") or [], "basketball", NOW)
-    assert {r.market_type for r in rows} <= {"moneyline", "spread", "total"}
-    assert all(r.period == "FT" for r in rows)
+    assert {r.market_type for r in rows} <= {"moneyline", "spread", "total", "team_total"}
+    assert {r.period for r in rows} <= {"FT", "H1", "Q1", "Q2", "Q3", "Q4"}
+
+
+def test_extended_periods_and_team_totals():
+    ev, full = _load_event()
+    rows = _parse_event(ev, full.get("eventGames") or [], "basketball", NOW)
+    by = {}
+    for r in rows:
+        by.setdefault((r.market_type, r.period), []).append(r)
+    # the captured fixture (Italy U20 W v Germany U20 W, 92 games) carries
+    # H1 + quarter ladders and both team totals
+    assert by.get(("total", "H1")) and by.get(("spread", "H1"))
+    for q in ("Q1", "Q2", "Q3", "Q4"):
+        assert by.get(("total", q)), f"missing quarter total {q}"
+    tt = [r for r in rows if r.market_type == "team_total"]
+    assert tt and {r.team_side for r in tt} == {"home", "away"}
+    for r in tt:
+        assert set(r.selections) == {"over", "under"} and r.line is not None
 
 
 def test_suspended_and_missing_side_dropped():
