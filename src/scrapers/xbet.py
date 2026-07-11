@@ -27,8 +27,9 @@ Lider-Bet / CrystalBet on live matched games; notes/build_log.md):
   soccer (verified vs CB 2026-06-17, live docs):
     G=1 T1/T2/T3 1X2 → moneyline FT (3-way), G=17 totals, G=2 spread
     sub-game "1st half"→H1
-  tennis: G=1 T1/T3 → moneyline FT (2-way). Totals/spreads NOT yet verified
-    for tennis — deliberately dropped.
+  tennis: G=1 T1/T3 moneyline; G=17 GAMES total; G=2 GAMES handicap
+    (side-signed) — verified vs Lider by name+time 2026-07-11
+    (ML 1.32pp / total 1.45pp / handicap 0.99pp medians).
   mma: sport id resolved from the sports tree by name; G=1 2-way moneyline.
 
 Handicap pairing self-check: basketball lists each side at its OWN signed
@@ -40,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import struct
 import threading
@@ -61,6 +63,16 @@ MAX_WORKERS = 8
 ENUM_TTL = 1800.0            # champ/board enumeration cache (fixtures churn slowly)
 
 SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4}   # mma resolved by name
+
+# Energy budget (2026-07-11, the "PC runs hot" fix): pricing the WHOLE board
+# every cycle was ~4,400 GetGameZip calls + ~60 MB JSON parse per 2 min across
+# 3 sports. Ladders are now fetched only for events starting within
+# HORIZON_HOURS, and half/quarter sub-game ladders only within SUBGAME_HOURS
+# (prematch period markets barely move days out). Enumeration still covers the
+# full board, so nothing is lost from matching — far events simply have no
+# 1xbet price until they enter the horizon.
+HORIZON_HOURS = float(os.environ.get("XBET_HORIZON_HOURS", "36"))
+SUBGAME_HOURS = float(os.environ.get("XBET_SUBGAME_HOURS", "18"))
 _MMA_NAMES = ("mma", "martial arts", "ufc")
 
 # sub-game panel name → v1 period, per sport (verified live)
@@ -322,7 +334,10 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
                                 {"home": ml[1], "away": ml[3]},
                                 fetched_at=fetched_at))
 
-    if sport in ("basketball", "soccer"):
+    if sport in ("basketball", "soccer", "tennis"):
+        # tennis: G=17 = GAMES total (1.45pp median vs Lider 'Total', n=41),
+        # G=2 = GAMES handicap side-signed (0.99pp, n=64) — verified 2026-07-11
+        # by name+time pairing vs Lider (1xbet has no SR ids).
         for line, (h, a) in _spread_rows(ge.get(2, [])).items():
             rows.append(_mk(game, sport, "spread", period,
                             {"home": h, "away": a}, line=line, fetched_at=fetched_at))
@@ -346,7 +361,7 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
 def _fetch_event(game: dict, sport: str, periods: bool,
                  fetched_at: datetime) -> list[Odds]:
     rows = _parse_zip(_game_zip(int(game["I"])), game, sport, "FT", fetched_at)
-    if periods:
+    if periods and (game.get("S") or 0) <= time.time() + SUBGAME_HOURS * 3600:
         pmap = SUBGAME_PERIODS.get(sport) or {}
         subs = {(x.get("PN") or "").strip(): x.get("I")
                 for x in (game.get("SG") or []) if x.get("I")}
@@ -365,6 +380,12 @@ def _fetch_event(game: dict, sport: str, periods: bool,
 def _fetch_sport_sync(sport: str, periods: bool) -> list[Odds]:
     games = _enumerate(sport)
     fetched_at = datetime.now(tz=timezone.utc)
+    horizon = time.time() + HORIZON_HOURS * 3600
+    skipped = sum(1 for g in games if (g.get("S") or 0) > horizon)
+    games = [g for g in games if (g.get("S") or 0) <= horizon]
+    if skipped:
+        log.debug("xbet %s: %d events beyond %.0fh horizon skipped",
+                  sport, skipped, HORIZON_HOURS)
     rows: list[Odds] = []
     errors = 0
 

@@ -84,7 +84,11 @@ from src.vig import devig_2way, devig_3way
 log = logging.getLogger(__name__)
 
 # ── Config (env-tunable) ──────────────────────────────────────────────────────
-PINNACLE_POLL_SEC = int(os.environ.get("PINNACLE_POLL_SEC", "60"))
+# 90s default since 2026-07-11 (was 60): with 3 sports enabled the three
+# Pinnacle loops were the largest CPU burner (~29s work each per cycle,
+# ~13k soccer rows parsed per minute). Set PINNACLE_POLL_SEC=60 to revert
+# to finer moves granularity at the cost of heat.
+PINNACLE_POLL_SEC = int(os.environ.get("PINNACLE_POLL_SEC", "90"))
 # 60s default since the browser-free CB transport (2026-06-12) — a full
 # list-mode cycle is ~1-2s/sport over HTTP. Was 180s in the Playwright era;
 # override via env if running CB_TRANSPORT=playwright with full detail.
@@ -287,7 +291,7 @@ EXTRA_BOOKS: tuple[str, ...] = tuple(b for b in ("liderbet", "betlive", "crocobe
 # All soft books in priority order — CB first (the original), then any enabled
 # extras. Pinnacle is the sharp reference, never in this list.
 SOFT_BOOKS: tuple[str, ...] = ("cb", *EXTRA_BOOKS)
-EXTRA_BOOK_POLL_SEC = int(os.environ.get("EXTRA_BOOK_POLL_SEC", "120"))
+EXTRA_BOOK_POLL_SEC = int(os.environ.get("EXTRA_BOOK_POLL_SEC", "150"))
 
 
 # ── Anomaly scanner config (Phase 6) ──────────────────────────────────────────
@@ -312,6 +316,12 @@ def _anomaly_enabled() -> bool:
 
 
 ANOMALY_SCAN = _anomaly_enabled()
+# Extra sports for the CB ladder anomaly scan (2026-07-11 — was basketball-only).
+# They run on a SLOWER cadence than basketball: a full-detail CB soccer sweep is
+# ~60-90s of postback+parse work, so 15 min keeps the heat manageable. Only
+# sports actually enabled in SPORTS= are scanned.
+ANOMALY_EXTRA_SEC = int(os.environ.get("ANOMALY_EXTRA_SEC", "900"))
+_ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS", "soccer,tennis")
 # CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
 # (it's the heaviest book — ~65s+CPU for a full board), other books every 2.5
 # min (see BETLIVE_DISCOVER_SEC / EXTRA_BOOK_POLL_SEC). List-mode polls unchanged.
@@ -384,7 +394,7 @@ def _empty_source_state() -> dict[str, Any]:
 # poll per sport feeds both (no separate anomaly/arbs polls). Default-off keeps
 # the Pinnacle-only pipeline byte-identical.
 XBET = os.environ.get("XBET", "").strip().lower() in ("1", "on", "true", "yes")
-XBET_POLL_SEC = int(os.environ.get("XBET_POLL_SEC", "120"))
+XBET_POLL_SEC = int(os.environ.get("XBET_POLL_SEC", "150"))
 
 
 def _empty_sport_state() -> dict[str, Any]:
@@ -458,6 +468,14 @@ _soft_scan_error: str | None = None
 # discover), stored here and merged into /api/anomalies `consistency`.
 _cb_soft_flags: list[dict] = []
 _betlive_soft_flags: list[dict] = []
+
+# Extra-sport CB ladder-anomaly state (soccer/tennis), merged into
+# /api/anomalies at read time. Keyed by sport.
+_extra_anomalies: dict[str, list[dict]] = {}
+_extra_anom_odds: dict[str, list] = {}
+_extra_anom_consistency: dict[str, list[dict]] = {}
+_extra_anom_at: dict[str, str] = {}
+_extra_anom_error: dict[str, str] = {}
 
 
 def _carry_first_seen(prev: list[dict], fresh: list[dict], ts_iso: str) -> list[dict]:
@@ -909,7 +927,7 @@ def _anomaly_base_row(a) -> dict:
     else:
         bet_line, bet_odds = a.line_lo, a.odds_lo
     return {
-        "sport": "basketball",
+        "sport": a.sport or "basketball",
         "league": a.league,
         "match_label": f"{a.home} — {a.away}",
         "home": a.home, "away": a.away,
@@ -1189,6 +1207,54 @@ def _merge_watch_rescan(
     still_anomalous = {r["cb_event_id"] for r in fresh_anoms if r["cb_event_id"]}
     new_watch = (cur_watch - event_ids) | still_anomalous
     return new_cb, new_anoms, new_flags, new_watch
+
+
+async def _anomaly_extra_loop():
+    """CB ladder anomalies for the extra sports (soccer/tennis) on a slower
+    cadence than basketball. One full-detail permissive scrape per sport per
+    ANOMALY_EXTRA_SEC; detectors are the same sport-agnostic ladder +
+    consistency checks. Soccer soft flags (when SOFT_SCAN_SOCCER=1) reuse this
+    snapshot — single-poll rule."""
+    from src.scrapers.crystalbet import fetch_crystalbet_anomaly_ladders
+    from src import soft_scan as _ss
+    sports = [s.strip() for s in _ANOMALY_EXTRA_RAW.split(",")
+              if s.strip() and s.strip() in SPORT_NAMES and s.strip() != "basketball"]
+    if not sports:
+        return
+    log.info("extra anomaly scan ENABLED — %s every %ds", sports, ANOMALY_EXTRA_SEC)
+    await asyncio.sleep(60)          # let the main pollers warm first
+    while True:
+        for sport in sports:
+            try:
+                odds = await fetch_crystalbet_anomaly_ladders(sport,
+                                                              headed=not CB_HEADLESS)
+                anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
+                rows = [_anomaly_base_row(a) for a in anoms]
+                ts = datetime.now(tz=timezone.utc)
+                flags = _merge_flag_first_seen(
+                    [_consistency_to_dict(f) for f in find_consistency_flags(odds)],
+                    _extra_anom_consistency.get(sport, []), ts.isoformat())
+                soft: list[dict] = []
+                if SOFT_SCAN and sport == "soccer" and soft_scan_module_enabled():
+                    soft = _ss.scan_cb_odds("soccer", odds)
+                async with _state_lock:
+                    _extra_anom_odds[sport] = odds
+                    _extra_anomalies[sport] = rows
+                    _extra_anom_consistency[sport] = flags + soft
+                    _extra_anom_at[sport] = ts.isoformat()
+                    _extra_anom_error.pop(sport, None)
+                log.info("extra anomaly scan %s: %d odds, %d anomalies, %d flags",
+                         sport, len(odds), len(rows), len(flags) + len(soft))
+            except Exception as e:
+                log.exception("extra anomaly scan failed (%s)", sport)
+                async with _state_lock:
+                    _extra_anom_error[sport] = str(e)[:200]
+        await asyncio.sleep(ANOMALY_EXTRA_SEC)
+
+
+def soft_scan_module_enabled() -> bool:
+    from src import soft_scan as _ss
+    return _ss.SOFT_SCAN_SOCCER
 
 
 async def _anomaly_watch_loop():
@@ -1487,6 +1553,7 @@ async def lifespan(app: FastAPI):
                  XBET_POLL_SEC)
     if ANOMALY_SCAN:
         tasks.append(asyncio.create_task(_anomaly_loop(), name="anomaly_loop"))
+        tasks.append(asyncio.create_task(_anomaly_extra_loop(), name="anomaly_extra_loop"))
         log.info(
             "anomaly scanner ENABLED — full-detail basketball scan every %ds",
             ANOMALY_SCAN_SEC,
@@ -1653,20 +1720,31 @@ async def api_anomalies(
     """CB-only ladder monotonicity anomalies from the latest hourly scan, with
     live Pinnacle fair-at-line + recent-move context attached per row. Sorted
     by % off, biggest first."""
+    all_base = list(_recent_anomalies) + [r for rows_ in _extra_anomalies.values()
+                                           for r in rows_]
     base = [
-        r for r in _recent_anomalies
+        r for r in all_base
         if r["pct"] >= min_pct and (not spread_only or r["market_type"] == "spread")
     ]
-    bball = _state.get("basketball")
-    pin_odds = bball["pin"]["odds"] if bball else []
-    recent_moves = _recent_moves.get("basketball", [])
-    rows = _attach_pin_to_anomalies(base, _anomaly_cb_odds, pin_odds, recent_moves)
+    # Pin fair/move context is sport-specific — attach per sport.
+    rows: list[dict] = []
+    by_sport: dict[str, list[dict]] = {}
+    for r in base:
+        by_sport.setdefault(r.get("sport") or "basketball", []).append(r)
+    for sport, sport_rows in by_sport.items():
+        st = _state.get(sport)
+        pin_odds = st["pin"]["odds"] if st else []
+        cb_odds = (_anomaly_cb_odds if sport == "basketball"
+                   else _extra_anom_odds.get(sport, []))
+        rows.extend(_attach_pin_to_anomalies(
+            sport_rows, cb_odds, pin_odds, _recent_moves.get(sport, [])))
     rows.sort(key=lambda r: r["pct"], reverse=True)
     # CB-internal flags + betlive favourite-flip flags share the consistency
     # list; both carry kind/periods/detail/severity so the tab renders them the
     # same way (betlive rows tagged book="betlive").
+    extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
     cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags
-                        + _cb_soft_flags + _betlive_soft_flags)
+                        + _cb_soft_flags + _betlive_soft_flags + extra_cons)
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
@@ -1692,6 +1770,12 @@ async def api_anomalies(
             "watch_sec": BETLIVE_WATCH_SEC,
             "discover_sec": BETLIVE_DISCOVER_SEC,
             "error": _betlive_error,
+        },
+        "extra": {
+            "sports": sorted(_extra_anomalies.keys()),
+            "scan_sec": ANOMALY_EXTRA_SEC,
+            "computed_at": dict(_extra_anom_at),
+            "errors": dict(_extra_anom_error),
         },
         "count": len(rows),
         "anomalies": rows,

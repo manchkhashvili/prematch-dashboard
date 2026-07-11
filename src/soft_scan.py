@@ -405,7 +405,9 @@ def scan_betlive(sport_name: str) -> list[dict]:
         return []
     s = bw.session()
     cc = s.get(f"{bw.COUNTRIES_URL}?sportId={sid}", headers=bw.HEADERS, timeout=30).json()
-    ids = [str(l["id"]) for l in bw._leaf_leagues(cc)]
+    from src.normalize import is_simulated_league
+    ids = [str(l["id"]) for l in bw._leaf_leagues(cc)
+           if not is_simulated_league(l.get("name"))]
     events = []
     for i in range(0, len(ids), 25):
         for w in (s.get(f"{bw.LEAGUE_EVENTS_URL}?leagueIds={','.join(ids[i:i+25])}"

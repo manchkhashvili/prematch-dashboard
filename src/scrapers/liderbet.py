@@ -32,7 +32,7 @@ import re
 from datetime import datetime, timezone
 
 from src.models import Odds
-from src.normalize import transliterate
+from src.normalize import is_simulated_league, transliterate
 
 log = logging.getLogger(__name__)
 
@@ -219,6 +219,7 @@ def _fetch_sport_sync(sport_name: str) -> list[Odds]:
     menu = s.get(f"{MENU_URL}?lang=en&marketFilter=true",
                  headers=HEADERS, timeout=_HTTP_TIMEOUT).json()["menu"]
     tour_ids = [n["id"] for n in _menu_nodes(menu)
+                if not is_simulated_league(n.get("name"))
                 if n.get("id", "").startswith("t:")
                 and n.get("sectionId") == section and n.get("cnt", 0) > 0]
     if not tour_ids:

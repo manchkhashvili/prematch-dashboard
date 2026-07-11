@@ -1178,6 +1178,30 @@ async def fetch_crystalbet_basketball_prematch(
     return await _fetch_for_sport(basketball, headed=headed, force_detail=force_detail)
 
 
+# sport → (module, permissive classifier or None→strict) for the anomaly scan.
+# Tennis has no permissive classifier yet — its strict classifier still yields
+# the games-total/handicap ladders the monotonicity detector needs.
+_ANOMALY_SPORT_TABLE = {
+    "basketball": (basketball, basketball.classify_market_title_permissive),
+    "soccer": (soccer, soccer.classify_market_title_permissive),
+    "tennis": (tennis, None),
+}
+
+
+async def fetch_crystalbet_anomaly_ladders(
+    sport_name: str, *, headed: bool = False,
+) -> list[Odds]:
+    """Full-detail anomaly scrape for ANY supported sport (2026-07-11 —
+    the scan was basketball-only before). Same semantics as the basketball
+    variant below: force_detail + bypass_cache (+ permissive classifier where
+    one exists)."""
+    mod, clf = _ANOMALY_SPORT_TABLE[sport_name]
+    return await _fetch_for_sport(
+        mod, headed=headed, force_detail=True,
+        classify_override=clf, bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
+    )
+
+
 async def fetch_crystalbet_basketball_anomaly_ladders(
     *, headed: bool = False,
 ) -> list[Odds]:

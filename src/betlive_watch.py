@@ -28,6 +28,7 @@ import time
 from datetime import datetime, timezone
 
 from src.betlive_anomalies import anomalies_for_event, pick_ml_markets
+from src.normalize import is_simulated_league
 from src.scrapers.betlive import _is_live, ticks_to_utc
 
 log = logging.getLogger(__name__)
@@ -113,7 +114,9 @@ def discover(sport_ids=DEFAULT_SPORT_IDS, *, max_events: int | None = None):
         r = s.get(f"{COUNTRIES_URL}?sportId={sid}", headers=HEADERS, timeout=_TIMEOUT)
         energy["list_calls"] += 1
         energy["list_bytes"] += len(r.content)
-        ids = [str(l["id"]) for l in _leaf_leagues(r.json())]
+        # simulated/esports shelves reuse real team names → phantom flip flags
+        ids = [str(l["id"]) for l in _leaf_leagues(r.json())
+               if not is_simulated_league(l.get("name"))]
         for i in range(0, len(ids), _LEAGUES_PER_CALL):
             chunk = ",".join(ids[i:i + _LEAGUES_PER_CALL])
             lr = s.get(f"{LEAGUE_EVENTS_URL}?leagueIds={chunk}&page=0&take={_EVENTS_PER_LEAGUE}",

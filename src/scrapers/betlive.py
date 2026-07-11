@@ -33,6 +33,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from src.models import Odds
+from src.normalize import is_simulated_league
 
 log = logging.getLogger(__name__)
 
@@ -66,8 +67,8 @@ _DOTNET_EPOCH = datetime(1, 1, 1)
 
 # Leaf-league name fragments that are esports/virtual/special shelves, not real
 # fixtures — skipped so we don't pour synthetic events into the matcher.
-_SKIP_LEAGUE = ("e-sports", "volta", "setka", "liga pro", "special", "srl ",
-                "esoccer", "ebasket", "cyber")
+# shared simulated/esports guard (normalize.SIM_LEAGUE_TOKENS) + book-local extras
+_SKIP_LEAGUE_EXTRA = ("special",)
 
 _SUBPERIOD = ("half", "quarter", " set", "1st", "2nd", "3rd", "4th", "period", "map")
 _PROP = ("home", "away", "team", "odd/even", "odd / even", "exact", "correct",
@@ -238,7 +239,9 @@ def _fetch_sport_sync(sport_name: str) -> list[Odds]:
     cc = s.get(f"{COUNTRIES_URL}?sportId={sport_id}",
                headers=HEADERS, timeout=_HTTP_TIMEOUT).json()
     leagues = [l for l in _leaf_leagues(cc)
-               if not any(tok in (l.get("name") or "").lower() for tok in _SKIP_LEAGUE)]
+               if not is_simulated_league(l.get("name"))
+               and not any(tok in (l.get("name") or "").lower()
+                           for tok in _SKIP_LEAGUE_EXTRA)]
     league_ids = [str(l["id"]) for l in leagues]
     if not league_ids:
         log.info("betlive %s: no leagues with events", sport_name)

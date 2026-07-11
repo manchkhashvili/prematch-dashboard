@@ -45,11 +45,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from src.models import Odds
-from src.normalize import transliterate
+from src.normalize import is_simulated_league, transliterate
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,9 @@ HEADERS = {"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
            "Accept": "application/json, text/plain, */*"}
 TIMEOUT = 25.0
 WORKERS = 8
+# Full-ladder horizon: per-event detail calls only for games starting within
+# this many hours; farther games use the board's inline main markets.
+DETAIL_HOURS = float(os.environ.get("CROCOBET_DETAIL_HOURS", "24"))
 
 SPORT_ID = {"soccer": 1, "basketball": 2, "tennis": 3}
 
@@ -192,7 +196,8 @@ def _fetch_sport_sync(sport: str) -> list[Odds]:
     fetched_at = datetime.now(tz=timezone.utc)
     cats = _get(s, "categories?lang=en").get("data") or []
     leaf = [c for c in cats if c.get("sportId") == sport_id
-            and (c.get("eventsCount") or 0) > 0]
+            and (c.get("eventsCount") or 0) > 0
+            and not is_simulated_league(c.get("categoryName"))]
     if not leaf:
         return []
     ids = ",".join(str(c["categoryId"]) for c in leaf)
@@ -202,7 +207,20 @@ def _fetch_sport_sync(sport: str) -> list[Odds]:
     board = [e for e in board
              if not e.get("eventStart") or e["eventStart"] > now_ms - 120_000]
 
+    # Energy budget (2026-07-11, the "PC runs hot" fix): the board response
+    # already carries the 3 MAIN markets inline for EVERY event (one call for
+    # the whole board), so we only open per-event full ladders for games
+    # starting within DETAIL_HOURS. Far-out games keep ML/total/spread from
+    # the board (matching + arbs unaffected); extended depth appears as
+    # kickoff approaches. This cut a ~950-call/~90 MB soccer+bball sweep per
+    # cycle to board-size + near-game ladders.
+    cutoff_ms = now_ms + DETAIL_HOURS * 3600_000
+    near = [e for e in board if (e.get("eventStart") or 0) <= cutoff_ms]
+    far = [e for e in board if (e.get("eventStart") or 0) > cutoff_ms]
+
     rows: list[Odds] = []
+    for ev in far:                     # inline mains only — zero extra calls
+        rows.extend(_parse_event(ev, ev.get("eventGames") or [], sport, fetched_at))
 
     def one(ev):
         try:
@@ -213,9 +231,10 @@ def _fetch_sport_sync(sport: str) -> list[Odds]:
             return []
 
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for chunk in ex.map(one, board):
+        for chunk in ex.map(one, near):
             rows.extend(chunk)
-    log.info("crocobet %s: %d Odds rows from %d events", sport, len(rows), len(board))
+    log.info("crocobet %s: %d Odds rows (%d near events full ladder, %d far "
+             "board-inline)", sport, len(rows), len(near), len(far))
     return rows
 
 
