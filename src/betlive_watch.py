@@ -152,7 +152,13 @@ def discover(sport_ids=DEFAULT_SPORT_IDS, *, max_events: int | None = None):
         energy["ext_calls"] += 1
         energy["ext_bytes"] += len(r.content)
         energy["ext_time"] += time.time() - t
-        body = r.json()
+        try:
+            body = r.json()
+        except Exception as exc:
+            # one non-JSON body (Cloudflare blip / HTML error page) must not
+            # kill the whole discover sweep — seen live 2026-07-12
+            log.debug("betlive discover: %s returned non-JSON: %s", eid, exc)
+            continue
         fe = body[0] if isinstance(body, list) and body else body
         if not isinstance(fe, dict):
             continue

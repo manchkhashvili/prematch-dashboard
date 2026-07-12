@@ -292,6 +292,8 @@ EXTRA_BOOKS: tuple[str, ...] = tuple(b for b in ("liderbet", "betlive", "crocobe
 # extras. Pinnacle is the sharp reference, never in this list.
 SOFT_BOOKS: tuple[str, ...] = ("cb", *EXTRA_BOOKS)
 EXTRA_BOOK_POLL_SEC = int(os.environ.get("EXTRA_BOOK_POLL_SEC", "150"))
+# Books whose normal polls deliver alt-line LADDERS (→ ladder-anomaly scan).
+_LADDER_BOOKS = ("liderbet", "crocobet")
 
 
 # ── Anomaly scanner config (Phase 6) ──────────────────────────────────────────
@@ -473,6 +475,14 @@ _soft_scan_error: str | None = None
 _cb_soft_flags: list[dict] = []
 _betlive_soft_flags: list[dict] = []
 
+# Ladder anomalies for the OTHER books (2026-07-12 — owner: "why anomalies
+# only for crystalbet?"). The detector is book-agnostic; Lider and Crocobet
+# already deliver alt-line ladders in their normal polls, so each poll runs
+# find_ladder_anomalies on the freshly fetched odds (single-poll rule — pure
+# computation, no extra network). Keyed by (book, sport). Betlive is absent:
+# its list view carries no ladders (detail enrichment would be needed).
+_book_anomalies: dict[tuple[str, str], list[dict]] = {}
+
 # Extra-sport CB ladder-anomaly state (soccer/tennis), merged into
 # /api/anomalies at read time. Keyed by sport.
 _extra_anomalies: dict[str, list[dict]] = {}
@@ -620,6 +630,19 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
                 )
             except Exception as e:
                 log.warning("tick store write failed (%s %s): %s", book, sport, e)
+            # Ladder anomalies on this book's own ladders (Lider details /
+            # Crocobet near-horizon events carry real alt-line ladders).
+            if book in _LADDER_BOOKS:
+                try:
+                    anoms = find_ladder_anomalies(
+                        odds, markets=ANOMALY_MARKETS, min_pct=0.0)
+                    rows = [_anomaly_base_row(a, book=book) for a in anoms]
+                    async with _state_lock:
+                        _book_anomalies[(book, sport)] = rows
+                    if rows:
+                        log.info("%s %s: %d ladder anomalies", book, sport, len(rows))
+                except Exception:
+                    log.exception("%s %s ladder-anomaly detection failed", book, sport)
         except Exception as e:
             log.exception("%s %s fetch failed", book, sport)
             async with _state_lock:
@@ -918,7 +941,7 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
 
 
 # ── Anomaly scanner (Phase 6) ─────────────────────────────────────────────────
-def _anomaly_base_row(a) -> dict:
+def _anomaly_base_row(a, book: str = "cb") -> dict:
     """CB-only fields for one ladder anomaly. Pin attachment added at request time.
 
     The 'inflated' rung — the side+line carrying the suspiciously high price you
@@ -931,6 +954,7 @@ def _anomaly_base_row(a) -> dict:
     else:
         bet_line, bet_odds = a.line_lo, a.odds_lo
     return {
+        "book": book,
         "sport": a.sport or "basketball",
         "league": a.league,
         "match_label": f"{a.home} — {a.away}",
@@ -1725,24 +1749,30 @@ async def api_anomalies(
     """CB-only ladder monotonicity anomalies from the latest hourly scan, with
     live Pinnacle fair-at-line + recent-move context attached per row. Sorted
     by % off, biggest first."""
-    all_base = list(_recent_anomalies) + [r for rows_ in _extra_anomalies.values()
-                                           for r in rows_]
+    all_base = (list(_recent_anomalies)
+                + [r for rows_ in _extra_anomalies.values() for r in rows_]
+                + [r for rows_ in _book_anomalies.values() for r in rows_])
     base = [
         r for r in all_base
         if r["pct"] >= min_pct and (not spread_only or r["market_type"] == "spread")
     ]
-    # Pin fair/move context is sport-specific — attach per sport.
+    # Pin fair/move context is (book, sport)-specific — attach per group using
+    # THAT book's odds snapshot so the reference join uses the right fixtures.
     rows: list[dict] = []
-    by_sport: dict[str, list[dict]] = {}
+    by_group: dict[tuple[str, str], list[dict]] = {}
     for r in base:
-        by_sport.setdefault(r.get("sport") or "basketball", []).append(r)
-    for sport, sport_rows in by_sport.items():
+        by_group.setdefault((r.get("book") or "cb",
+                             r.get("sport") or "basketball"), []).append(r)
+    for (book, sport), grp_rows in by_group.items():
         st = _state.get(sport)
         pin_odds = st["pin"]["odds"] if st else []
-        cb_odds = (_anomaly_cb_odds if sport == "basketball"
-                   else _extra_anom_odds.get(sport, []))
+        if book == "cb":
+            book_odds = (_anomaly_cb_odds if sport == "basketball"
+                         else _extra_anom_odds.get(sport, []))
+        else:
+            book_odds = (st.get(book, {}) or {}).get("odds") or [] if st else []
         rows.extend(_attach_pin_to_anomalies(
-            sport_rows, cb_odds, pin_odds, _recent_moves.get(sport, [])))
+            grp_rows, book_odds, pin_odds, _recent_moves.get(sport, [])))
     rows.sort(key=lambda r: r["pct"], reverse=True)
     # CB-internal flags + betlive favourite-flip flags share the consistency
     # list; both carry kind/periods/detail/severity so the tab renders them the
