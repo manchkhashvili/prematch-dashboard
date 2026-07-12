@@ -92,6 +92,8 @@
       <thead>
         <tr>
           <th title="When this finding FIRST appeared (persists across scans while it keeps firing)">First seen</th>
+          <th title="Which book contradicts itself (CB / Lider / Crocobet / Betlive / 1xbet)">Book</th>
+          <th>Sport</th>
           <th>Match</th>
           <th>League</th>
           <th>Check</th>
@@ -238,11 +240,13 @@ function renderConsistency(flags) {
     body.innerHTML = `<tr><td colspan="7" class="empty">scanner off</td></tr>`; return;
   }
   if (!flags.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty">no consistency flags</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="9" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
     <tr${f.stale ? ' style="opacity:.5"' : ''}>
       <td class="mono dim">${fmtTime(f.first_seen)}${f.stale ? ' ⚠︎' : ''}</td>
+      <td><span class="conf conf-medium">${f.book || "cb"}</span></td>
+      <td class="dim">${(f.sport || "").slice(0, 2)}</td>
       <td>${f.match_label}</td>
       <td class="dim">${f.league || ""}</td>
       <td>${KIND_LABEL[f.kind] || f.kind}</td>

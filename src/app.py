@@ -482,6 +482,11 @@ _betlive_soft_flags: list[dict] = []
 # computation, no extra network). Keyed by (book, sport). Betlive is absent:
 # its list view carries no ladders (detail enrichment would be needed).
 _book_anomalies: dict[tuple[str, str], list[dict]] = {}
+# Same idea for CB-internal CONSISTENCY flags (ml-vs-spread, favourite-flip
+# across periods, total-ladder, HT/FT…): find_consistency_flags is
+# book-agnostic, so every book that fetches ladders runs it on its own odds
+# (pure calc, no extra network). Keyed by (book, sport).
+_book_consistency: dict[tuple[str, str], list[dict]] = {}
 
 # Extra-sport CB ladder-anomaly state (soccer/tennis), merged into
 # /api/anomalies at read time. Keyed by sport.
@@ -593,6 +598,19 @@ async def _xbet_loop_for_sport(cfg: SportConfig):
                                    _recent_xbet_moves, _xbet_ml_series)
             except Exception as e:
                 log.warning("xbet move detection failed (%s): %s", sport, e)
+            try:
+                anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
+                prev = _book_consistency.get(("xbet", sport), [])
+                cflags = _merge_flag_first_seen(
+                    [_consistency_to_dict(f, book="xbet")
+                     for f in find_consistency_flags(odds)],
+                    prev, datetime.now(tz=timezone.utc).isoformat())
+                async with _state_lock:
+                    _book_anomalies[("xbet", sport)] = [
+                        _anomaly_base_row(a, book="xbet") for a in anoms]
+                    _book_consistency[("xbet", sport)] = cflags
+            except Exception:
+                log.exception("xbet anomaly/consistency detection failed (%s)", sport)
         except Exception as e:
             log.exception("xbet %s fetch failed", sport)
             async with _state_lock:
@@ -637,12 +655,20 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
                     anoms = find_ladder_anomalies(
                         odds, markets=ANOMALY_MARKETS, min_pct=0.0)
                     rows = [_anomaly_base_row(a, book=book) for a in anoms]
+                    prev = _book_consistency.get((book, sport), [])
+                    cflags = _merge_flag_first_seen(
+                        [_consistency_to_dict(f, book=book)
+                         for f in find_consistency_flags(odds)],
+                        prev, datetime.now(tz=timezone.utc).isoformat())
                     async with _state_lock:
                         _book_anomalies[(book, sport)] = rows
-                    if rows:
-                        log.info("%s %s: %d ladder anomalies", book, sport, len(rows))
+                        _book_consistency[(book, sport)] = cflags
+                    if rows or cflags:
+                        log.info("%s %s: %d ladder anomalies, %d consistency flags",
+                                 book, sport, len(rows), len(cflags))
                 except Exception:
-                    log.exception("%s %s ladder-anomaly detection failed", book, sport)
+                    log.exception("%s %s anomaly/consistency detection failed",
+                                  book, sport)
         except Exception as e:
             log.exception("%s %s fetch failed", book, sport)
             async with _state_lock:
@@ -1060,11 +1086,12 @@ async def _compute_anomalies() -> bool:
     return bool(cb_odds)
 
 
-def _consistency_to_dict(f) -> dict:
+def _consistency_to_dict(f, book: str = "cb") -> dict:
     return {
+        "book": book,
         "sport": f.sport, "league": f.league,
         "match_label": f.match_label, "home": f.home, "away": f.away,
-        "cb_event_id": f.event_id,
+        "cb_event_id": f.event_id, "book_event_id": f.event_id,
         "start_time": f.start_time.isoformat() if f.start_time else None,
         "kind": f.kind, "periods": f.periods, "detail": f.detail,
         "severity": f.severity, "outcome": f.outcome,
@@ -1778,8 +1805,9 @@ async def api_anomalies(
     # list; both carry kind/periods/detail/severity so the tab renders them the
     # same way (betlive rows tagged book="betlive").
     extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
+    book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
     cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags
-                        + _cb_soft_flags + _betlive_soft_flags + extra_cons)
+                        + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons)
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
