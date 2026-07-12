@@ -57,6 +57,8 @@
       <thead>
         <tr>
           <th>Start (UTC)</th>
+          <th title="Which book's ladder is inconsistent (CB / Lider / Crocobet)">Book</th>
+          <th>Sport</th>
           <th>League</th>
           <th>Match</th>
           <th>Market</th>
@@ -292,13 +294,15 @@ function render() {
     return;
   }
   if (rows.length === 0) {
-    body.innerHTML = `<tr><td colspan="12" class="empty">no anomalies above threshold</td></tr>`;
+    body.innerHTML = `<tr><td colspan="14" class="empty">no anomalies above threshold</td></tr>`;
     return;
   }
 
   body.innerHTML = rows.map(r => `
     <tr>
       <td class="mono dim">${fmtTime(r.start_time)}</td>
+      <td><span class="conf conf-medium">${r.book || "cb"}</span></td>
+      <td class="dim">${(r.sport || "").slice(0, 2)}</td>
       <td class="dim">${r.league || ""}</td>
       <td>${r.match_label}</td>
       <td class="dim">${r.market}</td>
