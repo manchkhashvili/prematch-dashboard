@@ -218,10 +218,30 @@ def _fetch_sport_sync(sport_name: str) -> list[Odds]:
 
     menu = s.get(f"{MENU_URL}?lang=en&marketFilter=true",
                  headers=HEADERS, timeout=_HTTP_TIMEOUT).json()["menu"]
-    tour_ids = [n["id"] for n in _menu_nodes(menu)
-                if not is_simulated_league(n.get("name"))
-                if n.get("id", "").startswith("t:")
-                and n.get("sectionId") == section and n.get("cnt", 0) > 0]
+    # The menu is a flat adjacency map {parentNodeId: [childNodes]}. Simulated
+    # football hides under real-looking TOURNAMENT names ("World Cup",
+    # "Champions League") whose PARENT category is the tell — e.g. the sim
+    # "World Cup" (t:69953) sits under c:17065 "Simulated Reality League",
+    # while the REAL c:22319 "World Cup 2026" is separate. So we drop a
+    # tournament when its own name OR its parent category name looks simulated
+    # (fixes the England-v-Argentina phantom edges, 2026-07-14).
+    name_by_id = {n["id"]: (n.get("name") or "")
+                  for v in menu.values() if isinstance(v, list)
+                  for n in v if isinstance(n, dict) and n.get("id")}
+    parent_of: dict[str, str] = {}
+    for parent_id, children in menu.items():
+        if not isinstance(children, list):
+            continue
+        for n in children:
+            if isinstance(n, dict) and n.get("id"):
+                parent_of[n["id"]] = parent_id
+    tour_ids = [
+        n["id"] for n in _menu_nodes(menu)
+        if n.get("id", "").startswith("t:")
+        and n.get("sectionId") == section and n.get("cnt", 0) > 0
+        and not is_simulated_league(n.get("name"))
+        and not is_simulated_league(name_by_id.get(parent_of.get(n["id"], "")))
+    ]
     if not tour_ids:
         log.info("liderbet %s: no tournaments with games", sport_name)
         return []
