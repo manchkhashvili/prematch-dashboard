@@ -598,19 +598,10 @@ async def _xbet_loop_for_sport(cfg: SportConfig):
                                    _recent_xbet_moves, _xbet_ml_series)
             except Exception as e:
                 log.warning("xbet move detection failed (%s): %s", sport, e)
-            try:
-                anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
-                prev = _book_consistency.get(("xbet", sport), [])
-                cflags = _merge_flag_first_seen(
-                    [_consistency_to_dict(f, book="xbet")
-                     for f in find_consistency_flags(odds)],
-                    prev, datetime.now(tz=timezone.utc).isoformat())
-                async with _state_lock:
-                    _book_anomalies[("xbet", sport)] = [
-                        _anomaly_base_row(a, book="xbet") for a in anoms]
-                    _book_consistency[("xbet", sport)] = cflags
-            except Exception:
-                log.exception("xbet anomaly/consistency detection failed (%s)", sport)
+            # NOTE: 1xbet is the REFERENCE book, not a betting venue — its
+            # internal ladder/consistency flags aren't actionable, so it is
+            # deliberately excluded from the Anomalies tab (owner call
+            # 2026-07-14). It still powers the 1xbet Arbs/Moves tabs.
         except Exception as e:
             log.exception("xbet %s fetch failed", sport)
             async with _state_lock:
@@ -1501,6 +1492,29 @@ def _flag_expired(f: dict, now: datetime, stale_max: float) -> bool:
     return False
 
 
+def _enrich_anomaly_rows(base: list[dict]) -> list[dict]:
+    """Attach Pinnacle fair/edge/move context per (book, sport) group and sort.
+    Runs in a worker thread (see api_anomalies) — reads global state snapshots;
+    the GIL makes list loads atomic and stale-by-one-poll is fine for a tab."""
+    by_group: dict[tuple[str, str], list[dict]] = {}
+    for r in base:
+        by_group.setdefault((r.get("book") or "cb",
+                             r.get("sport") or "basketball"), []).append(r)
+    out: list[dict] = []
+    for (book, sport), grp_rows in by_group.items():
+        st = _state.get(sport)
+        pin_odds = st["pin"]["odds"] if st else []
+        if book == "cb":
+            book_odds = (_anomaly_cb_odds if sport == "basketball"
+                         else _extra_anom_odds.get(sport, []))
+        else:
+            book_odds = (st.get(book, {}) or {}).get("odds") or [] if st else []
+        out.extend(_attach_pin_to_anomalies(
+            grp_rows, book_odds, pin_odds, _recent_moves.get(sport, [])))
+    out.sort(key=lambda r: r["pct"], reverse=True)
+    return out
+
+
 def _attach_pin_to_anomalies(
     rows: list[dict], cb_odds: list[Odds], pin_odds: list[Odds],
     recent_moves: list[dict],
@@ -1511,6 +1525,15 @@ def _attach_pin_to_anomalies(
         return []
     pin_by_event: dict[str, list[Odds]] = {}
     pin_label_by_event: dict[str, str] = {}
+    # PERF (2026-07-14): the Anomalies tab was stalling because this ran the
+    # full fuzzy match_events over the ENTIRE book (~900 soccer events) vs all
+    # of Pinnacle on EVERY request, ×books×sports, synchronously in the async
+    # handler → the event loop blocked for seconds and the tab often never
+    # opened / went stale. We only need pin fair for the FEW events that carry
+    # an anomaly, so restrict the match to those before fuzzing.
+    anom_eids = {r.get("cb_event_id") for r in rows if r.get("cb_event_id")}
+    if anom_eids and cb_odds:
+        cb_odds = [o for o in cb_odds if o.raw_event_id in anom_eids]
     if cb_odds and pin_odds:
         for me in match_events(cb_odds, pin_odds):
             if not me.cb:
@@ -1783,24 +1806,10 @@ async def api_anomalies(
         r for r in all_base
         if r["pct"] >= min_pct and (not spread_only or r["market_type"] == "spread")
     ]
-    # Pin fair/move context is (book, sport)-specific — attach per group using
-    # THAT book's odds snapshot so the reference join uses the right fixtures.
-    rows: list[dict] = []
-    by_group: dict[tuple[str, str], list[dict]] = {}
-    for r in base:
-        by_group.setdefault((r.get("book") or "cb",
-                             r.get("sport") or "basketball"), []).append(r)
-    for (book, sport), grp_rows in by_group.items():
-        st = _state.get(sport)
-        pin_odds = st["pin"]["odds"] if st else []
-        if book == "cb":
-            book_odds = (_anomaly_cb_odds if sport == "basketball"
-                         else _extra_anom_odds.get(sport, []))
-        else:
-            book_odds = (st.get(book, {}) or {}).get("odds") or [] if st else []
-        rows.extend(_attach_pin_to_anomalies(
-            grp_rows, book_odds, pin_odds, _recent_moves.get(sport, [])))
-    rows.sort(key=lambda r: r["pct"], reverse=True)
+    # Pin enrichment runs the fuzzy matcher — even restricted to anomaly events
+    # it's real CPU, so do it OFF the event loop so the tab always opens fast
+    # and never stalls other requests (2026-07-14 fix).
+    rows = await asyncio.to_thread(_enrich_anomaly_rows, base)
     # CB-internal flags + betlive favourite-flip flags share the consistency
     # list; both carry kind/periods/detail/severity so the tab renders them the
     # same way (betlive rows tagged book="betlive").

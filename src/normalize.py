@@ -290,6 +290,10 @@ SIM_LEAGUE_TOKENS = (
     "srl", "simulated", "cyber", "esoccer", "e-soccer", "esports", "e-sports",
     "ebasket", "e-basket", "volta", "setka", "liga pro", "battle",
     "8 minutes", "2x6", "2х6",   # e-Sports Battle formats (latin + cyrillic х)
+    # e-football platforms whose leagues reuse real club/national names
+    # (caught on the PARENT category node, e.g. Lider c:25629 / c:17065).
+    # Kept UNAMBIGUOUS — no "fifa" (real FIFA World Cup) or "esport" bare.
+    "ea sports", "reality league", "efootball", "e-football",
 )
 
 
