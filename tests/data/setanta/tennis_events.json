@@ -1,0 +1,176 @@
+[
+ [
+  "17684954",
+  {
+   "sport": "T",
+   "categoryId": "13e7724dde4e4b29b1353b8b5df72f35",
+   "tournamentId": "b33dcea334c4429bb4d367f9f27b5719",
+   "type": 0,
+   "startTime": 1785063600,
+   "stage": 1,
+   "name": "Thiago Monteiro - Alberto Bronzetti",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "244327",
+     "name": "Thiago Monteiro",
+     "slug": "thiago-monteiro",
+     "shortName": "Monteiro T.",
+     "extraData": null
+    },
+    {
+     "id": "141829",
+     "name": "Alberto Bronzetti",
+     "slug": "alberto-bronzetti",
+     "shortName": "Bronzetti A.",
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 7,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "ATP Challenger",
+   "tournamentName": "San Marino. Clay. Qualifying",
+   "countryCode": "T_ATP_CHA",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 28,
+   "regulation": null,
+   "slug": "thiago-monteiro-alberto-bronzetti",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": false,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ],
+ [
+  "17684957",
+  {
+   "sport": "T",
+   "categoryId": "13e7724dde4e4b29b1353b8b5df72f35",
+   "tournamentId": "b33dcea334c4429bb4d367f9f27b5719",
+   "type": 0,
+   "startTime": 1785052800,
+   "stage": 1,
+   "name": "Maxime Janvier - Lorenzo Angelini",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "60721",
+     "name": "Maxime Janvier",
+     "slug": "maxime-janvier",
+     "shortName": "Janvier M.",
+     "extraData": null
+    },
+    {
+     "id": "276809",
+     "name": "Lorenzo Angelini",
+     "slug": "lorenzo-angelini",
+     "shortName": null,
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 7,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "ATP Challenger",
+   "tournamentName": "San Marino. Clay. Qualifying",
+   "countryCode": "T_ATP_CHA",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 28,
+   "regulation": null,
+   "slug": "maxime-janvier-lorenzo-angelini",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": false,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ],
+ [
+  "17685029",
+  {
+   "sport": "T",
+   "categoryId": "13e7724dde4e4b29b1353b8b5df72f35",
+   "tournamentId": "b33dcea334c4429bb4d367f9f27b5719",
+   "type": 0,
+   "startTime": 1785058200,
+   "stage": 1,
+   "name": "Siddhant Banthia - Tommaso Compagnucci",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "87113",
+     "name": "Siddanth Banthia",
+     "slug": "siddanth-banthia",
+     "shortName": "Banthia S.",
+     "extraData": null
+    },
+    {
+     "id": "173464",
+     "name": "Tommaso Compagnucci",
+     "slug": "tommaso-compagnucci",
+     "shortName": "Compagnucci T.",
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 7,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "ATP Challenger",
+   "tournamentName": "San Marino. Clay. Qualifying",
+   "countryCode": "T_ATP_CHA",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 28,
+   "regulation": null,
+   "slug": "siddhant-banthia-tommaso-compagnucci",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": false,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ]
+]

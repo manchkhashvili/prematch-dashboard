@@ -77,7 +77,7 @@ if __package__ in (None, ""):
 
 from src.models import Odds
 from src.scrapers import cb_detail, cb_http, change_cache
-from src.scrapers.sports import basketball, mma, soccer, tennis
+from src.scrapers.sports import basketball, soccer, tennis
 
 # Re-export basketball list-view parsers so existing imports still resolve.
 # Tests import these names from crystalbet directly (test_crystalbet_parser.py).
@@ -92,7 +92,6 @@ SPORTS_URL = "https://www.crystalbet.com/Pages/Sports.aspx"
 BASKETBALL_SPORT_ID = basketball.SPORT_ID  # 17
 SOCCER_SPORT_ID = soccer.SPORT_ID          # 16
 TENNIS_SPORT_ID = tennis.SPORT_ID          # 22
-MMA_SPORT_ID = mma.SPORT_ID                # 69
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -144,22 +143,17 @@ SAMPLE_OUT_SOCCER = (
 SAMPLE_OUT_TENNIS = (
     Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_tennis.html"
 )
-SAMPLE_OUT_MMA = (
-    Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_mma.html"
-)
 
 # Map sport_name → module + saved-HTML path for ergonomic lookup.
 _SPORT_MODULES: dict[str, Any] = {
     basketball.SPORT_NAME: basketball,
     soccer.SPORT_NAME: soccer,
     tennis.SPORT_NAME: tennis,
-    mma.SPORT_NAME: mma,
 }
 _SPORT_SAMPLE_PATHS: dict[str, Path] = {
     basketball.SPORT_NAME: SAMPLE_OUT,
     soccer.SPORT_NAME: SAMPLE_OUT_SOCCER,
     tennis.SPORT_NAME: SAMPLE_OUT_TENNIS,
-    mma.SPORT_NAME: SAMPLE_OUT_MMA,
 }
 
 
@@ -323,8 +317,22 @@ async def _load_all_leagues(page) -> None:
 
 # ── HTML entry points ─────────────────────────────────────────────────────────
 
+def _as_soup(html_or_soup: Any):
+    """Accept either raw HTML or an already-parsed soup.
+
+    CB's browser-free transport normalises every panel with html5lib (required
+    — html.parser mis-nests CB's unclosed <td>s, and lxml's recovery diverges
+    from browsers). It used to hand back `str(soup)`, which the parsers below
+    then re-parsed with html.parser: measured on saved soccer panels, that
+    serialize + re-parse round trip is **33 % of CB's HTML processing** and
+    produces the same tree. Passing the html5lib soup straight through skips
+    it. Strings still work, so the saved-HTML path and the tests are unaffected.
+    """
+    return cb_http.as_soup(html_or_soup)
+
+
 def _parse_html_for_sport(
-    html: str, fetched_at: datetime, sport: Any,
+    html: Any, fetched_at: datetime, sport: Any,
 ) -> list[Odds]:
     """Parse a full Sports.aspx HTML page using the given sport module's parsers.
 
@@ -334,9 +342,7 @@ def _parse_html_for_sport(
     (dry_run_parse_saved / CB_USE_SAVED) and as a fallback inside the
     expansion flow.
     """
-    from bs4 import BeautifulSoup
-
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _as_soup(html)
     results: list[Odds] = []
     skipped_outrights = 0
 
@@ -417,11 +423,6 @@ def parse_html_soccer(html: str, fetched_at: datetime) -> list[Odds]:
 def parse_html_tennis(html: str, fetched_at: datetime) -> list[Odds]:
     """Parse a tennis Sports.aspx HTML page."""
     return _parse_html_for_sport(html, fetched_at, tennis)
-
-
-def parse_html_mma(html: str, fetched_at: datetime) -> list[Odds]:
-    """Parse an MMA Sports.aspx HTML page."""
-    return _parse_html_for_sport(html, fetched_at, mma)
 
 
 # ── Singletons: one browser, one page per sport ───────────────────────────────
@@ -712,7 +713,7 @@ class _GameOnList:
 
 
 def _extract_games_from_list_html(
-    html: str, fetched_at: datetime, sport: Any = None,
+    html: Any, fetched_at: datetime, sport: Any = None,
 ) -> list[_GameOnList]:
     """
     Walk the list-view HTML producing per-game metadata + list-view Odds.
@@ -724,12 +725,10 @@ def _extract_games_from_list_html(
     `sport` defaults to basketball for back-compat with the tests that import
     this name and call it without a sport argument.
     """
-    from bs4 import BeautifulSoup
-
     if sport is None:
         sport = basketball
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _as_soup(html)
     games: list[_GameOnList] = []
     date_str: Optional[str] = None
 
@@ -905,10 +904,14 @@ async def _expand_and_parse_one_http(
     marks expand_failed rather than list-only.
     """
     blob = await cb_http.expand_detail_html(sport.SPORT_ID, game.event_id)
-    if "game-details" not in blob:
+    # The transport yields a soup, but keep tolerating a string (Playwright
+    # path, saved fixtures, test stubs) — normalise before querying. The old
+    # `"game-details" not in blob` substring test became a DOM query; same
+    # transport-failure signal, and it no longer depends on the return type.
+    blob = cb_http.as_soup(blob)
+    if blob.select_one("table.game-details") is None:
         raise RuntimeError(
-            f"ExpandDetail returned no detail table for {game.event_id} "
-            f"({len(blob):,}B of panels)"
+            f"ExpandDetail returned no detail table for {game.event_id}"
         )
     return cb_detail.parse_detail_page(
         blob,
@@ -984,6 +987,7 @@ async def _fetch_for_sport(
     sport: Any, *, headed: bool, force_detail: bool = False,
     classify_override: Any = None, bypass_cache: bool = False,
     use_http: bool | None = None, start_within_hours: float | None = None,
+    should_continue: Any = None, expand_within_hours: float | None = None,
 ) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
@@ -1112,15 +1116,36 @@ async def _fetch_for_sport(
         n_cached_detail = 0
         n_list_fallback = 0
         n_expand_failed = 0
+        n_beyond_horizon = 0
 
         for i, game in enumerate(games, 1):
+            # Cooperative abort. A full soccer expansion is ~15 min, so without
+            # this, switching CrystalBet off in the Config tab keeps paying for
+            # the in-flight sweep long after the toggle. Checked on the progress
+            # boundary so it costs one call per _PROGRESS_LOG_EVERY games.
+            if (should_continue is not None and i % _PROGRESS_LOG_EVERY == 0
+                    and not should_continue()):
+                log.info("CB %s expansion ABORTED at %d/%d games (switched off)",
+                         sport_name, i, len(games))
+                break
             if i % _PROGRESS_LOG_EVERY == 0:
                 log.info(
                     "CB %s expansion progress: %d/%d games processed "
-                    "(expanded=%d, cached=%d, list-fallback=%d, failed=%d)",
+                    "(expanded=%d, cached=%d, list-fallback=%d, failed=%d, "
+                    "beyond-horizon=%d)",
                     sport_name, i, len(games), n_expanded, n_cached_detail,
-                    n_list_fallback, n_expand_failed,
+                    n_list_fallback, n_expand_failed, n_beyond_horizon,
                 )
+            # Expansion horizon (Crocobet's DETAIL_HOURS pattern). Far-out
+            # games keep their LIST-VIEW odds — they stay matched and priced on
+            # mains, they just don't get an ExpandDetail postback + html5lib
+            # parse until kickoff approaches. Only ~39 % of the soccer board
+            # starts within 24 h, and expansion is where all of CB's CPU goes.
+            if (expand_within_hours is not None and game.start_time is not None
+                    and game.start_time > fetched_at + timedelta(hours=expand_within_hours)):
+                all_odds.extend(game.list_odds)
+                n_beyond_horizon += 1
+                continue
             if cache.needs_expansion(game.event_id, game.loadinfo):
                 try:
                     detail_odds = await _expand_game(
@@ -1182,6 +1207,7 @@ async def _fetch_for_sport(
 
 async def fetch_crystalbet_basketball_prematch(
     *, headed: bool = False, force_detail: bool = False,
+    should_continue: Any = None, expand_within_hours: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch basketball with full detail-page expansion.
 
@@ -1190,7 +1216,9 @@ async def fetch_crystalbet_basketball_prematch(
     dashboard otherwise runs basketball in list-only mode. Used by the hourly
     anomaly scanner, which needs the ladders the list view doesn't expose.
     """
-    return await _fetch_for_sport(basketball, headed=headed, force_detail=force_detail)
+    return await _fetch_for_sport(basketball, headed=headed, force_detail=force_detail,
+                                  should_continue=should_continue,
+                                  expand_within_hours=expand_within_hours)
 
 
 # sport → (module, permissive classifier or None→strict) for the anomaly scan.
@@ -1282,29 +1310,25 @@ async def fetch_crystalbet_basketball_games(
 
 
 async def fetch_crystalbet_soccer_prematch(
-    *, headed: bool = False,
+    *, headed: bool = False, should_continue: Any = None,
+    expand_within_hours: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch soccer with full detail-page expansion."""
-    return await _fetch_for_sport(soccer, headed=headed)
+    return await _fetch_for_sport(soccer, headed=headed,
+                                 should_continue=should_continue,
+                                 expand_within_hours=expand_within_hours)
 
 
 async def fetch_crystalbet_tennis_prematch(
-    *, headed: bool = False,
+    *, headed: bool = False, should_continue: Any = None,
+    expand_within_hours: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch tennis. Designed for list-only mode (SPORTS=tennis:list);
     full mode would also work (basketball-style detail expansion) but tennis
     has 500+ matches per cycle which is too heavy without server resources."""
-    return await _fetch_for_sport(tennis, headed=headed)
-
-
-async def fetch_crystalbet_mma_prematch(
-    *, headed: bool = False,
-) -> list[Odds]:
-    """Scrape CB prematch MMA. List-only mode (SPORTS=mma:list) recommended —
-    MMA's CB list view exposes ML + total rounds only; per-fight method-of-
-    victory / round-betting markets live behind detail expansion which v1
-    skips. ~58 fights per cycle in typical samples (UFC + regional promotions)."""
-    return await _fetch_for_sport(mma, headed=headed)
+    return await _fetch_for_sport(tennis, headed=headed,
+                                 should_continue=should_continue,
+                                 expand_within_hours=expand_within_hours)
 
 
 # ── Per-sport accessors (with sport_name params for app.py / cache_persistence) ──
@@ -1440,18 +1464,6 @@ def dry_run_parse_saved_tennis(out_path: Path = SAMPLE_OUT_TENNIS) -> list[Odds]
     return odds_list
 
 
-def dry_run_parse_saved_mma(out_path: Path = SAMPLE_OUT_MMA) -> list[Odds]:
-    """Parse an already-saved MMA HTML sample without launching a browser."""
-    if not out_path.exists():
-        print(f"No saved HTML at {out_path}")
-        return []
-    html = out_path.read_text(encoding="utf-8")
-    fetched_at = datetime.now(tz=timezone.utc)
-    odds_list = parse_html_mma(html, fetched_at)
-    _print_summary(odds_list, out_path, len(html))
-    return odds_list
-
-
 def _print_summary(odds_list: list[Odds], path: Path, html_len: int) -> None:
     by_type: dict[str, int] = {}
     for o in odds_list:
@@ -1499,11 +1511,6 @@ if __name__ == "__main__":
         action="store_true",
         help="parse data/raw/cb_prematch_sample_tennis.html without launching browser",
     )
-    ap.add_argument(
-        "--parse-saved-mma",
-        action="store_true",
-        help="parse data/raw/cb_prematch_sample_mma.html without launching browser",
-    )
     ap.add_argument("--headless", action="store_true", help="run browser headless")
     args = ap.parse_args()
 
@@ -1513,7 +1520,5 @@ if __name__ == "__main__":
         dry_run_parse_saved_soccer()
     elif args.parse_saved_tennis:
         dry_run_parse_saved_tennis()
-    elif args.parse_saved_mma:
-        dry_run_parse_saved_mma()
     else:
         asyncio.run(dry_run_capture(headed=not args.headless))

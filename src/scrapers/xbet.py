@@ -30,7 +30,6 @@ Lider-Bet / CrystalBet on live matched games; notes/build_log.md):
   tennis: G=1 T1/T3 moneyline; G=17 GAMES total; G=2 GAMES handicap
     (side-signed) — verified vs Lider by name+time 2026-07-11
     (ML 1.32pp / total 1.45pp / handicap 0.99pp medians).
-  mma: sport id resolved from the sports tree by name; G=1 2-way moneyline.
 
 Handicap pairing self-check: basketball lists each side at its OWN signed
 line (T7@+L with T8@−L); other sports may list both sides at one P. We build
@@ -62,7 +61,7 @@ TIMEOUT = 15
 MAX_WORKERS = 8
 ENUM_TTL = 1800.0            # champ/board enumeration cache (fixtures churn slowly)
 
-SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4}   # mma resolved by name
+SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4}
 
 # Energy budget (2026-07-11, the "PC runs hot" fix): pricing the WHOLE board
 # every cycle was ~4,400 GetGameZip calls + ~60 MB JSON parse per 2 min across
@@ -73,7 +72,6 @@ SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4}   # mma resolved by name
 # 1xbet price until they enter the horizon.
 HORIZON_HOURS = float(os.environ.get("XBET_HORIZON_HOURS", "36"))
 SUBGAME_HOURS = float(os.environ.get("XBET_SUBGAME_HOURS", "18"))
-_MMA_NAMES = ("mma", "martial arts", "ufc")
 
 # sub-game panel name → v1 period, per sport (verified live)
 SUBGAME_PERIODS = {
@@ -213,27 +211,12 @@ def _game_zip(event_id: int) -> dict:
 
 # ── board enumeration (cached) ────────────────────────────────────────────────
 _enum_cache: dict[str, tuple[float, list[dict]]] = {}
-_mma_sport_id: list[int | None] = [None]
-
-
-def _resolve_mma_id() -> int | None:
-    if _mma_sport_id[0] is None:
-        for sp in _sports_tree():
-            name = (sp.get("N") or "").lower()
-            if any(t in name for t in _MMA_NAMES):
-                _mma_sport_id[0] = sp.get("I")
-                break
-        else:
-            _mma_sport_id[0] = -1
-    return _mma_sport_id[0] if _mma_sport_id[0] != -1 else None
-
-
 def _enumerate(sport_name: str) -> list[dict]:
     now = time.time()
     ts, cached = _enum_cache.get(sport_name, (0.0, []))
     if cached and now - ts < ENUM_TTL:
         return cached
-    sid = SPORT_ID.get(sport_name) or (_resolve_mma_id() if sport_name == "mma" else None)
+    sid = SPORT_ID.get(sport_name)
     if sid is None:
         log.warning("xbet: no sport id for %r", sport_name)
         return cached
@@ -244,6 +227,8 @@ def _enumerate(sport_name: str) -> list[dict]:
         out = []
         for g in _champ_games(c.get("LI")):
             if g.get("I") and g.get("O1") and g.get("O2"):
+                if _is_placeholder_fixture(g):
+                    continue
                 g["_league"] = g.get("L") or c.get("L")
                 out.append(g)
         return out
@@ -327,7 +312,7 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
                 rows.append(_mk(game, sport, "moneyline", "FT",
                                 {"home": ml[401], "away": ml[402]},
                                 fetched_at=fetched_at))
-        else:                                      # tennis / mma: G=1 T1/T3 2-way
+        else:                                      # tennis: G=1 T1/T3 2-way
             ml = {o.get("T"): _price(o) for o in ge.get(1, []) if o.get("P") is None}
             if ml.get(1) and ml.get(3):
                 rows.append(_mk(game, sport, "moneyline", "FT",
@@ -358,13 +343,45 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
     return [r for r in rows if r is not None]
 
 
+# 1xbet's league specials/outright shelves ship real markets under PLACEHOLDER
+# competitor names ("Home" v "Away"). Measured 2026-07-26: 596 soccer rows across
+# 18 leagues, every one collapsing into the single event identity
+# ("Home", "Away") — so the matcher saw one 596-row "fixture" spanning Argentina
+# to Iceland. Nothing downstream can use them and they can only mis-pair, so drop
+# them at enumeration. (These are the "outrights/specials" Football shelves
+# docs/1xbet-prematch.md flagged as unclassified.)
+_PLACEHOLDER_NAMES = {"home", "away", "team 1", "team 2", "1", "2"}
+
+
+def _is_placeholder_fixture(game: dict) -> bool:
+    h = (game.get("O1") or "").strip().lower()
+    a = (game.get("O2") or "").strip().lower()
+    return h in _PLACEHOLDER_NAMES or a in _PLACEHOLDER_NAMES
+
+
 def _fetch_event(game: dict, sport: str, periods: bool,
                  fetched_at: datetime) -> list[Odds]:
     rows = _parse_zip(_game_zip(int(game["I"])), game, sport, "FT", fetched_at)
     if periods and (game.get("S") or 0) <= time.time() + SUBGAME_HOURS * 3600:
         pmap = SUBGAME_PERIODS.get(sport) or {}
-        subs = {(x.get("PN") or "").strip(): x.get("I")
-                for x in (game.get("SG") or []) if x.get("I")}
+        # `PN` is NOT unique across sub-games: a match ships both a goals
+        # "1st half" (TG empty) and a corners "1st half" (TG='Corners'), plus
+        # Cards / Shots On Target / Players' stats siblings. Keying a dict on PN
+        # alone silently kept whichever came LAST in SG, so for some fixtures we
+        # fetched the CORNERS ladder and emitted every line as an H1 GOALS total.
+        #
+        # Observed 2026-07-26 on Sao Bernardo v Ceara (I=738573227):
+        #     I=738573228  PN='1st half'  TG=''          <- goals, wanted
+        #     I=739002600  PN='1st half'  TG='Corners'   <- won the dict
+        # giving an "H1 total" ladder of 2.5..7.5 with over-2.5 at 1.032, which
+        # collided with the soft books' real goal totals and produced +EV rows up
+        # to 996 %. Only the plain-statistic sub-game (empty TG) is goals; the
+        # tagged ones need `submarket` support before they can be emitted.
+        subs: dict[str, int] = {}
+        for x in (game.get("SG") or []):
+            if not x.get("I") or (x.get("TG") or "").strip():
+                continue
+            subs[(x.get("PN") or "").strip()] = x["I"]
         for pn, period in pmap.items():
             sub_id = subs.get(pn)
             if not sub_id:
@@ -420,16 +437,12 @@ async def fetch_xbet_tennis(*, concurrency: int = 10) -> list[Odds]:
     return await asyncio.to_thread(_fetch_sport_sync, "tennis", False)
 
 
-async def fetch_xbet_mma(*, concurrency: int = 10) -> list[Odds]:
-    return await asyncio.to_thread(_fetch_sport_sync, "mma", False)
-
-
 if __name__ == "__main__":   # smoke: python -m src.scrapers.xbet [sport]
     import sys
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     sport = sys.argv[1] if len(sys.argv) > 1 else "basketball"
     fn = {"basketball": fetch_xbet_basketball, "soccer": fetch_xbet_soccer,
-          "tennis": fetch_xbet_tennis, "mma": fetch_xbet_mma}[sport]
+          "tennis": fetch_xbet_tennis}[sport]
     odds = asyncio.run(fn())
     print(f"\n{sport}: {len(odds)} Odds rows")
     by = {}

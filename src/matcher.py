@@ -46,6 +46,7 @@ from rapidfuzz import fuzz
 
 from src.models import Odds
 from src.normalize import (
+    has_women_suffix_pair,
     has_women_tag,
     has_youth_tag,
     normalize_team,
@@ -161,14 +162,45 @@ class MatchResults(NamedTuple):
 
 
 def match_events(cb_odds: list[Odds], pin_odds: list[Odds]) -> list[MatchedEvent]:
-    """Backwards-compat alias: returns just the `matched` list from MatchResults."""
-    return match_with_diagnostics(cb_odds, pin_odds).matched
+    """Just the `matched` list. This is the hot path — every book, every cycle.
+
+    It skips the unmatched-candidate diagnostics, which lets it also skip
+    fuzzy-scoring pairs whose kickoffs are too far apart to ever be accepted
+    (see `_time_compatible`). Measured on Lider vs Pinnacle soccer: 895 x 532 =
+    476 140 pairs scored, of which only 15 205 were within the +/-1 h window —
+    **96.8 % of the scoring was provably wasted**. Matching was 64 % of a full
+    cycle's CPU.
+    """
+    return match_with_diagnostics(cb_odds, pin_odds, diagnostics=False).matched
+
+
+def _time_compatible(cb_time, pin_time) -> bool:
+    """Could this pair EVER pass `_accept`, on time alone?
+
+    Both acceptance tiers currently use the same bound (TIME_LOOSE_SECONDS ==
+    TIME_TIGHT_SECONDS), so a pair outside it is rejected whatever it scores —
+    scoring it is pure waste. If the two bounds ever diverge again, the max of
+    them is still the correct, conservative gate.
+
+    An unknown kickoff on either side must stay compatible: `_accept` falls
+    back to name confidence alone there, so those pairs are still matchable.
+    """
+    if cb_time is None or pin_time is None:
+        return True
+    return abs((cb_time - pin_time).total_seconds()) <= max(
+        TIME_LOOSE_SECONDS, TIME_TIGHT_SECONDS)
 
 
 def match_with_diagnostics(
-    cb_odds: list[Odds], pin_odds: list[Odds]
+    cb_odds: list[Odds], pin_odds: list[Odds], *, diagnostics: bool = True
 ) -> MatchResults:
-    """Match events + collect best-candidate info for every unmatched CB event."""
+    """Match events + collect best-candidate info for every unmatched CB event.
+
+    `diagnostics=False` skips the "best candidate regardless of threshold" pass
+    (the curation-log input) and, because nothing then needs scores for
+    time-incompatible pairs, prunes those before scoring. Matching results are
+    identical either way — the pruned pairs could never have been accepted.
+    """
     cb_events = _group_by_event(cb_odds)
     pin_events = _group_by_event(pin_odds)
 
@@ -185,14 +217,21 @@ def match_with_diagnostics(
         for k, v in pin_events.items()
     }
 
-    # Enumerate EVERY (cb, pin) pair with its score — no time filter at this
-    # stage. The tiered _accept() applies time as part of the threshold rule
-    # so we can't pre-filter on time without knowing the score first.
-    # Each entry: (score, cb_key, pin_key, flipped) — `flipped` marks a
-    # reversed-fixture match whose reference odds must be home/away-swapped.
+    # Enumerate (cb, pin) pairs with their scores. When diagnostics are wanted
+    # this is EVERY pair — the curation loop reports the best candidate
+    # regardless of threshold, so it needs them all. When they are not
+    # (match_events, the hot path), pairs that cannot pass `_accept` on time are
+    # skipped before the two fuzzy scores, which is where the CPU goes.
+    # Each entry: (score, cb_key, pin_key, flipped, eligible) — `flipped` marks
+    # a reversed-fixture match whose reference odds must be home/away-swapped.
     scored: list[tuple[float, tuple, tuple, bool]] = []
+    _cb_start = {k: v[0].start_time for k, v in cb_events.items()}
+    _pin_start = {k: v[0].start_time for k, v in pin_events.items()}
     for cb_key, (ch_n, ca_n) in cb_norm.items():
+        cb_t = _cb_start[cb_key]
         for pin_key, (ph_n, pa_n) in pin_norm.items():
+            if not diagnostics and not _time_compatible(cb_t, _pin_start[pin_key]):
+                continue
             score_h = fuzz.token_set_ratio(ch_n, ph_n)
             score_a = fuzz.token_set_ratio(ca_n, pa_n)
             score = (score_h + score_a) / 2.0
@@ -248,8 +287,8 @@ def match_with_diagnostics(
         ),
         key=lambda c: -c[0],
     )
-    used_cb: set[tuple[str, str, bool]] = set()
-    used_pin: set[tuple[str, str, bool]] = set()
+    used_cb: set[tuple] = set()
+    used_pin: set[tuple] = set()
     matched: list[MatchedEvent] = []
 
     for score, cb_key, pin_key, flipped, _eligible in candidates:
@@ -277,7 +316,7 @@ def match_with_diagnostics(
     # For every unmatched CB event, find its best (still-unused) Pin candidate
     # regardless of threshold — for the curation loop.
     unmatched: list[UnmatchedEvent] = []
-    best_by_cb: dict[tuple[str, str, bool], tuple[float, tuple[str, str, bool]]] = {}
+    best_by_cb: dict[tuple, tuple[float, tuple]] = {}
     for score, cb_key, pin_key, _flipped, _eligible in scored:
         if pin_key in used_pin:
             continue  # already taken by another CB event
@@ -342,21 +381,52 @@ def log_unmatched(result: MatchResults, *, path: Path = UNMATCHED_LOG_PATH) -> N
     log.info("unmatched_log: appended %d row(s) → %s", len(result.unmatched), path)
 
 
+# Kickoff bucket for the event key, in seconds. Two same-named fixtures this far
+# apart are DIFFERENT events and must not merge (see _group_by_event). Chosen
+# well below _accept()'s +/-1 h tolerance — so it never separates two things the
+# matcher would consider the same fixture — and well above any observed
+# intra-source drift (measured 2026-07-27 across Pinnacle/Lider/Setanta/Crocobet:
+# 0 of 2 820 name-pairs had more than one kickoff, and none mixed a missing
+# kickoff with a real one, so nothing legitimate splits).
+_EVENT_TIME_BUCKET_SEC = 900
+
+
+def _time_bucket(start_time) -> int | None:
+    if start_time is None:
+        return None
+    return int(start_time.timestamp()) // _EVENT_TIME_BUCKET_SEC
+
+
 def _group_by_event(
     odds_list: list[Odds],
-) -> dict[tuple[str, str, bool], list[Odds]]:
-    """Group a source's Odds into events. Key is (home, away, is_women).
+) -> dict[tuple[str, str, bool, int | None], list[Odds]]:
+    """Group a source's Odds into events. Key is (home, away, is_women, kickoff).
 
     Gender is part of the key so a men's and women's game that share IDENTICAL
     team names (Australian NBL1 double-headers — same clubs, ~2h apart, marked
     only by "Women" in the league) don't collapse into one mixed event. That
     collapse previously priced a men's line against the women's fair price and
     produced phantom +EV. The marker lives in the league; team names are checked
-    too for books that suffix "(W)"."""
-    groups: dict[tuple[str, str, bool], list[Odds]] = defaultdict(list)
+    too for books that suffix "(W)" or a bare " W".
+
+    KICKOFF is part of the key for the same reason, and it catches the case the
+    name-based guards cannot: **Pinnacle lists reserve and U20 fixtures under the
+    identical senior team names**. Observed live 2026-07-26 —
+
+        PINNACLE  Aguila v Luis Angel Firpo        -> {21:00, 18:00}
+        PINNACLE  Fuerte San Francisco v Platense  -> {21:00, 18:00}
+
+    where Lider showed the 18:00 games as "Cd Aguila U20" / "agila (rez)".
+    Without time in the key both Pinnacle events merged into one bucket, and the
+    senior soft-book fixture was priced against the RESERVE ladder — 14 phantom
+    rows including 6 of 9 ARBs. The youth guard cannot help because Pinnacle's
+    names carry no marker; time is the only signal present.
+    """
+    groups: dict[tuple[str, str, bool, int | None], list[Odds]] = defaultdict(list)
     for o in odds_list:
-        women = has_women_tag(o.league or "", o.home, o.away)
-        groups[(o.home, o.away, women)].append(o)
+        women = (has_women_tag(o.league or "", o.home, o.away)
+                 or has_women_suffix_pair(o.home, o.away))
+        groups[(o.home, o.away, women, _time_bucket(o.start_time))].append(o)
     return dict(groups)
 
 

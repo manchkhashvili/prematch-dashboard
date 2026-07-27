@@ -52,29 +52,26 @@ from src.matcher import (
     match_events, match_with_diagnostics,
 )
 from src.models import Odds
+from src import runtime_config
 from src.scrapers import cache_persistence
 from src.scrapers.crystalbet import (
     SAMPLE_OUT as CB_SAMPLE_PATH,
-    SAMPLE_OUT_MMA as CB_SAMPLE_PATH_MMA,
     SAMPLE_OUT_SOCCER as CB_SAMPLE_PATH_SOCCER,
     SAMPLE_OUT_TENNIS as CB_SAMPLE_PATH_TENNIS,
     close_crystalbet,
     fetch_crystalbet_basketball_anomaly_ladders,
     fetch_crystalbet_basketball_games,
     fetch_crystalbet_basketball_prematch,
-    fetch_crystalbet_mma_prematch,
     fetch_crystalbet_soccer_prematch,
     fetch_crystalbet_tennis_prematch,
     get_detail_status_map,
     get_last_expanded_map,
     parse_html as parse_cb_html,
-    parse_html_mma as parse_cb_html_mma,
     parse_html_soccer as parse_cb_html_soccer,
     parse_html_tennis as parse_cb_html_tennis,
 )
 from src.scrapers.pinnacle import (
     fetch_pinnacle_basketball,
-    fetch_pinnacle_mma,
     fetch_pinnacle_soccer,
     fetch_pinnacle_tennis,
 )
@@ -139,14 +136,6 @@ _ALL_SPORTS: list[SportConfig] = [
         cb_sample_path=CB_SAMPLE_PATH_TENNIS,
         cb_parse_html=parse_cb_html_tennis,
         xbet_fetcher=_xbet.fetch_xbet_tennis,
-    ),
-    SportConfig(
-        sport_name="mma",
-        cb_fetcher=fetch_crystalbet_mma_prematch,
-        pin_fetcher=fetch_pinnacle_mma,
-        cb_sample_path=CB_SAMPLE_PATH_MMA,
-        cb_parse_html=parse_cb_html_mma,
-        xbet_fetcher=_xbet.fetch_xbet_mma,
     ),
 ]
 
@@ -252,16 +241,20 @@ SPORT_NAMES = tuple(s.sport_name for s in SPORTS)
 
 
 # ── Extra soft books (Phase 7 — Lider-Bet, Betlive; env-gated) ────────────────
-# Two additional Georgian books, each matched against Pinnacle exactly like
+# Additional Georgian books, each matched against Pinnacle exactly like
 # CrystalBet (and against each other for cross-book arbs). Entirely opt-in:
 # default-off reproduces the CB-vs-Pin pipeline byte-for-byte (no state slots,
 # no pollers, no opportunity rows). Enable per book:
-#     LIDERBET=1 BETLIVE=1 python main.py
-# (lowercase liderbet=1 / betlive=1 also accepted). EXTRA_BOOK_POLL_SEC sets the
-# poll cadence for these JSON books (cheaper than CB; default 120s).
+#     LIDERBET=1 BETLIVE=1 CROCOBET=1 SETANTA=1 python main.py
+# (lowercase liderbet=1 / betlive=1 … also accepted). EXTRA_BOOK_POLL_SEC sets
+# the poll cadence for these books (cheaper than CB; default 150s).
+# Setanta is not a JSON-over-HTTP book — it rides a SignalR/MessagePack
+# websocket (see src/scrapers/setanta.py, docs/setanta.md) — but it presents
+# the same fetch_<book>_<sport>() -> list[Odds] interface as the rest.
 from src.scrapers import betlive as _betlive  # noqa: E402
 from src.scrapers import liderbet as _liderbet  # noqa: E402
 from src.scrapers import crocobet as _crocobet  # noqa: E402
+from src.scrapers import setanta as _setanta  # noqa: E402
 
 _BOOK_FETCHERS: dict[str, dict[str, Any]] = {
     "liderbet": {
@@ -279,6 +272,11 @@ _BOOK_FETCHERS: dict[str, dict[str, Any]] = {
         "basketball": _crocobet.fetch_crocobet_basketball,
         "tennis":     _crocobet.fetch_crocobet_tennis,
     },
+    "setanta": {
+        "soccer":     _setanta.fetch_setanta_soccer,
+        "basketball": _setanta.fetch_setanta_basketball,
+        "tennis":     _setanta.fetch_setanta_tennis,
+    },
 }
 
 
@@ -287,13 +285,70 @@ def _book_enabled(name: str) -> bool:
     return val in ("1", "on", "true", "yes")
 
 
-EXTRA_BOOKS: tuple[str, ...] = tuple(b for b in ("liderbet", "betlive", "crocobet") if _book_enabled(b))
-# All soft books in priority order — CB first (the original), then any enabled
-# extras. Pinnacle is the sharp reference, never in this list.
+# PROVISIONED extra books — every book that has a fetcher gets a state slot and
+# a poll loop, whether or not it is currently switched on. The loops self-gate
+# on the runtime config (Config tab) so a book can be turned on or off live
+# without a restart; an off book simply never fetches. Env flags still decide
+# the STARTING state via runtime_config's defaults.
+EXTRA_BOOKS: tuple[str, ...] = ("liderbet", "betlive", "crocobet", "setanta")
+# All soft books in priority order — CB first (the original), then the extras.
+# Pinnacle is the sharp reference, never in this list.
 SOFT_BOOKS: tuple[str, ...] = ("cb", *EXTRA_BOOKS)
 EXTRA_BOOK_POLL_SEC = int(os.environ.get("EXTRA_BOOK_POLL_SEC", "150"))
+# How often a switched-OFF loop wakes to notice it was switched back on. Small
+# enough that the Config tab feels instant, cheap enough to be free (one dict
+# lookup per tick).
+_IDLE_POLL_SEC = 5
+
+
+_gate_state: dict[str, bool] = {}
+
+
+async def _gated(section: str, key: str, what: str) -> bool:
+    """Runtime on/off gate for a poll loop, called at the top of each iteration.
+
+    Returns True when the loop should do its work this tick. When off it sleeps
+    a short idle interval and returns False, so the caller just `continue`s —
+    no fetch, no parse, no CPU. Logs only on transitions so an off loop is
+    silent in the log.
+    """
+    on = runtime_config.is_on(section, key)
+    if _gate_state.get(what) != on:
+        log.info("%s: %s (config)", what, "ON" if on else "OFF — idling")
+        _gate_state[what] = on
+    if not on:
+        await asyncio.sleep(_IDLE_POLL_SEC)
+    return on
+
+
+async def _sleep_gated(total: float, section: str, key: str) -> None:
+    """Sleep `total` seconds, but wake early if the Config tab switches this
+    loop OFF.
+
+    Without this a book on a 150 s cadence keeps its odds on screen (and in the
+    arbs grid) for up to a full cycle after you switch it off, which makes the
+    toggle feel broken. Sleeping in slices costs one dict lookup per slice.
+    """
+    remaining = float(total)
+    while remaining > 0:
+        slice_s = min(remaining, _IDLE_POLL_SEC)
+        await asyncio.sleep(slice_s)
+        remaining -= slice_s
+        if not runtime_config.is_on(section, key):
+            return
+
+
+def enabled_extra_books() -> tuple[str, ...]:
+    """Extra books switched ON right now (Config tab)."""
+    return tuple(b for b in EXTRA_BOOKS if runtime_config.book_on(b))
+
+
+def enabled_soft_books() -> tuple[str, ...]:
+    """Soft books switched ON right now, CB first."""
+    cb = ("cb",) if runtime_config.book_on("crystalbet") else ()
+    return (*cb, *enabled_extra_books())
 # Books whose normal polls deliver alt-line LADDERS (→ ladder-anomaly scan).
-_LADDER_BOOKS = ("liderbet", "crocobet")
+_LADDER_BOOKS = ("liderbet", "crocobet", "setanta")
 
 
 # ── Anomaly scanner config (Phase 6) ──────────────────────────────────────────
@@ -404,12 +459,13 @@ XBET_POLL_SEC = int(os.environ.get("XBET_POLL_SEC", "150"))
 
 
 def _empty_sport_state() -> dict[str, Any]:
-    # cb + pin always; one slot per enabled extra book (none by default).
+    # A slot for every PROVISIONED source, whether or not it is switched on —
+    # the Config tab can enable any of them at runtime and the loop needs a
+    # slot waiting for it. An off book's slot simply stays empty.
     st = {"cb": _empty_source_state(), "pin": _empty_source_state()}
     for book in EXTRA_BOOKS:
         st[book] = _empty_source_state()
-    if XBET:
-        st["xbet"] = _empty_source_state()
+    st["xbet"] = _empty_source_state()
     return st
 
 
@@ -562,7 +618,7 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
                 )
             except Exception:
                 pass
-        await asyncio.sleep(PINNACLE_POLL_SEC)
+        await asyncio.sleep(runtime_config.secs("pinnacle_poll_sec", PINNACLE_POLL_SEC))
 
 
 async def _xbet_loop_for_sport(cfg: SportConfig):
@@ -576,6 +632,8 @@ async def _xbet_loop_for_sport(cfg: SportConfig):
     if cfg.xbet_fetcher is None:
         return
     while True:
+        if not await _gated("books", "xbet", f"xbet {cfg.sport_name}"):
+            continue
         try:
             t0 = time.monotonic()
             odds = await cfg.xbet_fetcher()
@@ -606,7 +664,8 @@ async def _xbet_loop_for_sport(cfg: SportConfig):
             log.exception("xbet %s fetch failed", sport)
             async with _state_lock:
                 _state[sport]["xbet"]["error"] = str(e)[:200]
-        await asyncio.sleep(XBET_POLL_SEC)
+        await _sleep_gated(runtime_config.secs("xbet_poll_sec", XBET_POLL_SEC),
+                           "books", "xbet")
 
 
 async def _extra_book_loop_for_sport(book: str, sport: str):
@@ -621,7 +680,26 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
     if fetcher is None:
         log.info("%s: no fetcher for sport %s — loop not started", book, sport)
         return
+    was_on: bool | None = None
     while True:
+        # Runtime gate (Config tab). Checked BEFORE any work, so an off book
+        # costs one dict lookup per idle tick and nothing else — no fetch, no
+        # parse, no tick write, no ladder-anomaly pass.
+        if not runtime_config.book_on(book):
+            if was_on is not False:
+                log.info("%s %s: OFF (config) — idling", book, sport)
+                was_on = False
+                # Drop the slot's odds so downstream arbs/cross-book can't keep
+                # pricing off a frozen snapshot.
+                async with _state_lock:
+                    _state[sport][book] = _empty_source_state()
+                    _book_anomalies.pop((book, sport), None)
+                    _book_consistency.pop((book, sport), None)
+            await asyncio.sleep(_IDLE_POLL_SEC)
+            continue
+        if was_on is False:
+            log.info("%s %s: ON (config) — resuming polls", book, sport)
+        was_on = True
         try:
             t0 = time.monotonic()
             odds = await fetcher()
@@ -664,7 +742,8 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
             log.exception("%s %s fetch failed", book, sport)
             async with _state_lock:
                 _state[sport][book]["error"] = str(e)[:200]
-        await asyncio.sleep(EXTRA_BOOK_POLL_SEC)
+        await _sleep_gated(runtime_config.secs("extra_book_poll_sec",
+                                               EXTRA_BOOK_POLL_SEC), "books", book)
 
 
 def _snapshot_open_bets_for_sport(sport: str) -> None:
@@ -904,6 +983,8 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
     diagnostics once per cycle when Pin data is available."""
     sport = cfg.sport_name
     while True:
+        if not await _gated("books", "crystalbet", f"crystalbet {cfg.sport_name}"):
+            continue
         try:
             t0 = time.monotonic()
             if CB_USE_SAVED:
@@ -915,7 +996,18 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
                 odds = cfg.cb_parse_html(html, datetime.now(tz=timezone.utc))
                 src_label = "saved HTML"
             else:
-                odds = await cfg.cb_fetcher(headed=not CB_HEADLESS)
+                # Cooperative abort: a full CB soccer expansion runs ~15 min,
+                # so without this, switching CrystalBet off in the Config tab
+                # keeps burning CPU until the in-flight sweep finishes.
+                # 0 = unlimited (default, unchanged behaviour). Anything else
+                # limits ExpandDetail to near-kickoff games; far games keep
+                # their list-view odds so nothing drops off the board.
+                _h = runtime_config.num("limits", "cb_expand_within_hours", 0.0)
+                odds = await cfg.cb_fetcher(
+                    headed=not CB_HEADLESS,
+                    should_continue=lambda: runtime_config.book_on("crystalbet"),
+                    expand_within_hours=(_h if _h > 0 else None),
+                )
                 src_label = "live"
             dt = time.monotonic() - t0
             async with _state_lock:
@@ -954,7 +1046,8 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
                 )
             except Exception:
                 pass
-        await asyncio.sleep(CRYSTALBET_POLL_SEC)
+        await _sleep_gated(runtime_config.secs("crystalbet_poll_sec", CRYSTALBET_POLL_SEC),
+                           "books", "crystalbet")
 
 
 # ── Anomaly scanner (Phase 6) ─────────────────────────────────────────────────
@@ -1041,7 +1134,7 @@ async def _compute_anomalies() -> bool:
         _anomalies_error = None
     # Single-poll rule: the CB basketball-favourite soft flags reuse THIS
     # board snapshot (was a second full CB sweep in soft_scan.scan_all).
-    if SOFT_SCAN:
+    if runtime_config.is_on("scans", "soft_scan"):
         try:
             from src import soft_scan as _ss
             global _cb_soft_flags
@@ -1208,18 +1301,31 @@ async def _anomaly_loop():
     # Boot scan ASAP (after a short delay so the per-sport pollers init first),
     # retrying until the first success — otherwise a cold start could leave the
     # tab blank for up to an hour.
+    #
+    # The gate applies here too: this boot scan is a FULL CB expansion, so
+    # skipping it is most of the point of switching the scan off. Without the
+    # check a disabled scanner still paid for one whole sweep per restart.
     await asyncio.sleep(15)
-    ok = await _compute_anomalies()
+    ok = False
     while not ok:
-        await asyncio.sleep(120)
+        if not await _gated("scans", "anomaly", "anomaly scan"):
+            continue
         ok = await _compute_anomalies()
+        if not ok:
+            await asyncio.sleep(120)
 
     while True:
+        if not await _gated("scans", "anomaly", "anomaly scan"):
+            continue
         if ANOMALY_SCAN_AT_MINUTES is not None:
             wait = _seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES)
             log.info("anomaly scan: next run in %.0fs (aligned to minutes %s)",
                      wait, ANOMALY_SCAN_AT_MINUTES)
-            await asyncio.sleep(wait)
+            # Interruptible: the aligned wait can be ~30 min, and switching the
+            # scan off should not have to wait out the slot.
+            await _sleep_gated(wait, "scans", "anomaly")
+            if not runtime_config.is_on("scans", "anomaly"):
+                continue
             ok = await _compute_anomalies()
             if not ok:
                 # transient fail at the aligned slot — one quick retry instead
@@ -1227,7 +1333,10 @@ async def _anomaly_loop():
                 await asyncio.sleep(120)
                 await _compute_anomalies()
         else:
-            await asyncio.sleep(ANOMALY_SCAN_SEC)
+            await _sleep_gated(runtime_config.secs("anomaly_scan_sec", ANOMALY_SCAN_SEC),
+                               "scans", "anomaly")
+            if not runtime_config.is_on("scans", "anomaly"):
+                continue
             await _compute_anomalies()
 
 
@@ -1270,6 +1379,8 @@ async def _anomaly_extra_loop():
     log.info("extra anomaly scan ENABLED — %s every %ds", sports, ANOMALY_EXTRA_SEC)
     await asyncio.sleep(60)          # let the main pollers warm first
     while True:
+        if not await _gated("scans", "anomaly_extra", "anomaly extra scan"):
+            continue
         for sport in sports:
             try:
                 odds = await fetch_crystalbet_anomaly_ladders(
@@ -1282,7 +1393,8 @@ async def _anomaly_extra_loop():
                     [_consistency_to_dict(f) for f in find_consistency_flags(odds)],
                     _extra_anom_consistency.get(sport, []), ts.isoformat())
                 soft: list[dict] = []
-                if SOFT_SCAN and sport == "soccer" and soft_scan_module_enabled():
+                if (runtime_config.is_on("scans", "soft_scan")
+                        and sport == "soccer" and soft_scan_module_enabled()):
                     soft = _ss.scan_cb_odds("soccer", odds)
                 async with _state_lock:
                     _extra_anom_odds[sport] = odds
@@ -1296,7 +1408,8 @@ async def _anomaly_extra_loop():
                 log.exception("extra anomaly scan failed (%s)", sport)
                 async with _state_lock:
                     _extra_anom_error[sport] = str(e)[:200]
-        await asyncio.sleep(ANOMALY_EXTRA_SEC)
+        await _sleep_gated(runtime_config.secs("anomaly_extra_sec", ANOMALY_EXTRA_SEC),
+                           "scans", "anomaly_extra")
 
 
 def soft_scan_module_enabled() -> bool:
@@ -1312,7 +1425,10 @@ async def _anomaly_watch_loop():
     global _anomaly_cb_odds, _recent_anomalies, _recent_consistency
     global _anomaly_watchlist, _anomaly_watch_at
     while True:
-        await asyncio.sleep(ANOMALY_WATCH_SEC)
+        if not await _gated("scans", "anomaly_watch", "anomaly watch"):
+            continue
+        await _sleep_gated(runtime_config.secs("anomaly_watch_sec", ANOMALY_WATCH_SEC),
+                           "scans", "anomaly_watch")
         watch = set(_anomaly_watchlist)
         if not watch:
             continue
@@ -1359,6 +1475,8 @@ async def _betlive_discover_loop():
     global _betlive_watch, _betlive_error, _betlive_energy, _betlive_soft_flags
     await asyncio.sleep(20)   # let the cheap pollers init first
     while True:
+        if not await _gated("scans", "betlive_anomaly", "betlive discover"):
+            continue
         try:
             watch, anomalies, energy, full_events = await asyncio.to_thread(
                 bw.discover, BETLIVE_ANOMALY_SPORT_IDS)
@@ -1370,7 +1488,7 @@ async def _betlive_discover_loop():
             # Single-poll rule: reuse THIS sweep's full ladders for the
             # basketball-favourite soft flags (was a second Betlive sweep in
             # soft_scan.scan_all).
-            if SOFT_SCAN:
+            if runtime_config.is_on("scans", "soft_scan"):
                 try:
                     fresh = _ss.scan_betlive_events("basketball", full_events)
                     ts_iso = datetime.now(tz=timezone.utc).isoformat()
@@ -1386,7 +1504,8 @@ async def _betlive_discover_loop():
             log.exception("betlive discover failed")
             async with _state_lock:
                 _betlive_error = str(e)[:200]
-        await asyncio.sleep(BETLIVE_DISCOVER_SEC)
+        await _sleep_gated(runtime_config.secs("betlive_discover_sec", BETLIVE_DISCOVER_SEC),
+                           "scans", "betlive_anomaly")
 
 
 async def _betlive_watch_loop():
@@ -1397,7 +1516,9 @@ async def _betlive_watch_loop():
     global _betlive_error
     sess = None
     while True:
-        await asyncio.sleep(BETLIVE_WATCH_SEC)
+        if not await _gated("scans", "betlive_anomaly", "betlive watch"):
+            continue
+        await asyncio.sleep(runtime_config.secs("betlive_watch_sec", BETLIVE_WATCH_SEC))
         watch = dict(_betlive_watch)
         if not watch:
             continue
@@ -1425,6 +1546,8 @@ async def _soft_scan_loop():
     stale_max = max(3 * SOFT_SCAN_SEC, 3 * 3600)
     await asyncio.sleep(30)
     while True:
+        if not await _gated("scans", "soft_scan", "soft scan"):
+            continue
         try:
             flags, failed = await asyncio.to_thread(soft_scan.scan_all)
             ts = datetime.now(tz=timezone.utc)
@@ -1449,7 +1572,8 @@ async def _soft_scan_loop():
             log.exception("soft_scan sweep failed")
             async with _state_lock:
                 _soft_scan_error = str(e)[:200]
-        await asyncio.sleep(SOFT_SCAN_SEC)
+        await _sleep_gated(runtime_config.secs("soft_scan_sec", SOFT_SCAN_SEC),
+                           "scans", "soft_scan")
 
 
 def _carry_stale_flags(prev: list[dict], fresh: list[dict], failed: set,
@@ -1620,36 +1744,23 @@ async def lifespan(app: FastAPI):
                 _extra_book_loop_for_sport(book, cfg.sport_name),
                 name=f"{book}_loop_{cfg.sport_name}",
             ))
-        if XBET and cfg.xbet_fetcher is not None:
+        if cfg.xbet_fetcher is not None:
             tasks.append(asyncio.create_task(
                 _xbet_loop_for_sport(cfg), name=f"xbet_loop_{cfg.sport_name}",
             ))
-    if EXTRA_BOOKS:
-        log.info("extra books ENABLED: %s (poll %ds)", ", ".join(EXTRA_BOOKS),
-                 EXTRA_BOOK_POLL_SEC)
-    if XBET:
-        log.info("1xbet reference ENABLED (poll %ds) — 1xbet Arbs + 1xbet Moves tabs",
-                 XBET_POLL_SEC)
-    if ANOMALY_SCAN:
-        tasks.append(asyncio.create_task(_anomaly_loop(), name="anomaly_loop"))
-        tasks.append(asyncio.create_task(_anomaly_extra_loop(), name="anomaly_extra_loop"))
-        log.info(
-            "anomaly scanner ENABLED — full-detail basketball scan every %ds",
-            ANOMALY_SCAN_SEC,
-        )
-        if ANOMALY_WATCH_SEC > 0:
-            tasks.append(asyncio.create_task(_anomaly_watch_loop(), name="anomaly_watch_loop"))
-            log.info("anomaly watch loop ENABLED — flagged games re-scanned every %ds",
-                     ANOMALY_WATCH_SEC)
-    if BETLIVE_ANOMALY:
-        tasks.append(asyncio.create_task(_betlive_discover_loop(), name="betlive_discover_loop"))
-        tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
-        log.info("betlive favourite-flip watch ENABLED — discover/%ds, refreshOdds/%ds, sports=%s",
-                 BETLIVE_DISCOVER_SEC, BETLIVE_WATCH_SEC, BETLIVE_ANOMALY_SPORT_IDS)
-    if SOFT_SCAN:
-        tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
-        log.info("soft-book HT/FT + basketball-favourite sweep ENABLED — every %ds "
-                 "(CB + Betlive + Lider-Bet)", SOFT_SCAN_SEC)
+    # Every loop is spawned unconditionally and gates itself on the runtime
+    # config (Config tab) — that is what makes a toggle take effect without a
+    # restart. An off loop costs one dict lookup per _IDLE_POLL_SEC tick.
+    tasks.append(asyncio.create_task(_anomaly_loop(), name="anomaly_loop"))
+    tasks.append(asyncio.create_task(_anomaly_extra_loop(), name="anomaly_extra_loop"))
+    tasks.append(asyncio.create_task(_anomaly_watch_loop(), name="anomaly_watch_loop"))
+    tasks.append(asyncio.create_task(_betlive_discover_loop(), name="betlive_discover_loop"))
+    tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
+    tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
+    _rc = runtime_config.get()
+    log.info("runtime config — books ON: %s | scans ON: %s (change live at /config.html)",
+             ", ".join(k for k, v in _rc["books"].items() if v) or "none",
+             ", ".join(k for k, v in _rc["scans"].items() if v) or "none")
     try:
         yield
     finally:
@@ -1675,6 +1786,62 @@ async def root() -> RedirectResponse:
 
 
 # ── API endpoints ─────────────────────────────────────────────────────────────
+@app.get("/api/config")
+async def api_config_get() -> dict:
+    """Live runtime config + enough metadata for the Config tab to render it.
+
+    `runtime` reports what each loop is actually doing right now (last fetch
+    age / row count), so the page can show that a switched-off book really did
+    stop rather than just claiming it.
+    """
+    cfg = runtime_config.get()
+    live: dict[str, Any] = {}
+    for book in ("cb", *EXTRA_BOOKS, "xbet"):
+        rows, newest = 0, None
+        for sport in SPORT_NAMES:
+            slot = _state[sport].get(book)
+            if not slot:
+                continue
+            rows += slot["count"]
+            if slot["fetched_at"] and (newest is None or slot["fetched_at"] > newest):
+                newest = slot["fetched_at"]
+        live[book] = {"rows": rows, "age_sec": _age_sec(newest)}
+    return {
+        "config": cfg,
+        "live": live,
+        "meta": {
+            "books": list(runtime_config.BOOKS),
+            "scans": list(runtime_config.SCANS),
+            "cadence_bounds": {k: [v[1], v[2]] for k, v in runtime_config.CADENCES.items()},
+            "limit_bounds": {k: [v[1], v[2]] for k, v in runtime_config.LIMITS.items()},
+            "idle_poll_sec": _IDLE_POLL_SEC,
+            "sport_names": list(SPORT_NAMES),
+        },
+    }
+
+
+@app.post("/api/config")
+async def api_config_set(payload: dict) -> dict:
+    """Partial update, e.g. {"books": {"setanta": false}}. Takes effect on each
+    loop's next tick (<= _IDLE_POLL_SEC for an idle loop, or the end of the
+    current cycle for a running one)."""
+    from fastapi import HTTPException
+    try:
+        cfg = runtime_config.update(payload or {})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    log.info("runtime config updated via API: %s", payload)
+    return {"ok": True, "config": cfg}
+
+
+@app.post("/api/config/reset")
+async def api_config_reset() -> dict:
+    """Back to the env-seeded defaults."""
+    cfg = runtime_config.reset()
+    log.info("runtime config reset to env defaults")
+    return {"ok": True, "config": cfg}
+
+
 @app.get("/api/status")
 async def api_status() -> dict:
     """Diagnostic snapshot — per-sport counts, last-update timestamps, errors."""
@@ -1696,7 +1863,8 @@ async def api_status() -> dict:
                 "error":      pin["error"],
             },
         }
-        for extra in (*EXTRA_BOOKS, *(("xbet",) if XBET else ())):
+        for extra in (*enabled_extra_books(),
+                      *(("xbet",) if runtime_config.book_on("xbet") else ())):
             slot = _state[sport].get(extra)
             if slot is not None:
                 sports_status[sport][extra] = {
@@ -1820,10 +1988,16 @@ async def api_anomalies(
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
-        "enabled": ANOMALY_SCAN or BETLIVE_ANOMALY or SOFT_SCAN,
+        # Read the LIVE config, not the boot env: the Config tab can switch
+        # these on/off at runtime, and reporting the env value made the tab say
+        # "off" while the scan was actually running (and vice versa).
+        "enabled": (runtime_config.is_on("scans", "anomaly")
+                    or runtime_config.is_on("scans", "anomaly_extra")
+                    or runtime_config.is_on("scans", "betlive_anomaly")
+                    or runtime_config.is_on("scans", "soft_scan")),
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "cb_fetched_at": _anomalies_cb_fetched_at.isoformat() if _anomalies_cb_fetched_at else None,
-        "scan_sec": ANOMALY_SCAN_SEC,
+        "scan_sec": runtime_config.secs("anomaly_scan_sec", ANOMALY_SCAN_SEC),
         "at_minutes": ANOMALY_SCAN_AT_MINUTES,
         "next_scan_in_sec": (
             round(_seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES))
@@ -1832,20 +2006,20 @@ async def api_anomalies(
         "error": _anomalies_error,
         "coverage": _anomaly_coverage,
         "watch_count": len(_anomaly_watchlist),
-        "watch_sec": ANOMALY_WATCH_SEC,
+        "watch_sec": runtime_config.secs("anomaly_watch_sec", ANOMALY_WATCH_SEC),
         "watch_at": _anomaly_watch_at.isoformat() if _anomaly_watch_at else None,
         "betlive": {
-            "enabled": BETLIVE_ANOMALY,
+            "enabled": runtime_config.is_on("scans", "betlive_anomaly"),
             "watching": len(_betlive_watch),
             "flips": len(_betlive_consistency),
             "computed_at": _betlive_computed_at.isoformat() if _betlive_computed_at else None,
-            "watch_sec": BETLIVE_WATCH_SEC,
-            "discover_sec": BETLIVE_DISCOVER_SEC,
+            "watch_sec": runtime_config.secs("betlive_watch_sec", BETLIVE_WATCH_SEC),
+            "discover_sec": runtime_config.secs("betlive_discover_sec", BETLIVE_DISCOVER_SEC),
             "error": _betlive_error,
         },
         "extra": {
             "sports": sorted(_extra_anomalies.keys()),
-            "scan_sec": ANOMALY_EXTRA_SEC,
+            "scan_sec": runtime_config.secs("anomaly_extra_sec", ANOMALY_EXTRA_SEC),
             "computed_at": dict(_extra_anom_at),
             "errors": dict(_extra_anom_error),
         },
@@ -1863,7 +2037,9 @@ async def api_anomalies_status() -> dict:
     that /api/anomalies does. Lets alerts.js poll every 30s on every page
     without paying the full re-match cost."""
     return {
-        "enabled": ANOMALY_SCAN or BETLIVE_ANOMALY,
+        "enabled": (runtime_config.is_on("scans", "anomaly")
+                    or runtime_config.is_on("scans", "anomaly_extra")
+                    or runtime_config.is_on("scans", "betlive_anomaly")),
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "next_scan_in_sec": (
             round(_seconds_until_minutes(ANOMALY_SCAN_AT_MINUTES))
@@ -1914,7 +2090,7 @@ async def api_opportunities(
     """
     ref = ref if isinstance(ref, str) and ref in ("pin", "xbet") else "pin"
     # 1xbet is a reference, never a soft book to price against itself.
-    books = [b for b in SOFT_BOOKS if b != ref]
+    books = [b for b in enabled_soft_books() if b != ref]
     if isinstance(book, str) and book and book != "all":
         books = [book] if book in books else []
     all_opps: list[dict] = []
@@ -1957,7 +2133,7 @@ def _cross_book_arbs_for_sport(sport: str, min_edge_pct: float) -> list[dict]:
 
     # side -> best {book, odds, ...} per market group
     groups: dict[tuple, dict[str, dict]] = defaultdict(dict)
-    for book in SOFT_BOOKS:
+    for book in enabled_soft_books():
         for o in _state[sport].get(book, {}).get("odds") or []:
             if not o.sr_match_id:
                 continue
@@ -2053,7 +2229,7 @@ def _cross_book_for_sport(sport: str, min_edge: float, kind: str | None) -> list
     sr_of_pin: dict[str, str] = {}          # pin_event_id -> sr_match_id
     cb_opps: list = []
     if pin_odds:
-        for bk in SOFT_BOOKS:
+        for bk in enabled_soft_books():
             bk_odds = _state[sport].get(bk, {}).get("odds")
             if not bk_odds:
                 continue
@@ -2071,7 +2247,7 @@ def _cross_book_for_sport(sport: str, min_edge: float, kind: str | None) -> list
     #    fixtures, Pinnacle-matched or not). base key = the market identity.
     table: dict[tuple, dict[str, dict[str, float]]] = {}   # base -> side -> {book: odds}
     meta: dict[str, dict] = {}                              # sr -> display meta
-    for bk in SOFT_BOOKS:
+    for bk in enabled_soft_books():
         for od in _state[sport].get(bk, {}).get("odds") or []:
             if not od.sr_match_id:
                 continue
@@ -2371,8 +2547,10 @@ def _bet_to_dict(bet: dict) -> dict:
 @app.get("/api/bets")
 async def api_list_bets(
     status: str | None = Query(None, description="open | settled | won | lost | pushed | void | all"),
+    since: str | None = Query(None, description="ISO date/ts — only bets PLACED on or after"),
+    until: str | None = Query(None, description="ISO date/ts — only bets PLACED on or before (a bare date is inclusive)"),
 ) -> list[dict]:
-    rows = bets.list_bets(status=status)
+    rows = bets.list_bets(status=status, since=since, until=until)
     return [_bet_to_dict(r) for r in rows]
 
 
@@ -2568,12 +2746,16 @@ async def api_chart(
 async def api_capital(
     days: int | None = Query(None, ge=1, le=3650,
                              description="Performance lookback window (days); omit for all-time"),
+    since: str | None = Query(None, description="ISO date/ts — explicit window start (overrides `days`)"),
 ) -> dict:
     """Per-account balances + totals + cumulative settled-PnL curve.
+
     `days` windows the performance stats (settled PnL / yield / ROI / curve);
-    balances stay all-time."""
-    since = None
-    if days is not None:
+    balances stay all-time. `since` is the explicit form used by the bets page's
+    date filter and takes precedence, so the P&L block reads against exactly the
+    same window as the bets table — otherwise "filter to a fresh date" would
+    show zero bets next to a lifetime P&L."""
+    if since is None and days is not None:
         since = (datetime.now(tz=timezone.utc) - timedelta(days=days)) \
             .isoformat(timespec="seconds")
     return capital.capital_summary(since=since)

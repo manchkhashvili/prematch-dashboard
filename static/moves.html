@@ -29,6 +29,7 @@
       <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
+      <a href="/config.html">Config</a>
     </nav>
     <div class="status" id="status">
       <span id="cb-status">CB —</span>
@@ -163,7 +164,6 @@ function sportPrefix(s) {
   if (s === "basketball") return "bb";
   if (s === "soccer")     return "sc";
   if (s === "tennis")     return "tn";
-  if (s === "mma")        return "mma";
   return s.slice(0, 2);
 }
 function buildSourceStatus(label, sports, source, staleThresholdSec) {

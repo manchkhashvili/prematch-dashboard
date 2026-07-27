@@ -1,0 +1,176 @@
+[
+ [
+  "17630437",
+  {
+   "sport": "B",
+   "categoryId": "68277c5a9ba44cca95e344942619cb1e",
+   "tournamentId": "a155d61c20aa4ed0a876f9331b04ee2b",
+   "type": 0,
+   "startTime": 1785290400,
+   "stage": 1,
+   "name": "Las Vegas Aces (w) - Portland Fire (w)",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "211",
+     "name": "Las Vegas Aces (w)",
+     "slug": "las-vegas-aces-w",
+     "shortName": null,
+     "extraData": null
+    },
+    {
+     "id": "1695579",
+     "name": "Portland Fire (w)",
+     "slug": "portland-fire-w",
+     "shortName": null,
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 15,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "WNBA",
+   "tournamentName": "Regular season",
+   "countryCode": "WNBA",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 26,
+   "regulation": null,
+   "slug": "las-vegas-aces-w-portland-fire-w",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": false,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ],
+ [
+  "17630438",
+  {
+   "sport": "B",
+   "categoryId": "68277c5a9ba44cca95e344942619cb1e",
+   "tournamentId": "a155d61c20aa4ed0a876f9331b04ee2b",
+   "type": 0,
+   "startTime": 1785290400,
+   "stage": 1,
+   "name": "Los Angeles Sparks (w) - New York Liberty (w)",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "972",
+     "name": "Los Angeles Sparks (w)",
+     "slug": "los-angeles-sparks-w",
+     "shortName": null,
+     "extraData": null
+    },
+    {
+     "id": "889",
+     "name": "New York Liberty (w)",
+     "slug": "new-york-liberty-w",
+     "shortName": null,
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 15,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "WNBA",
+   "tournamentName": "Regular season",
+   "countryCode": "WNBA",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 26,
+   "regulation": null,
+   "slug": "los-angeles-sparks-w-new-york-liberty-w",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": false,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ],
+ [
+  "17643734",
+  {
+   "sport": "B",
+   "categoryId": "68277c5a9ba44cca95e344942619cb1e",
+   "tournamentId": "a155d61c20aa4ed0a876f9331b04ee2b",
+   "type": 0,
+   "startTime": 1785369600,
+   "stage": 1,
+   "name": "Dallas Wings (w) - Atlanta Dream (w)",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "1480",
+     "name": "Dallas Wings (w)",
+     "slug": "dallas-wings-w",
+     "shortName": null,
+     "extraData": null
+    },
+    {
+     "id": "494",
+     "name": "Atlanta Dream (w)",
+     "slug": "atlanta-dream-w",
+     "shortName": null,
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 15,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "WNBA",
+   "tournamentName": "Regular season",
+   "countryCode": "WNBA",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 26,
+   "regulation": null,
+   "slug": "dallas-wings-w-atlanta-dream-w",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": false,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ]
+]

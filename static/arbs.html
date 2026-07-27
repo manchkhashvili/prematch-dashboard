@@ -23,6 +23,7 @@
       <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
+      <a href="/config.html">Config</a>
     </nav>
     <div class="status" id="status">
       <span id="cb-status">CB —</span>
@@ -36,11 +37,12 @@
       <span class="chip"    data-kind="+EV">+EV</span>
       <span class="chip"    data-kind="ARB">ARB</span>
     </div>
-    <div class="chip-group" id="book-filter" title="Which soft book's price vs Pinnacle. Lider/Betlive appear only when enabled (LIDERBET=1 / BETLIVE=1).">
+    <div class="chip-group" id="book-filter" title="Which soft book's price vs Pinnacle. Books appear when switched on under Config → Books (env vars only seed the first run).">
       <span class="chip on" data-book="all">All books</span>
       <span class="chip"    data-book="cb">CB</span>
       <span class="chip"    data-book="liderbet">Lider</span>
       <span class="chip"    data-book="betlive">Betlive</span>
+      <span class="chip"    data-book="setanta">Setanta</span>
     </div>
     <label>
       Min edge %
@@ -51,6 +53,10 @@
       Alert ≥
       <input type="number" id="alert-threshold" value="15" step="1" min="1" />
       %
+    </label>
+    <label title="Rows whose soft-book↔Pinnacle pairing looks unreliable (kickoff far apart, weak name score, or an implausibly large edge). Hidden by default: in a live audit every kickoff-misaligned row and almost every >20% edge was weak. Untick to inspect them — they are also the input for curating team_aliases.yaml.">
+      <input type="checkbox" id="show-weak" />
+      Show weak
     </label>
     <label title="When checked, manually muted rows are hidden entirely instead of dimmed in place.">
       <input type="checkbox" id="hide-muted" />
@@ -244,6 +250,9 @@ function saveKeySet(storageKey, set) {
 let userHighlighted = loadKeySet(HIGHLIGHT_KEY);
 let userMuted       = loadKeySet(MUTED_KEY);
 let hideMuted       = false;
+// Weak rows are hidden by default — see sortedRows(). Persisted so the
+// choice survives a reload, same as the other view toggles.
+let showWeak        = localStorage.getItem("arbsShowWeak") === "1";
 
 const hideMutedInput = document.getElementById("hide-muted");
 // Restore checkbox state across reloads.
@@ -257,6 +266,14 @@ hideMutedInput.addEventListener("change", () => {
   hideMuted = hideMutedInput.checked;
   try { localStorage.setItem("arbs_hide_muted", hideMuted ? "1" : "0"); } catch (e) {}
   render();   // no need to refetch — local state only affects display
+});
+
+const showWeakInput = document.getElementById("show-weak");
+showWeakInput.checked = showWeak;
+showWeakInput.addEventListener("change", () => {
+  showWeak = showWeakInput.checked;
+  try { localStorage.setItem("arbsShowWeak", showWeak ? "1" : "0"); } catch (e) {}
+  render();   // display-only, like hide-muted
 });
 
 function toggleFlag(set, storageKey, key) {
@@ -310,16 +327,40 @@ async function fetchAndRender() {
   }
 }
 
+// Confidence-FIRST ordering (2026-07-26 audit). Sorting by edge alone puts the
+// least trustworthy rows on top: in a live snapshot every one of the 14
+// kickoff-misaligned rows and 7 of the 8 edges above 20 % were `weak`, while the
+// rows that survived scrutiny sat at a 1.9 % median. Rank by confidence tier,
+// then by edge inside the tier, so the top of the table is the part you can act
+// on. `weak` is hidden behind a toggle rather than deleted — it is still the
+// input to curating team_aliases.yaml.
+const CONF_RANK = { strong: 0, medium: 1, weak: 2 };
+
+function sortedRows() {
+  const rows = showWeak ? cache.slice() : cache.filter(o => (o.confidence || "medium") !== "weak");
+  return rows.sort((a, b) => {
+    const ra = CONF_RANK[a.confidence || "medium"] ?? 1;
+    const rb = CONF_RANK[b.confidence || "medium"] ?? 1;
+    if (ra !== rb) return ra - rb;
+    return (b.edge_pct ?? 0) - (a.edge_pct ?? 0);
+  });
+}
+
 function render() {
   const body = document.getElementById("opps-body");
+  const rows = sortedRows();
+  const hidden = cache.length - rows.length;
   document.getElementById("row-count").textContent =
-    `${cache.length} row${cache.length === 1 ? "" : "s"}`;
-  if (cache.length === 0) {
-    body.innerHTML = `<tr><td colspan="15" class="empty">no opportunities at current threshold</td></tr>`;
+    `${rows.length} row${rows.length === 1 ? "" : "s"}` +
+    (hidden > 0 ? ` (${hidden} weak hidden)` : "");
+  if (rows.length === 0) {
+    body.innerHTML = `<tr><td colspan="15" class="empty">` +
+      (cache.length ? `all ${cache.length} row(s) are weak — tick "show weak" to see them`
+                    : `no opportunities at current threshold`) + `</td></tr>`;
     return;
   }
   if (window.chartCtxReset) chartCtxReset();
-  body.innerHTML = cache.map(o => {
+  body.innerHTML = rows.map(o => {
     const partner = (o.kind === "ARB" && o.arb_partner_side && o.arb_partner_odds)
       ? `<div class="partner">+ Pin ${o.arb_partner_side} @ ${Number(o.arb_partner_odds).toFixed(2)}</div>`
       : "";

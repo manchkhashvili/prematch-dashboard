@@ -21,6 +21,7 @@
       <a href="/anomalies.html" class="active">Anomalies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
+      <a href="/config.html">Config</a>
     </nav>
     <div class="status" id="status">
       <span id="cb-status">CB —</span>
@@ -57,7 +58,7 @@
       <thead>
         <tr>
           <th>Start (UTC)</th>
-          <th title="Which book's ladder is inconsistent (CB / Lider / Crocobet)">Book</th>
+          <th title="Which book's ladder is inconsistent (CB / Lider / Crocobet / Setanta)">Book</th>
           <th>Sport</th>
           <th>League</th>
           <th>Match</th>
@@ -92,7 +93,7 @@
       <thead>
         <tr>
           <th title="When this finding FIRST appeared (persists across scans while it keeps firing)">First seen</th>
-          <th title="Which book contradicts itself (CB / Lider / Crocobet / Betlive / 1xbet)">Book</th>
+          <th title="Which book contradicts itself (CB / Lider / Crocobet / Setanta / Betlive / 1xbet)">Book</th>
           <th>Sport</th>
           <th>Match</th>
           <th>League</th>
@@ -136,7 +137,7 @@ function fmtAge(sec) {
   return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
 }
 function sportPrefix(s) {
-  return ({basketball:"bb", soccer:"sc", tennis:"tn", mma:"mma"})[s] || s.slice(0,2);
+  return ({basketball:"bb", soccer:"sc", tennis:"tn"})[s] || s.slice(0,2);
 }
 function buildSourceStatus(label, sports, source, staleThresholdSec) {
   const parts = []; let anyErr = false, worstAge = 0;
@@ -237,7 +238,8 @@ function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-
 function renderConsistency(flags) {
   const body = document.getElementById("cons-body");
   if (!meta.enabled) {
-    body.innerHTML = `<tr><td colspan="7" class="empty">scanner off</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="7" class="empty">scanner off — enable under `
+      + `<a href="/config.html">Config</a> &rarr; Scans</td></tr>`; return;
   }
   if (!flags.length) {
     body.innerHTML = `<tr><td colspan="9" class="empty">no consistency flags</td></tr>`; return;
@@ -285,8 +287,11 @@ function render() {
     `${rows.length} anomaly${rows.length === 1 ? "" : "ies"}${scanInfo}`;
 
   if (!meta.enabled) {
-    body.innerHTML = `<tr><td colspan="12" class="empty">Anomaly scanner is OFF. Start with `
-      + `<code>ANOMALY_SCAN=1</code> (or add <code>anomalies:on</code> to SPORTS).</td></tr>`;
+    // Switchable at runtime since 2026-07-26 — point at the Config tab rather
+    // than an env var that no longer decides anything after first boot.
+    body.innerHTML = `<tr><td colspan="12" class="empty">Anomaly scanner is OFF — `
+      + `turn it on under <a href="/config.html">Config</a> &rarr; Scans `
+      + `(first scan takes a couple of minutes).</td></tr>`;
     return;
   }
   if (meta.error) {

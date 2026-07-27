@@ -314,27 +314,63 @@ def get_bet(bet_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def list_bets(status: str | None = None) -> list[dict]:
+def _range_sql(since: str | None, until: str | None, prefix: str = " WHERE") -> str:
+    """Build the placed_at range predicate (empty string when unfiltered)."""
+    parts = []
+    if since is not None:
+        parts.append("placed_at >= ?")
+    if until is not None:
+        parts.append("placed_at <= ?")
+    return (prefix + " " + " AND ".join(parts)) if parts else ""
+
+
+def _range_args(since: str | None, until: str | None) -> tuple:
+    if until is not None and len(until) == 10:
+        until = until + "T23:59:59.999999+00:00"
+    return tuple(x for x in (since, until) if x is not None)
+
+
+def list_bets(status: str | None = None, since: str | None = None,
+              until: str | None = None) -> list[dict]:
     """List bets. status=None returns all; 'open' / 'settled' / a specific terminal
-    state ('won','lost','pushed','void') filters accordingly."""
+    state ('won','lost','pushed','void') filters accordingly.
+
+    `since` / `until` are ISO-8601 dates or timestamps filtering on **placed_at**
+    — when the bet was logged, not when the game runs. That is the axis the
+    dashboard's date filter uses: picking a start date should show only the bets
+    you have taken since then, so a fresh window reads zero across the board.
+    Comparison is lexicographic, which is correct for ISO-8601; a bare date like
+    "2026-08-01" therefore includes the whole of that day for `since`, and
+    `until` is made inclusive by extending a bare date to end-of-day.
+    """
+    if until is not None and len(until) == 10:      # bare YYYY-MM-DD → inclusive
+        until = until + "T23:59:59.999999+00:00"
     conn = _require_conn()
     with _conn_lock:
         if status is None or status == "all":
             rows = conn.execute(
-                "SELECT * FROM bets ORDER BY placed_at DESC"
+                "SELECT * FROM bets" + _range_sql(since, until)
+                + " ORDER BY placed_at DESC", _range_args(since, until)
             ).fetchall()
         elif status == "open":
             rows = conn.execute(
-                "SELECT * FROM bets WHERE status = 'open' ORDER BY start_time ASC, placed_at DESC"
+                "SELECT * FROM bets WHERE status = 'open'"
+                + _range_sql(since, until, prefix=" AND")
+                + " ORDER BY start_time ASC, placed_at DESC",
+                _range_args(since, until)
             ).fetchall()
         elif status == "settled":
             rows = conn.execute(
-                "SELECT * FROM bets WHERE status != 'open' ORDER BY settled_at DESC"
+                "SELECT * FROM bets WHERE status != 'open'"
+                + _range_sql(since, until, prefix=" AND")
+                + " ORDER BY settled_at DESC", _range_args(since, until)
             ).fetchall()
         elif status in VALID_STATUSES:
             rows = conn.execute(
-                "SELECT * FROM bets WHERE status = ? ORDER BY settled_at DESC",
-                (status,),
+                "SELECT * FROM bets WHERE status = ?"
+                + _range_sql(since, until, prefix=" AND")
+                + " ORDER BY settled_at DESC",
+                (status, *_range_args(since, until)),
             ).fetchall()
         else:
             raise ValueError(f"unknown status filter {status!r}")

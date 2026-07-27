@@ -4,6 +4,8 @@
 /data/bets.db-wal
 /data/cache/
 /data/unmatched_log.csv
+# Config-tab state — per-deployment operator preference, not source.
+/data/runtime_config.json
 
 # Operational telemetry (regenerated each run)
 /dashboard.log*

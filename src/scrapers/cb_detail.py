@@ -279,9 +279,13 @@ def parse_detail_page(
     first table.game-details found anywhere on the page — convenient for
     one-off captures.
     """
-    from bs4 import BeautifulSoup
+    # `html` may be a string (Playwright transport, saved fixtures) or an
+    # already-parsed html5lib soup (browser-free transport — see
+    # cb_http.normalize_soup). Re-parsing a soup we already built was 33 % of
+    # CB's HTML processing for zero change in output.
+    from src.scrapers.cb_http import as_soup
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = as_soup(html)
     if scope_to_event:
         # Scope: find this game's container, then the detail table within it.
         container = soup.select_one(

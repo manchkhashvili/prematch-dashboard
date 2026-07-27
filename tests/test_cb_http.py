@@ -223,7 +223,9 @@ class TestFetchListHtml:
     def test_returns_games_panel(self, monkeypatch):
         sess, fake = make_warmed(monkeypatch, [LIST_DELTA])
         panel = sess.fetch_list_html()
-        assert "GContainerList" in panel
+        # returns an html5lib soup now (cb_http.normalize_soup) — the parsers
+        # consume it directly instead of re-parsing a serialized string
+        assert panel.select_one("div.GContainerList") is not None
         body = fake.posts[-1]
         hf = "ctl00$ctl00$ContentPlaceHolder1$ContentPlaceHolder2$HiddenFieldUpdateChampionatsParam"
         assert body[hf] == "SelectAllChampionats:17"
@@ -244,7 +246,7 @@ class TestExpandDetail:
     def test_returns_panels_and_collapses(self, monkeypatch):
         sess, fake = make_warmed(monkeypatch, [EXPAND_DELTA, COLLAPSE_DELTA])
         blob = sess.expand_detail_html("42")
-        assert "game-details" in blob
+        assert blob.select_one("table.game-details") is not None
         expand_body, collapse_body = fake.posts[-2], fake.posts[-1]
         assert expand_body["__EVENTARGUMENT"] == "ExpandDetail:42"
         assert collapse_body["__EVENTARGUMENT"] == "CollapseDetail:42"
@@ -264,7 +266,7 @@ class TestExpandDetail:
 
         sess._post = flaky
         blob = sess.expand_detail_html("42")
-        assert "game-details" in blob
+        assert blob.select_one("table.game-details") is not None
 
 
 # ── Module-level wrappers ─────────────────────────────────────────────────────
@@ -277,7 +279,7 @@ class TestModuleWrappers:
         fake = FakeSession([ENGLISH_PAGE, SPORT_DELTA, LIST_DELTA])
         monkeypatch.setattr("curl_cffi.requests.Session", lambda *a, **kw: fake)
         panel = asyncio.run(cb_http.fetch_list_html(17))
-        assert "GContainerList" in panel
+        assert panel.select_one("div.GContainerList") is not None
 
     def test_expand_requires_warm_session(self):
         with pytest.raises(RuntimeError, match="not warmed"):
