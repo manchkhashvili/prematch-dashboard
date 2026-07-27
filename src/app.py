@@ -2747,6 +2747,10 @@ async def api_capital(
     days: int | None = Query(None, ge=1, le=3650,
                              description="Performance lookback window (days); omit for all-time"),
     since: str | None = Query(None, description="ISO date/ts — explicit window start (overrides `days`)"),
+    until: str | None = Query(None, description="ISO date/ts — explicit window end"),
+    mode: str = Query("pnl", pattern="^(pnl|fresh)$",
+                      description="pnl = window bets only (money stays all-time); "
+                                  "fresh = window bets AND ledger, so an empty period reads all zeros"),
 ) -> dict:
     """Per-account balances + totals + cumulative settled-PnL curve.
 
@@ -2758,7 +2762,9 @@ async def api_capital(
     if since is None and days is not None:
         since = (datetime.now(tz=timezone.utc) - timedelta(days=days)) \
             .isoformat(timespec="seconds")
-    return capital.capital_summary(since=since)
+    if until is not None and len(until) == 10:      # bare date → inclusive day
+        until = until + "T23:59:59.999999+00:00"
+    return capital.capital_summary(since=since, until=until, mode=mode)
 
 
 @app.post("/api/capital/accounts")

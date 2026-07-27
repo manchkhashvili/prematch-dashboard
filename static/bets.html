@@ -120,6 +120,10 @@
     .bets-daterange input[type=date] {
       font-size: 12px; padding: 2px 6px;
     }
+    .bets-daterange .range-mode {
+      margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--border);
+      display: inline-flex; gap: 4px;
+    }
     .bets-summary {
       padding: 10px 18px 4px;
       font-size: 12px;
@@ -420,6 +424,10 @@
     <button class="chip-btn" id="bets-range-today">Today</button>
     <button class="chip-btn" id="bets-range-month">This month</button>
     <button class="chip-btn on" id="bets-range-clear">All time</button>
+    <span class="range-mode" title="What the date window applies to.&#10;&#10;PnL — bets only. Settled PnL, yield, ROI and turnover use the window; the money columns (opening, ledger net, balances, dividend) stay all-time, because where your cash sits does not depend on the dates you are viewing.&#10;&#10;Start fresh — bets AND ledger transactions. Every figure comes only from events inside the window, so a new period reads zero everywhere including balances and the per-account rows. Nothing is deleted; clear the filter and the full picture returns.">
+      <button class="chip-btn on" id="mode-pnl">PnL</button>
+      <button class="chip-btn" id="mode-fresh">Start fresh</button>
+    </span>
   </div>
   <div class="bets-summary" id="bets-summary"></div>
 
@@ -737,11 +745,17 @@ function legsBlock(b) {
 // under a lifetime P&L. Persisted so the chosen period survives a reload.
 const RANGE_KEY = "bets_date_range_v1";
 let betsSince = "", betsUntil = "";
+// "pnl"  = window bets only, money columns stay all-time (default)
+// "fresh" = window bets AND ledger, so an empty period reads all zeros
+let rangeMode = "pnl";
 
 function loadRange() {
   try {
     const raw = localStorage.getItem(RANGE_KEY);
-    if (raw) { const r = JSON.parse(raw); betsSince = r.since || ""; betsUntil = r.until || ""; }
+    if (raw) {
+      const r = JSON.parse(raw);
+      betsSince = r.since || ""; betsUntil = r.until || ""; rangeMode = r.mode || "pnl";
+    }
   } catch (e) {}
   document.getElementById("bets-since").value = betsSince;
   document.getElementById("bets-until").value = betsUntil;
@@ -749,7 +763,8 @@ function loadRange() {
 }
 
 function saveRange() {
-  try { localStorage.setItem(RANGE_KEY, JSON.stringify({ since: betsSince, until: betsUntil })); }
+  try { localStorage.setItem(RANGE_KEY,
+        JSON.stringify({ since: betsSince, until: betsUntil, mode: rangeMode })); }
   catch (e) {}
 }
 
@@ -763,6 +778,11 @@ function rangeQuery() {
 function markRangePreset() {
   const clear = document.getElementById("bets-range-clear");
   if (clear) clear.classList.toggle("on", !betsSince && !betsUntil);
+  const mp = document.getElementById("mode-pnl"), mf = document.getElementById("mode-fresh");
+  if (mp && mf) {
+    mp.classList.toggle("on", rangeMode === "pnl");
+    mf.classList.toggle("on", rangeMode === "fresh");
+  }
 }
 
 async function applyRange() {
@@ -980,9 +1000,16 @@ async function loadCapital() {
   try {
     // The explicit date filter wins over the 7d/30d/90d chips so both blocks
     // always describe the same period.
-    const capUrl = "/api/capital"
-      + (betsSince ? `?since=${encodeURIComponent(betsSince)}`
-                   : (capWindowDays ? `?days=${capWindowDays}` : ""));
+    let capUrl = "/api/capital";
+    if (betsSince || betsUntil) {
+      const q = [];
+      if (betsSince) q.push("since=" + encodeURIComponent(betsSince));
+      if (betsUntil) q.push("until=" + encodeURIComponent(betsUntil));
+      q.push("mode=" + rangeMode);
+      capUrl += "?" + q.join("&");
+    } else if (capWindowDays) {
+      capUrl += `?days=${capWindowDays}`;
+    }
     const [capR, ledR] = await Promise.all([
       fetch(capUrl), fetch("/api/capital/ledger"),
     ]);
@@ -1004,7 +1031,7 @@ async function loadCapital() {
       <div class="cap-card" id="card-starting" style="cursor:pointer"
            title="Click to set starting capital (adds an 'opening' entry to an account)">
         <div class="v">${fmtMoney(t.starting_capital)}</div>
-        <div class="k">Starting capital${(betsSince || capWindowDays) ? " (period)" : ""} ✎${t.starting_capital ? "" : " — click to set"}</div>
+        <div class="k">Starting capital${(betsSince || betsUntil) ? (rangeMode === "fresh" ? " (fresh)" : " (period)") : (capWindowDays ? " (period)" : "")} ✎${t.starting_capital ? "" : " — click to set"}</div>
       </div>
       <div class="cap-card" title="Settled betting PnL ${fmtMoney(t.settled_pnl)} − withdrawal fees paid ${fmtMoney(t.commission_paid ?? 0)}. The books' withdrawal commission is a real cost, so it's deducted here."><div class="v ${moneyClass((t.net_pnl ?? t.settled_pnl))}">${fmtMoney(t.net_pnl ?? t.settled_pnl)}</div><div class="k">PnL − fees</div></div>
       <div class="cap-card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
@@ -1259,6 +1286,12 @@ document.getElementById("bets-range-month").addEventListener("click", () => {
   document.getElementById("bets-since").value = d;
   document.getElementById("bets-until").value = "";
   applyRange();
+});
+document.getElementById("mode-pnl").addEventListener("click", () => {
+  rangeMode = "pnl"; applyRange();
+});
+document.getElementById("mode-fresh").addEventListener("click", () => {
+  rangeMode = "fresh"; applyRange();
 });
 document.getElementById("bets-range-clear").addEventListener("click", () => {
   betsSince = ""; betsUntil = "";

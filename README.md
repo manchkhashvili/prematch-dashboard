@@ -161,10 +161,12 @@ supersedes them when set.
   buttons (Won / Lost / Pushed / Void / Delete). A **date filter** ("Placed
   between", with Today / This month / All time presets) scopes the table *and*
   the Capital & PnL block to the same window, so picking a fresh start date
-  reads zero across both — starting capital re-baselines to your equity at the
-  window start and dividends count only that period. Balances/equity stay
-  current (where the money is now doesn't depend on the dates you're viewing),
-  and nothing is deleted: clear the filter and all history returns.
+  reads zero across both. Two modes sit beside the dates:
+  **PnL** windows bets only (money columns stay all-time and current — "how did
+  my betting do in July"), while **Start fresh** windows bets *and* ledger
+  transactions so an empty period reads zero everywhere, per-account rows
+  included. Both are views: nothing is deleted, and clearing the filter returns
+  the full picture.
 - **`/calc.html`** — devig calculator (Shin or proportional toggle) + +EV
   checker with quarter-Kelly stake suggestion. Inputs persist via
   `localStorage`.
