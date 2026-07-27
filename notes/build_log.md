@@ -4058,3 +4058,44 @@ that is a different, destructive operation — archive the accounts and open new
 ones, or add an explicit "close period" action that writes closing/opening
 ledger entries. Deliberately not done here: it cannot be undone by clearing a
 filter.
+
+---
+
+## 2026-07-27 — two filter modes: "PnL" vs "Start fresh"
+
+The date filter re-baselined starting capital but left TOTAL, the per-account
+table (opening / ledger net / bet PnL / staked / bets) and dividend at all-time
+values — visible in the owner's screenshot with the window active. The ask:
+"I want everything to be 0 ... maybe 2 types of filters, 1 for pnl where there
+is only bets included and another to start fresh, so for bets + transactions".
+
+That framing is exactly right, because "filter by date" genuinely means two
+different questions. `capital_summary(since, until, mode=…)`:
+
+- **`mode="pnl"` (default)** — the window applies to **bets only**. Settled PnL,
+  turnover, yield, ROI and the curve are windowed; the money columns (opening,
+  ledger net, balances, equity, dividend) stay all-time and current. Answers
+  "how did my betting do in July" without pretending the cash moved.
+- **`mode="fresh"`** — the window applies to **bets AND ledger transactions**.
+  `entries` and `all_bets` are filtered up front (ledger by `ts`, bets by
+  `placed_at` — the same axis the bets table uses, so the two agree), so every
+  downstream figure derives only from in-window events. An empty period reads
+  zero across the whole page, per-account rows included.
+
+Verified on the real 5-account / 98-bet DB with the screenshot's window
+(`since=2026-07-27`):
+
+    ALL TIME      equity 9398.94  starting 8400.00  pnl 6342.50  staked 33346.47
+    PnL mode      equity 9398.94  starting 9398.94  pnl    0.00  staked 33346.47
+    START FRESH   equity    0.00  starting    0.00  pnl    0.00  staked     0.00
+                  ...and every account row 0/0/0/0/0.
+
+Both modes are views — tests assert the all-time summary is byte-identical after
+reading either, and that with no window the two modes return identical totals.
+`mode` is validated server-side (`^(pnl|fresh)$`, bad value → HTTP 422). The UI
+adds a PnL / Start fresh pair beside the date inputs, persisted with the range,
+and labels the card "Starting capital (fresh)" vs "(period)".
+
+Still deliberately NOT done: a destructive close-the-books that writes
+closing/opening ledger entries. "Start fresh" is reversible by clearing the
+filter; that would not be.

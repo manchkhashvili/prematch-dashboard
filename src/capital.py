@@ -416,18 +416,46 @@ def _attribute(bet: dict, tag_to_id: dict[str, int]) -> Optional[int]:
     return tag_to_id.get(bet.get("book"))
 
 
-def capital_summary(since: Optional[str] = None) -> dict:
+def _in_window(ts: Optional[str], since: Optional[str], until: Optional[str]) -> bool:
+    if not ts:
+        return since is None
+    if since is not None and ts < since:
+        return False
+    if until is not None and ts > until:
+        return False
+    return True
+
+
+def capital_summary(since: Optional[str] = None, until: Optional[str] = None,
+                    mode: str = "pnl") -> dict:
     """Everything the capital UI needs in one call: per-account balances,
     totals, and the cumulative settled-PnL curve.
 
-    `since` (ISO ts) is a time filter for PERFORMANCE only — settled PnL,
-    turnover, yield, ROI and the curve count only bets settled on/after it.
-    Balances, equity, open exposure and per-account columns stay all-time /
-    current (where the money is now doesn't depend on the lookback window).
+    Two filter MODES, because "filter by date" means two different things:
+
+    `mode="pnl"` (default) — the window applies to **bets only**. Settled PnL,
+    turnover, yield, ROI and the curve count only bets settled in it; the money
+    columns (opening, ledger net, balances, equity, dividend) stay all-time and
+    current, because where your cash sits does not depend on the dates you are
+    viewing. Use this to ask "how did my betting do in July".
+
+    `mode="fresh"` — the window applies to **bets AND ledger transactions**.
+    Every figure is derived only from events inside it, so the period reads as a
+    brand-new book: an empty window shows zeros across the whole page, including
+    balances and per-account rows. Use this to start a new period without
+    deleting anything. Nothing is mutated — clear the window and the full
+    picture returns.
     """
     accounts = list_accounts()
     entries = list_entries()
     all_bets = _bets.list_bets()
+
+    if mode == "fresh" and (since is not None or until is not None):
+        # Ledger entries by when the money moved; bets by when they were PLACED
+        # (the same axis the bets table filters on, so the two agree).
+        entries = [e for e in entries if _in_window(e.get("ts"), since, until)]
+        all_bets = [b for b in all_bets
+                    if _in_window(b.get("placed_at"), since, until)]
 
     tag_to_id = {
         a["book_tag"]: a["id"] for a in accounts
@@ -561,7 +589,7 @@ def capital_summary(since: Optional[str] = None) -> dict:
     # and the all-time view returns unchanged.
     period_opening = None
     period_dividend = dividend_total
-    if since is not None:
+    if since is not None and mode != "fresh":
         work_ids = {r["id"] for r in work}
         flow_in_window = 0.0          # capital moved into/out of working accounts
         for e in entries:

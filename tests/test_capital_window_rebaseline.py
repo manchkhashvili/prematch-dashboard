@@ -94,3 +94,52 @@ def test_windowing_is_a_view_not_a_mutation(seeded):
     capital.capital_summary(since="2027-01-01T00:00:00+00:00")
     after = capital.capital_summary()["totals"]
     assert before == after
+
+
+# ── mode="fresh": bets AND ledger windowed, so an empty period reads all zeros ──
+
+def test_fresh_mode_zeroes_everything_for_an_empty_window(seeded):
+    """The ask: filter to a period with no activity and the WHOLE page reads 0 —
+    balances and per-account rows included, not just performance."""
+    t = capital.capital_summary(since="2027-01-01T00:00:00+00:00", mode="fresh")["totals"]
+    assert t["starting_capital"] == 0
+    assert t["settled_pnl"] == 0
+    assert t["equity"] == 0
+    assert t["open_exposure"] == 0
+    assert t["total_stake"] == 0
+    assert t["dividend_total"] == 0
+
+    rows = capital.capital_summary(since="2027-01-01T00:00:00+00:00", mode="fresh")["accounts"]
+    for r in rows:
+        assert r["opening"] == 0 and r["ledger_net"] == 0 and r["balance"] == 0
+        assert r["n_bets"] == 0 and r["total_stake"] == 0
+
+
+def test_pnl_mode_keeps_the_money_columns(seeded):
+    """The other mode: same empty window, but balances stay real."""
+    t = capital.capital_summary(since="2027-01-01T00:00:00+00:00", mode="pnl")["totals"]
+    assert t["settled_pnl"] == 0          # performance windowed
+    assert t["equity"] > 0                # money is still there
+    assert t["starting_capital"] == pytest.approx(t["equity"], abs=0.01)
+
+
+def test_fresh_mode_counts_only_in_window_activity(seeded):
+    """A window that DOES contain activity reports exactly that activity."""
+    t = capital.capital_summary(since="2026-05-01T00:00:00+00:00", mode="fresh")["totals"]
+    # only the June bet was placed in the window (+100 on a 100 stake)
+    assert t["settled_pnl"] == pytest.approx(100.0, abs=0.01)
+    assert t["total_stake"] == pytest.approx(100.0, abs=0.01)
+    # the January opening entry is outside the window
+    assert t["starting_capital"] == 0
+
+
+def test_fresh_mode_is_still_only_a_view(seeded):
+    before = capital.capital_summary()["totals"]
+    capital.capital_summary(since="2027-01-01T00:00:00+00:00", mode="fresh")
+    assert capital.capital_summary()["totals"] == before
+
+
+def test_unfiltered_fresh_mode_is_identical_to_all_time(seeded):
+    """With no window, the mode must make no difference at all."""
+    assert (capital.capital_summary(mode="fresh")["totals"]
+            == capital.capital_summary(mode="pnl")["totals"])
