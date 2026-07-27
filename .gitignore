@@ -6,6 +6,13 @@
 /data/unmatched_log.csv
 # Config-tab state — per-deployment operator preference, not source.
 /data/runtime_config.json
+# Odds-history store — regenerable runtime state, and it grows to GBs. It was
+# committed by mistake up to 2026-07-27 (1.2-1.4 GB per commit, 8 blobs over
+# GitHub's 100 MB file limit), which silently blocked every push for 11 commits.
+# Purged from history with git-filter-repo; never track it again.
+/data/ticks.db
+/data/ticks.db-shm
+/data/ticks.db-wal
 
 # Operational telemetry (regenerated each run)
 /dashboard.log*
