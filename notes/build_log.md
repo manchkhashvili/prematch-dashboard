@@ -3491,3 +3491,570 @@ pending user go-ahead.
 - Pinnacle's `/leagues/{id}/matchups` response — need to confirm whether
   start_time is in `startTime` (ISO Z) or some other field. Will verify on
   first real call.
+
+---
+
+## 2026-07-26 — Setanta added as the sixth book + CPU profile of a full cycle
+
+**Setanta (`src/scrapers/setanta.py`, `SETANTA=1`)**
+
+No REST odds endpoint exists — odds ride a SignalR/MessagePack websocket
+(`wss://sport-iframe.ukyuku.xyz/direct-feed/feed`). Protocol, energy numbers
+and gotchas: `docs/setanta.md`. Probe: `scripts/probe_setanta.py`.
+
+Market map verified through the `docs/market-mapping-principles.md` gate —
+devigged (Shin) fair probabilities vs **Pinnacle**, live matched fixtures,
+corners/bookings excluded from the reference side:
+
+| Sport | Markets | n | median gap | p90 |
+|---|---|---|---|---|
+| soccer | ML/total/spread/team_total, FT+H1 | 4 957 | **0.29–0.99pp** | ≤2.05pp |
+| basketball | ML(incl OT)/total/spread, FT+H1 | 112 | **0.25–0.67pp** | ≤1.89pp |
+| tennis | ML/total/spread FT | 566 | **0.40–0.77pp** | ≤2.04pp |
+
+All PASS (gate is ≤3pp). Orientation separately confirmed against Lider-Bet:
+219 shared soccer fixtures, **0 reversed**, favourite side agreed 217/219.
+
+Three traps caught during integration, all now in the docstring + tests:
+1. `subPeriod` is a **minute window**, not a sub-market — `(period=1,
+   subPeriod=15)` is "first 15 minutes" (draw 1.22 vs the real H1's 1.94).
+   Emitting it as H1 produced 130 %+ phantom edges; 271 "opportunities"
+   collapsed to 53 once it was required null.
+2. Basketball `period` 1..4 are **quarters**; H1 is `4010`.
+3. Basketball moneyline is `marketType` **145** ("to win including overtime").
+   `marketType` 2 for basketball is the REGULATION 3-way — using it would
+   mis-pair against every other book.
+
+**CPU profile of one full soccer cycle** (4 soft books + Pinnacle, no CB):
+11.89 s CPU — matching **64 %**, scrape/parse 32 %, edge 4 %. Matching costs
+~1.9 s per book *regardless of book size* (betlive's 902 odds cost the same as
+crocobet's 12 197) because it is an event cross-product against Pinnacle's
+board. Measured on Lider: 895 × 532 = 476 140 pairs fuzzy-scored, of which only
+15 205 are within the ±1 h `_accept` window — **96.8 % of the scoring is
+provably wasted**.
+
+**CrystalBet dwarfs all of it.** Cold soccer sweep: 105.9 s CPU in 240 s wall,
+having processed only 400/1050 games (≈278 s CPU for a full cold pass). The
+burn is html5lib tokenizing + bs4 tree-building (`_tokenizer` 15.5 s cum,
+`bs4.element.decode` 9.7 s cum over just 123 calls in a 120 s window). This is
+the cold-start worst case — production's change-cache re-expands only moved
+games (`cached=0` in this run because it was cold).
+
+Board horizon (soccer, 2026-07-26): only **39 % of Setanta's 854 events and
+50 % of Pinnacle's 534 start within 24 h**; 47 %/59 % within 72 h. So a 3-day
+horizon would drop ~53 % of CB's expansion work and ~72 % of matcher pairs —
+but for the matcher, bucketing candidates by kickoff is strictly better (same
+result, no coverage lost).
+
+---
+
+## 2026-07-26 (later) — Config tab: runtime on/off for books, scans, cadences
+
+`src/runtime_config.py` + `/config.html` + `/api/config`. Every knob that used
+to be an env var read once at import is now live; the poll loops re-read it at
+the top of each iteration.
+
+Design: **env seeds, the saved file rules.** `data/runtime_config.json` wins
+over env once written, so an existing deployment is byte-identical in behaviour
+until someone actually changes something. Writes are validated (unknown keys
+rejected, cadences clamped — a 0 s poll would hammer a book into rate-limiting).
+
+Mechanics worth remembering:
+- Every loop is now spawned **unconditionally** and self-gates. Previously a
+  loop only existed if its env flag was set at boot, so nothing could be
+  switched on later.
+- `_empty_sport_state()` allocates a slot for every provisioned source, not
+  just the enabled ones — a book being switched on needs a slot waiting.
+- Switching a book off **clears its state slot** so arbs/cross-book can't keep
+  pricing off a frozen snapshot.
+- Read sites go through `enabled_soft_books()` / `enabled_extra_books()`; the
+  two cross-book test fixtures now declare their books ON explicitly.
+
+Two bugs this shook out, both found by running the app rather than the tests:
+1. **`_anomaly_loop` did a boot scan *before* its `while True:`** — so a
+   switched-off scanner still paid for one full CB expansion on every restart,
+   which is most of what you're trying to avoid. Gated.
+2. **Long sleeps made toggles feel broken.** A book on a 150 s cadence kept its
+   odds on screen for up to a full cycle after being switched off. Added
+   `_sleep_gated()`, which sleeps in `_IDLE_POLL_SEC` slices and returns early
+   when the gate flips. Toggle → cleared now measured at ~12 s (bounded by the
+   slice, not the cadence). The aligned anomaly wait (up to ~30 min) got the
+   same treatment.
+
+Live verification (`CB_TRANSPORT=http SETANTA=1 LIDERBET=1 CROCOBET=1
+SPORTS=soccer`): boot scan suppressed (0 scans with scans off), toggle off →
+`setanta rows 11 029 → 0` in ~12 s, toggle on → resumes, bad key → HTTP 400,
+`pinnacle_poll_sec: 1` → clamped to 15.
+
+**Live full-app run, 2026-07-26 (what the Config tab actually buys)**
+
+Observed with `SPORTS=soccer`, 4 books on, scans off:
+
+| t | process CPU | CB soccer expansion | CB cycles done |
+|---|---|---|---|
+| 3:01 | 2:16 | 200/1051 | 0 |
+| 5:01 | 3:59 | 350/1051 | 0 |
+| 8:01 | 6:12 | 650/1051 | 0 |
+
+- **~77 % of one core, sustained, essentially all of it CrystalBet.** The other
+  four books together are noise: setanta 9.5 s, liderbet 19.3 s, crocobet
+  21.1 s, pinnacle 21.2 s per cycle, each mostly network wait.
+- **CB never completed a single soccer cycle in 8 minutes** (`cb rows=0` the
+  whole run), so CB contributed nothing to arbs while costing everything.
+- **CB starves the other pollers.** crocobet age hit 226 s and setanta 148 s
+  against a 150 s cadence — the html5lib parse is sync CPU on the event loop,
+  so async pollers queue behind it.
+- `_compute_anomalies` is hardcoded to CB **basketball** regardless of
+  `SPORTS=` — with `SPORTS=soccer` the scan still scrapes 47 CB basketball
+  games. Intended (the tab is basketball-ladder-focused) but it means the scan
+  toggle, not `SPORTS`, is what stops that cost.
+
+Cooperative abort added to `_fetch_for_sport(should_continue=...)`: switching
+CrystalBet off mid-sweep now aborts on the next progress boundary
+(`CB soccer expansion ABORTED at 75/1051 games (switched off)`) instead of
+burning up to ~15 min of CPU to finish a sweep nobody wanted.
+
+`tests/conftest.py` now isolates `runtime_config` for the whole suite — without
+it the tests read the developer's real `data/runtime_config.json`, and having
+CrystalBet switched off in the running dashboard made `test_opps_carry_sport_tag`
+fail. Tests must not depend on local operator state.
+
+---
+
+## 2026-07-26 (cont.) — the three CPU levers, measured
+
+### 1. CB parses each panel ONCE (was twice)
+
+`cb_http` normalised every panel with html5lib and returned `str(soup)`, which
+every downstream parser then **re-parsed with html.parser**. Measured on saved
+soccer panels, that serialize + re-parse round trip is **33 % of CB's HTML
+processing** (serialize ~10 %, re-parse ~23 %).
+
+Verified output-identical before changing anything — same Odds set from the soup
+and from its serialization, per sport: soccer 1086/1086, basketball 233/233,
+tennis 902/902, zero diffs. Downstream parse 1183 → 313 ms (soccer).
+
+Now `normalize_soup()` returns the soup, the transport wrappers hand it back,
+and `crystalbet` / `cb_detail` accept either via `cb_http.as_soup()` — so the
+Playwright path, the saved-HTML path and every fixture still work with strings.
+Locked in by `tests/test_cb_soup_passthrough.py`.
+
+Live, like-for-like (soccer-only, 4 books, scans off):
+
+| | elapsed | CPU | games processed | **CPU/game** |
+|---|---|---|---|---|
+| before | 3:01 | 136 s | 200 | 0.68 s |
+| after | 3:31 | 93 s | 325 | **0.29 s** |
+
+The live gain is larger than the isolated 33 %; the string round trip also drove
+allocation the microbenchmark didn't capture. Treat 33 % as the floor and the
+live figure as indicative — cache state and game mix differ between runs.
+
+### 2. Matcher skips pairs it could never accept
+
+Both `_accept` tiers use the same time bound, so any (book, pinnacle) pair whose
+kickoffs are >1 h apart is rejected regardless of score — scoring it is waste.
+On live soccer that was **96.8 %** of the work (476 140 pairs scored, 15 205
+inside the window), and matching was 64 % of a cycle's CPU.
+
+`match_events()` (the hot path — every book, every cycle) now prunes on time
+before scoring. `match_with_diagnostics()` is unchanged and still scores every
+pair, because the curation log reports the best candidate *regardless* of
+threshold — that distinction is why this is free rather than a coverage trade.
+
+Proven on live boards, identical matched sets:
+
+| book | matched | CPU before | after |
+|---|---|---|---|
+| liderbet | 511 = 511 | 2.32 s | **0.44 s** (−81 %) |
+| setanta | 537 = 537 | 2.22 s | **0.43 s** (−81 %) |
+| crocobet | 344 = 344 | 2.37 s | **0.48 s** (−80 %) |
+
+### 3. CB expansion horizon (opt-in)
+
+`expand_within_hours` on `_fetch_for_sport` + `limits.cb_expand_within_hours`
+in the Config tab. Games beyond the horizon keep their **list-view odds** — they
+stay on the board and stay matched, they just don't get an ExpandDetail postback
+until kickoff approaches (Crocobet's DETAIL_HOURS pattern).
+
+**Default 0 = unlimited = today's behaviour**, because trading ladder depth for
+CPU is the operator's call, not a silent default.
+
+Live at 6 h: at 700/1053 games, **587 beyond-horizon vs 99 expanded** — and CB
+finally got through the board instead of never completing a cycle.
+
+---
+
+## 2026-07-26 — dashboard audit: are the opportunities real?
+
+Ran the full dashboard (all 4 sports, 5 soft books + Pinnacle, `CB_TRANSPORT=http`,
+`CB_EXPAND_WITHIN_HOURS=6`, scans off) and audited every +EV/ARB row.
+
+**91 opportunities >= 0.5 %: 63 strong, 8 medium, 20 weak.**
+
+The `confidence` flag earns its keep: **all 14 kickoff-misaligned rows and 7 of
+the 8 edges above 20 % are weak**. What survives (strong + kickoff aligned) has a
+median edge of 1.9 % and a max of 8.7 % — the shape a real soft-vs-sharp
+distribution should have. Cross-book corroboration is the strongest reality
+signal: the same price appearing at liderbet + betlive + crocobet (e.g. Chotebor
+ML home 2.55 vs 2.37 fair) is far more likely genuine than a lone outlier.
+
+### Bug found and FIXED: bare "W" women's suffix (strong-confidence phantom)
+
+Betlive writes women's fixtures as `Boca Juniors W — San Lorenzo de Almagro W` —
+no parentheses, no "Women" in the league — which `_WOMEN_TAG` did not match. As
+with youth tags, `token_set_ratio` treats "boca juniors" as a subset of "boca
+juniors w" and scores **100**, so the WOMEN'S fixture matched the MEN'S Pinnacle
+event (both landed on `pin_event 1632820968`) at **`confidence: strong`**. That
+is the dangerous class — nothing in the UI warns you.
+
+Fix: `has_women_suffix_pair()` requires **both** sides suffixed, because English
+clubs abbreviate Wanderers identically ("Bolton W" faces an unsuffixed
+opponent). Residual false positive (Bolton W vs Wolverhampton W) costs a missed
+match, never a mispriced one. Tests: `tests/test_women_suffix_guard.py`.
+Verified live: rows mentioning a " W" team went 1 -> 0.
+
+### Root cause of the remaining 14 weak rows: Pinnacle's UNTAGGED reserve/U20 fixtures
+
+All 14 are one cluster — 2 El Salvador Primera Division fixtures seen from 3
+books. Pinnacle lists, under **identical names**, two events 3 h apart:
+
+```
+PINNACLE   Aguila v Luis Angel Firpo        -> {21:00, 18:00}
+PINNACLE   Fuerte San Francisco v Platense  -> {21:00, 18:00}
+```
+
+Lider shows what the 18:00 ones are:
+
+```
+Cd Aguila U20 v luis ankhel firpo          18:00
+agila (rez)   v luis ankhel firpo (rez)    18:00     <- "rez" = reserves
+CD Fuerte San Francisco U20 v Platense U20 18:00
+```
+
+So the 18:00 games are **reserve / U20** fixtures that Pinnacle does not tag.
+`_group_by_event` keys on `(home, away, is_women)` with **no time**, so both
+Pinnacle events collapse into one bucket and the senior soft-book fixture is
+priced against the reserve ladder. The youth guard cannot help — it reads names,
+and Pinnacle's names carry no marker. The only signal present is **time**.
+
+**Recommended fix (not applied — event grouping is the matcher's core and
+touches every book and sport):** add a coarse kickoff bucket to the event key,
+so two same-named events 3 h apart cannot merge. `_accept`'s +/-1 h tolerance
+still lets a legitimately matched fixture pair across small schedule
+disagreements; only the *merging* of distinct events stops. This is the same bug
+class as the women's suffix and the youth tags, and it is the last known source
+of phantom ARBs (6 of 9 ARBs in this run).
+
+### Feed health
+
+Clean: pinnacle, liderbet, betlive, crocobet, setanta across soccer/basketball/
+tennis. Expected empties: crocobet tennis (no verified gameType codes — returns
+[] without fetching), CB soccer/tennis on the first cycle (~10 min even with the
+horizon).
+
+**MMA is effectively unserved**: only CB (21 rows) and Pinnacle (2 rows). All
+four extra books return 0 — Setanta has no MMA sport code at all, so its poll is
+a guaranteed no-op every 150 s. Either map MMA per book or drop MMA from
+`SPORTS` and stop paying for those polls.
+
+---
+
+## 2026-07-26 — MMA removed from the pipeline
+
+MMA was costing four soft-book polls per cycle for nothing. Measured in the
+audit run: CB 21 rows, Pinnacle 2 rows, **liderbet / betlive / crocobet /
+setanta all 0**. Setanta has no MMA sport code at all, and 1xbet resolved an MMA
+sport id, enumerated 30 events, then emitted 0 Odds — pure waste.
+
+Removed: the `SportConfig` entry and its imports (`src/app.py`), the per-book
+fetchers (`crystalbet`, `pinnacle`, `xbet`), the sport module
+(`src/scrapers/sports/mma.py`), its parser + CLI flag + saved sample, the
+frontend label maps, and `tests/test_mma_parser.py` (12 tests).
+
+Kept deliberately: the historical protocol facts in `docs/crystalbet.md`
+(CB's sport-ID table) and `docs/pinnacle.md` (MMA market set + a 2026-06-11
+inventory snapshot) — those remain true and are reference material, not config.
+Nothing validates a bet's `sport` against a whitelist, so any historical MMA
+bets still render.
+
+Sports now: basketball, soccer, tennis.
+
+---
+
+## 2026-07-26 — 1xbet audit: TWO real bugs (its H1 markets were corners)
+
+1xbet had never been audited (XBET was off in every earlier run). Enabling it
+surfaced **499 opportunities vs Pinnacle's 34** at the same threshold, with the
+top rows at 996 %, 851 %, 830 % and **402 of 499 sitting in H1**. That
+concentration was the tell.
+
+### Bug 1 — corners sub-game emitted as H1 GOALS totals
+
+`_fetch_event` built `subs = {PN: I}` from the sub-game list. **`PN` is not
+unique.** Raw feed for Sao Bernardo v Ceara (I=738573227):
+
+```
+I=738573228  PN='1st half'  TG=''          <- goals, wanted
+I=739002600  PN='1st half'  TG='Corners'   <- won the dict comprehension
+I=739002601  PN='2nd half'  TG='Corners'
+I=738622993  PN=''          TG='Cards'
+```
+
+A dict keeps the LAST duplicate, so for any fixture whose corners sub-game
+sorted after the goals one we fetched the **corners ladder** and labelled every
+line `(total, H1)` goals — `submarket` is None on all 9 359 rows, so nothing
+distinguished them. Result: an "H1 total" ladder of 2.5–7.5 with over-2.5 at
+**1.032**, colliding with the soft books' real goal totals.
+
+Fix: only take sub-games with an empty `TG` (the plain-statistic ladder). Tagged
+ones (Corners/Cards/Shots/Players' stats) need `submarket` support first.
+Sao Bernardo's H1 totals went 2.5–7.5 -> **0.5–3.5**.
+
+This is precisely the debt `docs/1xbet-into-v1-plan.md` flagged ("verify before
+enabling soccer edges") — the FT verification passed, H1 was never checked
+against a book that prices H1 goals.
+
+### Bug 2 — league specials leaked in as a single 596-row "fixture"
+
+1xbet's outright/specials shelves ship real markets under placeholder competitor
+names. Measured: **596 soccer rows across 18 leagues** (Argentina … Iceland), all
+collapsing into the one event identity `("Home", "Away")` — the matcher saw a
+single 596-row fixture spanning three continents. Dropped at enumeration
+(`_is_placeholder_fixture`). These are the unclassified "outrights/specials"
+Football shelves noted in `docs/1xbet-prematch.md`.
+
+### After both fixes
+
+| | before | after |
+|---|---|---|
+| opportunities vs 1xbet | 499 | **115** |
+| confidence | weak 344 / med 44 / strong 111 | **strong 107 / med 4 / weak 4** |
+| H1 share | 402/499 (81 %) | **13/115 (11 %)** |
+| max edge | **996 %** | **11.1 %** |
+| strong+aligned | — | 105 rows, median 1.18 %, max 9.45 % |
+
+Feed health is fine otherwise: basketball 996 rows, soccer 8 538, tennis 1 626,
+no errors. Note `xbet/pin` row ratios (3.6 / 0.4 / 1.9) — 1xbet is much deeper
+than Pinnacle on basketball and tennis and much thinner on soccer, which is the
+coverage trade the second reference exists for.
+
+## Arbs table reordered + weak toggle
+
+`sortedRows()` ranks by confidence tier first, then edge inside the tier, and
+hides `weak` behind a "Show weak" checkbox (persisted, default off). Row count
+shows "(N weak hidden)" so nothing is silently dropped, and weak rows remain the
+input for curating team_aliases.yaml.
+
+Also gated the audio alert in `static/alerts.js` on confidence — it fired on
+`edge_pct >= threshold` with no confidence check, i.e. it was loudest exactly
+where the data was least reliable.
+
+---
+
+## 2026-07-27 — reserve/U20 event collapse fixed + cross-tab alert dedupe
+
+### Kickoff is now part of the event key
+
+`_group_by_event` keyed on `(home, away, is_women)` with no time, so Pinnacle's
+**untagged reserve / U20 fixtures** merged with the senior game of the same name
+and the senior soft-book line got priced against the reserve ladder (see the
+2026-07-26 audit entry for the El Salvador evidence).
+
+Key is now `(home, away, is_women, kickoff_bucket)` with a **900 s** bucket —
+chosen well below `_accept()`'s ±1 h tolerance, so it can never separate two
+things the matcher would treat as the same fixture, and well above any observed
+intra-source drift.
+
+Verified safe before changing anything: across Pinnacle soccer/basketball,
+Lider, Setanta and Crocobet — **0 of 2 820 name-pairs had more than one kickoff,
+and none mixed a missing kickoff with a real one**, so no legitimate event
+splits. Tests: `tests/test_reserve_fixture_collapse.py` (reproduces the live
+Aguila case, plus drift / missing-kickoff / bucket-boundary cases).
+
+Live effect (all three phantom classes now closed):
+
+| signal | before the three fixes | after |
+|---|---|---|
+| opportunities >= 0.5 % | 84–91 | **48** |
+| confidence | strong 63 / med 8 / weak 20 | **strong 45 / med 2 / weak 1** |
+| kickoff-misaligned rows | 14 | **0** |
+| edges > 20 % | 7–8 | **0** |
+| max edge | 68 % (996 % on the 1xbet ref) | **9.4 %** |
+
+Median surviving edge 1.31 %. Board composition differs day to day so those
+counts are NOT a controlled comparison — see the A/B below, which is.
+
+**Did the fix hide real opportunities? Verified no.** Controlled A/B on one live
+snapshot (soccer + basketball + tennis, 5 books, ~37 k Odds rows), same data,
+only `_time_bucket` toggled — OFF reproduces the pre-fix key exactly:
+
+    matched events : OFF(old)=1778   ON(new)=1778   delta=0
+    opportunities  : OFF(old)=35     ON(new)=35     delta=0
+    LOST: 0    GAINED: 0
+
+So the 91 -> 48 drop was NOT this fix; it was board composition plus the 1xbet
+and women's-suffix fixes. Three further loss paths checked and closed:
+
+1. **Folded submarkets** — Pinnacle attaches corners/bookings to the parent
+   fixture as separate matchupIds. If those carried a different kickoff their
+   markets would split into an unreachable event. Measured: 525 submarket rows,
+   **0** fixtures where the submarket bucket differs from the parent bucket.
+2. **Bucket-boundary straddle** — 4 340 fixtures across all sources, **0** split
+   by the bucket. At 900 s the bucket is 4x finer than `_accept`'s 3 600 s
+   tolerance, so it can never separate what the matcher treats as one fixture.
+3. **Real edges inside a collision** — two tests now assert both directions: a
+   genuine soft-vs-SENIOR edge still surfaces and is priced against the senior
+   ladder (`pin_no_vig` sanity-checked), while the reserve-contaminated phantom
+   is gone.
+
+### Alert sounds no longer multiply across tabs
+
+`alerts.js` runs in every tab with its own in-memory seen-set, so a new
+opportunity made each tab independently decide it was new and play the 2.5 s
+alarm — N tabs, N overlapping alarms. Persisting the seen-set does not help: the
+tabs poll at different offsets and all read "not seen" before any writes.
+
+localStorage has no compare-and-swap, but its writes are synchronous and ordered
+within an origin, so `claimSound(kind)` does write-then-read-back: the last
+writer keeps the key and every other tab reads back a foreign tab id and stays
+silent. The claim is per sound kind (opps / moves / scan) and expires after 6 s,
+so a tab closing mid-claim cannot mute later alerts, and a genuinely new alert in
+the next round still fires.
+
+Verified by simulating five tabs against one shared store: 5 tabs in the same
+round → **1** sound; after the window → 1 again (not permanently muted); the
+three sound kinds independent. Residual race is the microseconds between our own
+write and read-back, versus the seconds-wide window before.
+
+---
+
+## 2026-07-27 — Config tab: scans reported (and partly gated) from the boot env
+
+Reported by the owner: anomaly scans switched ON in the Config tab, but the
+Anomalies tab said "off" and rendered nothing. My fault — when the Config tab
+landed I gated the *loops* on `runtime_config` but left six sites reading the
+module-level env constants:
+
+**Reporting (3)** — `/api/anomalies` and `/api/anomalies/status` returned
+`"enabled": ANOMALY_SCAN or BETLIVE_ANOMALY or SOFT_SCAN`, i.e. the boot env. The
+frontend early-returns on `!meta.enabled`, so the tab printed "scanner off" and
+skipped rendering entirely even while the scan was running. Both symptoms, one
+cause.
+
+**Behavioural (3)** — `if SOFT_SCAN:` still gated the CB basketball-favourite
+flags, the soccer extra-scan soft flags and the Betlive basketball flags, so
+switching `soft_scan` on in the UI did nothing for those paths.
+
+All six now read `runtime_config.is_on("scans", …)`. The reported cadences
+(`scan_sec`, `watch_sec`, `discover_sec`) are live too — they are editable in the
+Config tab, so echoing the boot value was misleading in the same way.
+
+The stale "Start with `ANOMALY_SCAN=1`" hint in `static/anomalies.html` now points
+at Config → Scans, and mentions that the first scan takes a couple of minutes
+(the other half of "not loading" is simply that a cold CB basketball full-detail
+sweep is not instant).
+
+Verified by reproducing the exact scenario — boot with `ANOMALY_SCAN` **unset**,
+then switch it on in the UI:
+
+    scans OFF (env unset)      enabled: False
+    POST /api/config           scans: {anomaly: True, anomaly_extra: True}
+    +8s                        enabled: True   (was still False before the fix)
+    scan completes             computed_at set, 7 anomalies, 75 consistency
+                               flags, coverage 2 952 odds / 28 games / 101
+                               ladders, next_scan_in_sec 720, no errors
+
+**Lesson for the next runtime toggle:** gating the loop is only half the job —
+every `enabled` field an API reports, and every secondary code path that
+piggybacks on the same env flag, has to move with it. Worth grepping for the env
+constant by name rather than trusting that the loops are the only readers.
+
+---
+
+## 2026-07-27 — date filter on bets ("start fresh")
+
+Owner request: filter bets by date so a new period reads zero and you can start
+fresh without deleting history.
+
+**Backend.** `bets.list_bets(status, since, until)` filters on **`placed_at`** —
+when the bet was logged, not when the game runs; that is the axis "what have I
+taken since X" means. Comparison is lexicographic, correct for ISO-8601. A bare
+`until` date is extended to `T23:59:59.999999` so "to 2026-08-01" includes that
+whole day — the off-by-one that would otherwise silently hide a day's bets, and
+the case the tests pin down. `/api/bets` gained `since`/`until`.
+
+**The part that makes "everything 0" true.** Filtering only the table would leave
+an empty bets list sitting under a lifetime P&L. `/api/capital` now takes an
+explicit `since` (precedence over the existing `days` chips) and the page sends
+the same window to both, so the two blocks always describe the same period.
+
+**Frontend.** From/To date inputs plus Today / This month / All time presets, in
+`static/bets.html`. Persisted to localStorage so the chosen period survives a
+reload. The summary line appends "placed <from> → <to>" when a window is active,
+and the empty state says "no bets placed in this window — clear the date filter
+to see all history" rather than the misleading "no bets logged yet".
+
+Verified live against the real 98-bet DB:
+
+    all time                       bets= 98  staked=33346.47
+    since 2026-06-29               bets=  5  staked= 1350.00
+    until 2026-06-29 (inclusive)   bets= 97  staked=33296.47
+    2026-06-29 .. 2026-06-29       bets=  4  staked= 1300.00
+    FUTURE (since 2027-01-01)      bets=  0  staked=    0.00
+
+    capital all time        settled_pnl=6342.5  yield=14.29%  roi=75.51%
+    capital since 06-30     settled_pnl=1859.62 yield=3.16%   roi=22.14%
+    capital FUTURE          settled_pnl=0.0     yield=None    roi=0.0
+
+**Deliberately NOT zeroed: balances/equity.** `capital_summary` windows
+*performance* only (settled PnL, turnover, yield, ROI, curve) — equity stayed
+9 398.94 in every window above. That is existing documented behaviour and it is
+right: where your money is now does not depend on which date range you are
+looking at. Only the performance numbers reset. If the intent was also to
+re-baseline the bankroll, that is a different feature (an opening-balance
+marker) — say so and it is a small addition.
+
+Filtering is a view, not a delete — a test asserts clearing the window brings all
+98 bets back.
+
+---
+
+## 2026-07-27 — "start fresh": the date window now re-baselines capital
+
+Follow-up to the bets date filter. Filtering the bets table alone left the
+Capital & PnL block reporting all-time starting capital and dividends next to an
+empty bets list. `capital_summary(since=…)` now re-baselines the whole period:
+
+- **`starting_capital`** = equity AT the window start, reconstructed backwards
+  from today (current equity − capital moved in the window − PnL in the window).
+  The all-time figure is still exposed as `starting_capital_all_time`.
+- **`dividend_total`** = only what was pulled out DURING the window
+  (`dividend_total_all_time` keeps the lifetime figure).
+- **Balances / equity / open exposure stay CURRENT.** Where the money is now does
+  not depend on which dates you are looking at; zeroing them would misstate the
+  bankroll. This was already the documented contract — it now just applies to a
+  coherent set of period figures.
+
+Verified against the real 98-bet / 5-account DB:
+
+    window              start_cap  settled_pnl  dividend   equity    recon
+    all time              8400.00      6342.50   4000.00  9398.94  -5343.56
+    since 2026-06-29     11905.70      2139.62   4000.00  9398.94  -4646.38
+    since 2026-07-01      8025.70      2019.62      0.00  9398.94   -646.38
+    FUTURE 2027-01-01     9398.94         0.00      0.00  9398.94     0.00
+
+`recon = equity − starting_capital − settled_pnl` is the net capital moved in the
+window, so it is 0 exactly when no money moved — and the FUTURE row (the actual
+"start fresh" case) reconciles to 0.00 with opening = current equity. The
+all-time row is unchanged from before the change.
+
+Nothing is rewritten. A test asserts that reading a window leaves the all-time
+summary byte-identical, and the UI labels the card "Starting capital (period)"
+when a window is active.
+
+**If a HARD reset is ever wanted** (zero the balances too and begin a new book),
+that is a different, destructive operation — archive the accounts and open new
+ones, or add an explicit "close period" action that writes closing/opening
+ledger entries. Deliberately not done here: it cannot be undone by clearing a
+filter.

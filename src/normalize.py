@@ -69,6 +69,29 @@ _WOMEN_TAG = re.compile(
 )
 
 
+# Bare trailing-"W" convention: some books (Betlive) write a women's fixture as
+# "Boca Juniors W — San Lorenzo de Almagro W" with no parentheses and no
+# "Women" in the league, which `_WOMEN_TAG` above does not catch. That let a
+# WOMEN'S fixture match the MEN'S Pinnacle event at fuzzy score 100 (as with the
+# youth tags, token_set_ratio treats "boca juniors" as a subset of "boca juniors
+# w") and produce a **strong-confidence** phantom edge — the dangerous kind,
+# because no flag warns you. Observed live 2026-07-26 on Boca Juniors W vs
+# San Lorenzo W, both books landing on pin_event 1632820968.
+#
+# A blanket trailing-W rule is NOT safe: English clubs abbreviate Wanderers the
+# same way ("Bolton W", "Wycombe W"). Women's fixtures suffix BOTH sides, while
+# "Bolton W" faces an unsuffixed opponent — so require both. The residual false
+# positive (Bolton W vs Wolverhampton W) costs at most a missed match, never a
+# mispriced one.
+_WOMEN_SUFFIX = re.compile(r"(?i)\s(?:w|wom)\.?\s*$")
+
+
+def has_women_suffix_pair(home: str, away: str) -> bool:
+    """True when BOTH team names carry the bare "W" women's suffix."""
+    return bool(home and away
+                and _WOMEN_SUFFIX.search(home) and _WOMEN_SUFFIX.search(away))
+
+
 def has_women_tag(*texts: str) -> bool:
     """True if any string (league and/or team names) marks a WOMEN's competition.
 

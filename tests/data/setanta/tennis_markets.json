@@ -1,0 +1,2318 @@
+[
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 16,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "0",
+         "2"
+        ]
+       },
+       "odd": 252,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 33,
+       "originalOdd": 238
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "1",
+         "2"
+        ]
+       },
+       "odd": 394,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 33,
+       "originalOdd": 367
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "2",
+         "0"
+        ]
+       },
+       "odd": 413,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 33,
+       "originalOdd": 385
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "2",
+         "1"
+        ]
+       },
+       "odd": 531,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 33,
+       "originalOdd": 492
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 5,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    6
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 4,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "3"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 181,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 15,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 189,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 15,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 3,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 6,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 6,
+        "values": []
+       },
+       "odd": 183,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 29,
+       "originalOdd": 182
+      },
+      {
+       "key": {
+        "type": 7,
+        "values": []
+       },
+       "odd": 187,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 29,
+       "originalOdd": 186
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 81,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 5,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "21.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 4,
+        "values": []
+       },
+       "odd": 182,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 29,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 5,
+        "values": []
+       },
+       "odd": 188,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 29,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 2,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 1,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 0,
+        "values": []
+       },
+       "odd": 103,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 28,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 3,
+        "values": []
+       },
+       "odd": 860,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 28,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 1,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 4,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "6.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 199,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 18,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 172,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 18,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 3,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 260,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "-1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 127,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 341,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    },
+    {
+     "key": {
+      "marketParameters": [
+       "1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 101,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 1120,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 1
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 4,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 7,
+   "period": 0,
+   "subPeriod": null,
+   "layout": "1"
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "1",
+       "12.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 37,
+        "values": []
+       },
+       "odd": 249,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 38,
+        "values": []
+       },
+       "odd": 147,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 7,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 5,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "18"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 4,
+        "values": []
+       },
+       "odd": 188,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 17,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 5,
+        "values": []
+       },
+       "odd": 182,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 17,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 2,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 5,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "9.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 4,
+        "values": []
+       },
+       "odd": 196,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 5,
+        "values": []
+       },
+       "odd": 175,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 10,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 260,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "-1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 944,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 102,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    },
+    {
+     "key": {
+      "marketParameters": [
+       "1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 327,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 129,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 1
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 4,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 4,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 187,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 183,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 11,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 4,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "-6.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 176,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 15,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 194,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 15,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 3,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 6,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 6,
+        "values": []
+       },
+       "odd": 171,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": 170
+      },
+      {
+       "key": {
+        "type": 7,
+        "values": []
+       },
+       "odd": 201,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": 200
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 82,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    3,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 6,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 6,
+        "values": []
+       },
+       "odd": 184,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 16,
+       "originalOdd": 183
+      },
+      {
+       "key": {
+        "type": 7,
+        "values": []
+       },
+       "odd": 186,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 16,
+       "originalOdd": 185
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 81,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 1,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 0,
+        "values": []
+       },
+       "odd": 114,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 18,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 3,
+        "values": []
+       },
+       "odd": 487,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 18,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 9,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 4,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "-3.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 212,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 164,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 11,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 5,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "8.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 4,
+        "values": []
+       },
+       "odd": 176,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 5,
+        "values": []
+       },
+       "odd": 194,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 10,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 1,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 0,
+        "values": []
+       },
+       "odd": 214,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 37,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 3,
+        "values": []
+       },
+       "odd": 162,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 37,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 9,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 6,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 6,
+        "values": []
+       },
+       "odd": 168,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 7,
+        "values": []
+       },
+       "odd": 205,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": 204
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 82,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    3,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 7,
+   "period": 0,
+   "subPeriod": null,
+   "layout": "2"
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "2",
+       "12.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 37,
+        "values": []
+       },
+       "odd": 261,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 38,
+        "values": []
+       },
+       "odd": 143,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 7,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 16,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "0",
+         "2"
+        ]
+       },
+       "odd": 1440,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 26,
+       "originalOdd": 1200
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "1",
+         "2"
+        ]
+       },
+       "odd": 2415,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 26,
+       "originalOdd": 2000
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "2",
+         "0"
+        ]
+       },
+       "odd": 134,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 26,
+       "originalOdd": 128
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "2",
+         "1"
+        ]
+       },
+       "odd": 447,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 26,
+       "originalOdd": 385
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 5,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    6
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 7,
+   "period": 0,
+   "subPeriod": null,
+   "layout": "2"
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "2",
+       "12.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 37,
+        "values": []
+       },
+       "odd": 198,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 38,
+        "values": []
+       },
+       "odd": 173,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 7,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 7,
+   "period": 0,
+   "subPeriod": null,
+   "layout": "1"
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "1",
+       "5.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 37,
+        "values": []
+       },
+       "odd": 177,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 1,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 38,
+        "values": []
+       },
+       "odd": 193,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 1,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 7,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 16,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "0",
+         "2"
+        ]
+       },
+       "odd": 135,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 27,
+       "originalOdd": 130
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "1",
+         "2"
+        ]
+       },
+       "odd": 463,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 27,
+       "originalOdd": 405
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "2",
+         "0"
+        ]
+       },
+       "odd": 1231,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 27,
+       "originalOdd": 1050
+      },
+      {
+       "key": {
+        "type": 102,
+        "values": [
+         "2",
+         "1"
+        ]
+       },
+       "odd": 2161,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 27,
+       "originalOdd": 1830
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 5,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    6
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 5,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "8.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 4,
+        "values": []
+       },
+       "odd": 174,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 5,
+        "values": []
+       },
+       "odd": 197,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 10,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 1,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 0,
+        "values": []
+       },
+       "odd": 450,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 27,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 3,
+        "values": []
+       },
+       "odd": 116,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 27,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 9,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 4,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "3.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 163,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 214,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 11,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 6,
+   "period": 1,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 6,
+        "values": []
+       },
+       "odd": 167,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 7,
+        "values": []
+       },
+       "odd": 206,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 7,
+       "originalOdd": 205
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 82,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    3,
+    54
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 6,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 6,
+        "values": []
+       },
+       "odd": 183,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 14,
+       "originalOdd": 182
+      },
+      {
+       "key": {
+        "type": 7,
+        "values": []
+       },
+       "odd": 187,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 14,
+       "originalOdd": 186
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 81,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 260,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "-1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 379,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 29,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 122,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 29,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    },
+    {
+     "key": {
+      "marketParameters": [
+       "1.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 86,
+        "values": []
+       },
+       "odd": 152,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 28,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 87,
+        "values": []
+       },
+       "odd": 234,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 28,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 1
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 4,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    4
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 5,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "17.5"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 4,
+        "values": []
+       },
+       "odd": 179,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 2,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 5,
+        "values": []
+       },
+       "odd": 191,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 2,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 2,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684954",
+   "resultKind": 1,
+   "marketType": 7,
+   "period": 0,
+   "subPeriod": null,
+   "layout": "2"
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "2",
+       "6"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 37,
+        "values": []
+       },
+       "odd": 191,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 38,
+        "values": []
+       },
+       "odd": 179,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 12,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "5b8dbab4056d42038862bf16940a84da",
+   "sortOrder": 7,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 1,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 0,
+        "values": []
+       },
+       "odd": 232,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 51,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 3,
+        "values": []
+       },
+       "odd": 153,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 51,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 1,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17685029",
+   "resultKind": 1,
+   "marketType": 1,
+   "period": 0,
+   "subPeriod": null,
+   "layout": null
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": []
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 0,
+        "values": []
+       },
+       "odd": 748,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 35,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 3,
+        "values": []
+       },
+       "odd": 105,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 35,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "6a5b9db4853a4ae59788c811a1a80c27",
+   "sortOrder": 1,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ],
+ [
+  {
+   "eventId": "17684957",
+   "resultKind": 1,
+   "marketType": 7,
+   "period": 0,
+   "subPeriod": null,
+   "layout": "1"
+  },
+  {
+   "marketItems": [
+    {
+     "key": {
+      "marketParameters": [
+       "1",
+       "12"
+      ]
+     },
+     "outcomes": [
+      {
+       "key": {
+        "type": 37,
+        "values": []
+       },
+       "odd": 199,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      },
+      {
+       "key": {
+        "type": 38,
+        "values": []
+       },
+       "odd": 172,
+       "isFrozen": false,
+       "isRemoved": false,
+       "lineItemId": null,
+       "version": 23,
+       "originalOdd": null
+      }
+     ],
+     "isRemoved": false,
+     "lineItemId": null,
+     "sortOrder": 0
+    }
+   ],
+   "lineItemId": "eaa0f983670e4fae979f070df7715092",
+   "sortOrder": 7,
+   "correlationContext": null,
+   "tabs": [
+    0,
+    1,
+    3
+   ],
+   "isEarlyPayoutAvailable": false
+  }
+ ]
+]

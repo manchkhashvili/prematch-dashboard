@@ -93,6 +93,31 @@ SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboa
 
 ---
 
+## Runtime config (Config tab)
+
+Everything that used to need a restart is switchable at `/config.html`:
+
+| Section | What |
+|---|---|
+| Books | `crystalbet`, `liderbet`, `betlive`, `crocobet`, `setanta`, `xbet` (Pinnacle is the reference — always on) |
+| Scans | `anomaly`, `anomaly_extra`, `anomaly_watch`, `betlive_anomaly`, `soft_scan` |
+| Cadence | per-loop poll intervals, clamped server-side to a safe range |
+| Limits | CB anomaly horizon, Setanta / Crocobet full-ladder horizons |
+
+API: `GET /api/config`, `POST /api/config` (partial, e.g.
+`{"books":{"setanta":false}}`), `POST /api/config/reset`.
+
+**Why it saves real money:** the scans are the expensive part — a cold
+CrystalBet full-detail soccer sweep is ~278 s of CPU (html5lib + bs4). Books
+each cost 0.3–1.4 s CPU per cycle plus their bytes. Switching off what you
+aren't watching stops that work at the source rather than throttling it.
+
+Precedence: `data/runtime_config.json` (written by the UI) wins over env vars;
+env only seeds keys that have never been set. `POST /api/config/reset` drops
+back to the env-seeded defaults.
+
+---
+
 ## Environment variables
 
 | Var                        | Default       | What it does |
@@ -133,12 +158,26 @@ supersedes them when set.
   profit. Only populated when `LIDERBET=1` / `BETLIVE=1` (and/or CB) are on.
 - **`/bets.html`** — placed bets table with live CB-now / Pin-fair-now / edge
   evolution. Inline sparkline of Pin fair over time per open bet. Settle
-  buttons (Won / Lost / Pushed / Void / Delete).
+  buttons (Won / Lost / Pushed / Void / Delete). A **date filter** ("Placed
+  between", with Today / This month / All time presets) scopes the table *and*
+  the Capital & PnL block to the same window, so picking a fresh start date
+  reads zero across both — starting capital re-baselines to your equity at the
+  window start and dividends count only that period. Balances/equity stay
+  current (where the money is now doesn't depend on the dates you're viewing),
+  and nothing is deleted: clear the filter and all history returns.
 - **`/calc.html`** — devig calculator (Shin or proportional toggle) + +EV
   checker with quarter-Kelly stake suggestion. Inputs persist via
   `localStorage`.
 - **`/unmatched.html`** — CB events that didn't match any Pin event +
   their best below-threshold candidate. Useful for curating `team_aliases.yaml`.
+- **`/config.html`** — **live** on/off switches for every soft book and every
+  scan, plus poll cadences and work-horizon limits. Changes apply within ~5 s
+  without a restart: a book you switch off does not fetch, parse, write ticks
+  or run its ladder-anomaly pass, and its odds are cleared so nothing
+  downstream prices off a frozen snapshot. Settings persist to
+  `data/runtime_config.json`; env vars only seed the *initial* values, so an
+  existing deployment behaves exactly as before until you change something.
+  See "Runtime config" below.
 
 ---
 

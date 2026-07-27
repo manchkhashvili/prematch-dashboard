@@ -262,5 +262,7 @@ CB's tennis primary handicap is **games-based**, so:
   the CB side had no team_total classifier — pulling them created phantom
   unpaired rows. Per-sport allow-lists, not a global one.
 - MMA (`sport_id=22`): `{moneyline, total}` only — can't handicap a fight.
+  (Protocol fact retained for reference; MMA was dropped from the dashboard
+  2026-07-26 — only CB and Pinnacle ever served it, and no soft book did.)
   Method-of-victory + go-the-distance props exist as separate market types,
   unused.

@@ -1,0 +1,176 @@
+[
+ [
+  "17567282",
+  {
+   "sport": "F",
+   "categoryId": "4be52dbba8a64dbc89d591ce63e6754c",
+   "tournamentId": "3a33e35fa92a42998146eebadcf31c18",
+   "type": 0,
+   "startTime": 1785436200,
+   "stage": 1,
+   "name": "CFR Cluj - Alashkert",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "19387",
+     "name": "CFR Cluj",
+     "slug": "cfr-cluj",
+     "shortName": null,
+     "extraData": null
+    },
+    {
+     "id": "90887",
+     "name": "Alashkert",
+     "slug": "alashkert",
+     "shortName": "Alashkert",
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 10,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "UEFA Conference League",
+   "tournamentName": "Qualification",
+   "countryCode": "UECL",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 185,
+   "regulation": null,
+   "slug": "cfr-cluj-alashkert",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": true,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ],
+ [
+  "17566621",
+  {
+   "sport": "F",
+   "categoryId": "4be52dbba8a64dbc89d591ce63e6754c",
+   "tournamentId": "3a33e35fa92a42998146eebadcf31c18",
+   "type": 0,
+   "startTime": 1785258000,
+   "stage": 1,
+   "name": "Apollon Limassol - Dila Gori",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "241",
+     "name": "Apollon Limassol",
+     "slug": "apollon-limassol",
+     "shortName": null,
+     "extraData": null
+    },
+    {
+     "id": "75243",
+     "name": "Dila Gori",
+     "slug": "dila-gori",
+     "shortName": "Dila Gori",
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 10,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "UEFA Conference League",
+   "tournamentName": "Qualification",
+   "countryCode": "UECL",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 186,
+   "regulation": null,
+   "slug": "apollon-limassol-dila-gori",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": true,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ],
+ [
+  "17666511",
+  {
+   "sport": "F",
+   "categoryId": "4be52dbba8a64dbc89d591ce63e6754c",
+   "tournamentId": "3a33e35fa92a42998146eebadcf31c18",
+   "type": 0,
+   "startTime": 1785438000,
+   "stage": 1,
+   "name": "Sporting Braga - Zeleznicar Pancevo",
+   "tradingStatus": 1,
+   "status": 0,
+   "competitorType": 2,
+   "competitors": [
+    {
+     "id": "3582",
+     "name": "Sporting Braga",
+     "slug": "sporting-braga",
+     "shortName": null,
+     "extraData": null
+    },
+    {
+     "id": "86683",
+     "name": "Zeleznicar Pancevo",
+     "slug": "zeleznicar-pancevo",
+     "shortName": null,
+     "extraData": null
+    }
+   ],
+   "scoreboard": {
+    "stage": 10,
+    "subStage": null,
+    "timer": null,
+    "scores": [],
+    "note": null,
+    "server": 0,
+    "serverNumber": null,
+    "pointInfos": []
+   },
+   "note": null,
+   "categoryName": "UEFA Conference League",
+   "tournamentName": "Qualification",
+   "countryCode": "UECL",
+   "hasHighlights": false,
+   "hasBetradarMapping": false,
+   "outcomesCount": 183,
+   "regulation": null,
+   "slug": "sporting-braga-zeleznicar-pancevo",
+   "tags": [],
+   "subsport": "",
+   "isCybersport": false,
+   "sortingIndex": null,
+   "isBetBuilderPossible": true,
+   "isEarlyPayoutPossible": false,
+   "isVirtuallyCricketRoulette": false,
+   "isEnhancedPricesPossible": false
+  }
+ ]
+]

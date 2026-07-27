@@ -66,6 +66,47 @@
   }
   let seenKeys = loadSeen();
 
+  // ── Cross-tab sound claim ──────────────────────────────────────────────
+  // Every open tab runs this poller with its OWN in-memory seen-set, so when a
+  // new opportunity appears each tab independently decides it is new and each
+  // plays the 2.5 s alarm — N tabs, N overlapping alarms. Persisting the
+  // seen-set does not fix it: the tabs poll at their own offsets and both read
+  // "not seen" before either writes.
+  //
+  // localStorage has no compare-and-swap, but writes ARE synchronous and
+  // ordered within an origin, so write-then-read-back is an effective claim:
+  // if two tabs race, the last writer wins the key and the other reads back a
+  // different tab id and stays silent. The residual race is the microseconds
+  // between our own write and read-back, versus the seconds-wide window before.
+  //
+  // The claim is scoped per sound kind and expires quickly, so a tab closing
+  // mid-claim cannot mute future alerts.
+  const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const CLAIM_KEY_PREFIX = "alert_sound_claim_v1:";
+  const CLAIM_WINDOW_MS = 6000;
+
+  function claimSound(kind) {
+    const key = CLAIM_KEY_PREFIX + kind;
+    const now = Date.now();
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const prev = JSON.parse(raw);
+        // A fresh claim by ANOTHER tab means it is already sounding for this
+        // poll round — stay quiet. Our own claim does not block us (a genuinely
+        // new alert in the next round should still fire).
+        if (prev && prev.tab !== TAB_ID && now - prev.ts < CLAIM_WINDOW_MS) {
+          return false;
+        }
+      }
+      localStorage.setItem(key, JSON.stringify({ tab: TAB_ID, ts: now }));
+      const after = JSON.parse(localStorage.getItem(key) || "null");
+      return !after || after.tab === TAB_ID;    // lost the write race → silent
+    } catch (e) {
+      return true;      // localStorage unavailable → behave as before
+    }
+  }
+
   // ── Audio (lazy init on first user gesture) ────────────────────────────
   let audioCtx = null;
   function ensureAudio() {
@@ -256,9 +297,18 @@
       // Still track them in seenKeys (so they don't fire when un-muted on
       // the same edge) but never count them toward newAtThreshold.
       const isMuted = mutedKeys.has(betKey(o));
+      // Never ping on a `weak` pairing (2026-07-26 audit). The threshold is a
+      // big edge, and big edges are overwhelmingly weak: in a live snapshot
+      // every kickoff-misaligned row and 7 of the 8 edges above 20 % were weak.
+      // Without this the alert is loudest exactly where it is least reliable.
+      // They still enter seenKeys, so a row that later turns strong at the same
+      // edge doesn't fire retroactively.
+      const isWeak = (o.confidence || "medium") === "weak";
       // Only count for sound-play if at-or-above threshold AND this isn't
-      // the first-ever seed pass AND alerts are enabled AND not muted.
-      if (isNew && o.edge_pct >= threshold && !isFirstEverPoll && enabled && !isMuted) {
+      // the first-ever seed pass AND alerts are enabled AND not muted AND the
+      // pairing is trustworthy.
+      if (isNew && o.edge_pct >= threshold && !isFirstEverPoll && enabled
+          && !isMuted && !isWeak) {
         newAtThreshold++;
       }
     }
@@ -279,7 +329,7 @@
     }
 
     if (newAtThreshold > 0) {
-      playPing();
+      if (claimSound("opps")) playPing();
       // Console hint for the dev console-watcher case.
       try {
         console.log(`[alert] ${newAtThreshold} new opportunity(ies) at ≥ ${threshold}%`);
@@ -332,7 +382,7 @@
       return;
     }
     if (newMoves > 0) {
-      playMoveChime();
+      if (claimSound("moves")) playMoveChime();
       try {
         console.log(`[move-alert] ${newMoves} new move(s) at ≥ ${threshold}pp`);
       } catch (e) {}
@@ -364,7 +414,7 @@
     try { localStorage.setItem(SCAN_SEEN_TS_KEY, status.computed_at); } catch (e) {}
     if (lastSeen === null) return;                        // seed silently first time
 
-    playScanChime();
+    if (claimSound("scan")) playScanChime();
     try {
       console.log(`[scan-alert] anomaly scan refreshed: ${status.anomalies} anomalies, `
                   + `${status.consistency} consistency flags`);

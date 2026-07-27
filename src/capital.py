@@ -539,11 +539,46 @@ def capital_summary(since: Optional[str] = None) -> dict:
     work = [r for r in rows if not r.get("is_dividend")]
     dividend_total = round(sum(r["balance"] for r in rows if r.get("is_dividend")), 2)
     starting = sum(r["opening"] for r in work)
+
     open_exposure = sum(r["open_stake"] for r in work)
     total_stake_all = sum(r["total_stake"] for r in work)
     equity = sum(r["balance"] for r in work)
     current_capital = sum(r["current_value"] for r in work)
     total_withdrawal_cost = sum(r["withdrawal_cost"] for r in work)
+
+    # ── Windowed "start fresh" re-baseline ────────────────────────────────
+    # With a `since`, the period should read as a self-contained book:
+    #   starting_capital = what the operation was worth AT the window start,
+    #                      not the original all-time deposits;
+    #   dividend_total   = only what was taken out DURING the window.
+    # Equity, balances and open exposure stay CURRENT — where the money is now
+    # does not depend on which dates you are looking at, and zeroing them would
+    # be a lie about your bankroll.
+    #
+    # Opening equity is reconstructed backwards from today: current equity minus
+    # everything that happened inside the window (capital moved in/out, settled
+    # bet PnL, manual PnL, commission). No data is rewritten — clear the window
+    # and the all-time view returns unchanged.
+    period_opening = None
+    period_dividend = dividend_total
+    if since is not None:
+        work_ids = {r["id"] for r in work}
+        flow_in_window = 0.0          # capital moved into/out of working accounts
+        for e in entries:
+            if e["ts"] < since or e["account_id"] not in work_ids:
+                continue
+            if e["kind"] in ("opening", "deposit", "withdraw", "adjustment", "transfer"):
+                flow_in_window += e["amount"]
+            elif e["kind"] == "commission":
+                flow_in_window += e["amount"]      # already signed negative
+        pnl_in_window = sum(
+            pnl for ts, _bid, pnl, _stake, status in settled_events if ts >= since
+        ) + sum(amt for ts, _aid, amt in pnl_events if ts >= since)
+        period_opening = round(equity - flow_in_window - pnl_in_window, 2)
+        period_dividend = round(
+            sum(e["amount"] for e in entries
+                if e["ts"] >= since and e["account_id"] not in work_ids
+                and e["kind"] in ("opening", "deposit", "transfer")), 2)
 
     # Performance (windowed by `since`): settled PnL, turnover, yield, ROI and
     # the curve count only bets settled in the window. Deposits/withdrawals are
@@ -577,7 +612,10 @@ def capital_summary(since: Optional[str] = None) -> dict:
     return {
         "accounts": rows,
         "totals": {
-            "starting_capital": round(starting, 2),
+            # Windowed: equity at the window start. All-time: original deposits.
+            "starting_capital": (period_opening if period_opening is not None
+                                 else round(starting, 2)),
+            "starting_capital_all_time": round(starting, 2),
             "equity": round(equity, 2),
             # Total = all money valuing open bets at stake = starting + PnL
             # (gross, no withdrawal fee). current_capital nets the book fee.
@@ -596,7 +634,8 @@ def capital_summary(since: Optional[str] = None) -> dict:
             "net_pnl": round(settled_pnl - commission_paid, 2),
             # dividends pulled out of the operation (already excluded from the
             # totals above; surfaced so the UI can show "Total" net of it).
-            "dividend_total": dividend_total,
+            "dividend_total": period_dividend,
+            "dividend_total_all_time": dividend_total,
             "open_exposure": round(open_exposure, 2),
             "total_stake": round(total_stake_all, 2),
             # yield = pnl / turnover (settled stakes in window); the standard

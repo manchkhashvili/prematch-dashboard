@@ -31,7 +31,12 @@ def _ml(source, home_odds, away_odds, sr_id=None):
 
 @pytest.fixture
 def grid_state(monkeypatch):
+    # Books are runtime-gated (Config tab) since 2026-07-26 — the read sites
+    # go through enabled_soft_books(), so a book the operator switched off
+    # never reaches the grid. Declare these three ON for the test.
     monkeypatch.setattr(app_mod, "SOFT_BOOKS", ("cb", "liderbet", "betlive"))
+    monkeypatch.setattr(app_mod, "enabled_soft_books",
+                        lambda: ("cb", "liderbet", "betlive"))
     snap = app_mod._state.get("tennis")
     app_mod._state["tennis"] = {
         "cb": app_mod._empty_source_state(),

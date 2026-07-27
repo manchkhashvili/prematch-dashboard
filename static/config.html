@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Config — Prematch Dashboard</title>
+  <link rel="stylesheet" href="/style.css?v=20260527c" />
+  <script src="/theme.js?v=20260527"></script>
+  <script src="/alerts.js?v=20260601a" defer></script>
+  <style>
+    .cfg-wrap { max-width: 900px; margin: 20px auto; padding: 0 20px 60px; }
+    .cfg-section {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 6px; padding: 18px 20px; margin-bottom: 16px;
+    }
+    .cfg-section h2 {
+      margin: 0 0 4px; font-size: 13px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint);
+    }
+    .cfg-section p.hint { margin: 0 0 14px; font-size: 12px; color: var(--text-faint); }
+    .row {
+      display: grid; grid-template-columns: 26px 1fr auto auto;
+      gap: 10px; align-items: center;
+      padding: 7px 0; border-bottom: 1px solid var(--border);
+    }
+    .row:last-child { border-bottom: 0; }
+    .row .name { font-size: 13px; }
+    .row .desc { font-size: 11px; color: var(--text-faint); display: block; }
+    .row .live { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+    .pill {
+      font-size: 10px; padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+      border: 1px solid var(--border); color: var(--text-faint);
+    }
+    .pill.on  { color: #1a7f37; border-color: #1a7f37; }
+    .pill.off { color: var(--text-faint); }
+    .num-row { display: grid; grid-template-columns: 1fr 120px 90px; gap: 10px;
+               align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .num-row:last-child { border-bottom: 0; }
+    .num-row input { width: 100%; }
+    .bounds { font-size: 11px; color: var(--text-faint); text-align: right; }
+    .actions { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+    #saved { font-size: 12px; color: #1a7f37; opacity: 0; transition: opacity .2s; }
+    #saved.show { opacity: 1; }
+    #err { font-size: 12px; color: #b42318; }
+    input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Prematch Dashboard</h1>
+    <nav>
+      <a href="/matches.html">Matches</a>
+      <a href="/arbs.html">Arbs / +EV</a>
+      <a href="/moves.html">Top Moves</a>
+      <a href="/arbs.html?ref=xbet" id="nav-xarbs">1xbet Arbs</a>
+      <a href="/moves.html?ref=xbet" id="nav-xmoves">1xbet Moves</a>
+      <a href="/anomalies.html">Anomalies</a>
+      <a href="/bets.html">Bets</a>
+      <a href="/calc.html">Calc</a>
+      <a href="/config.html" class="active">Config</a>
+    </nav>
+  </header>
+
+  <div class="cfg-wrap">
+    <div class="cfg-section">
+      <h2>Books</h2>
+      <p class="hint">
+        Turning a book off stops its next poll entirely — no fetch, no parse, no
+        tick write, no ladder-anomaly pass — and clears its odds so nothing
+        downstream prices off a frozen snapshot. Takes effect within
+        <span id="idle-sec">5</span>s. Pinnacle is the reference and is always on.
+      </p>
+      <div id="books"></div>
+    </div>
+
+    <div class="cfg-section">
+      <h2>Scans</h2>
+      <p class="hint">
+        The anomaly scans are the expensive ones: a cold CrystalBet full-detail
+        soccer sweep is ~278s of CPU. Turn them off when you're not watching.
+      </p>
+      <div id="scans"></div>
+    </div>
+
+    <div class="cfg-section">
+      <h2>Cadence (seconds)</h2>
+      <p class="hint">How often each loop runs. Longer = cheaper. Clamped server-side.</p>
+      <div id="cadence"></div>
+    </div>
+
+    <div class="cfg-section">
+      <h2>Work limits</h2>
+      <p class="hint">
+        Horizons that cut per-cycle work without turning a book off. Only ~39% of
+        the soccer board starts within 24h, so a shorter horizon drops a large
+        share of the expansion/decode cost.
+      </p>
+      <div id="limits"></div>
+      <div class="actions">
+        <button class="btn" id="reset">Reset to env defaults</button>
+        <span id="saved">saved</span>
+        <span id="err"></span>
+      </div>
+    </div>
+  </div>
+
+<script>
+const BOOK_DESC = {
+  crystalbet: "CrystalBet — ASP.NET postbacks + html5lib. Heaviest book by CPU.",
+  liderbet:   "Lider-Bet — JSON, batches 50 matches/call. Cheap.",
+  betlive:    "Betlive — JSON, 1 request/event. Cheap CPU, heavy bytes.",
+  crocobet:   "Crocobet — JSON REST, per-event ladders. SportRadar id inline.",
+  setanta:    "Setanta — SignalR/MessagePack websocket. Cheapest per outcome.",
+  xbet:       "1xbet — second reference; powers the 1xbet Arbs / Moves tabs.",
+};
+const SCAN_DESC = {
+  anomaly:         "CB full-detail basketball ladder scan.",
+  anomaly_extra:   "CB full-detail scan for the extra sports (soccer/tennis).",
+  anomaly_watch:   "Fast re-scan of games already flagged.",
+  betlive_anomaly: "Betlive favourite-flip watch (discover + refreshOdds).",
+  soft_scan:       "Soft-book HT/FT + basketball-favourite sweep.",
+};
+const CAD_DESC = {
+  pinnacle_poll_sec: "Pinnacle reference poll",
+  crystalbet_poll_sec: "CrystalBet poll",
+  extra_book_poll_sec: "Extra soft books poll",
+  xbet_poll_sec: "1xbet poll",
+  anomaly_scan_sec: "Anomaly scan",
+  anomaly_extra_sec: "Anomaly scan (extra sports)",
+  anomaly_watch_sec: "Anomaly watch (0 = off)",
+  betlive_discover_sec: "Betlive discover sweep",
+  betlive_watch_sec: "Betlive refreshOdds",
+  soft_scan_sec: "Soft scan",
+};
+const LIM_DESC = {
+  anomaly_extra_horizon_h: "CB anomaly scan: only games starting within (hours)",
+  cb_expand_within_hours: "CB expansion: full ladders within (hours) — 0 = unlimited. Biggest CPU lever.",
+  setanta_detail_hours: "Setanta: full ladders within (hours), main markets beyond",
+  crocobet_detail_hours: "Crocobet: full ladders within (hours), board inline beyond",
+};
+const BOOK_SLOT = { crystalbet: "cb" };  // state slot name differs for CB
+
+let META = {}, CFG = {};
+
+function flash(msg, isErr) {
+  const s = document.getElementById("saved"), e = document.getElementById("err");
+  if (isErr) { e.textContent = msg; setTimeout(() => e.textContent = "", 6000); }
+  else { s.classList.add("show"); setTimeout(() => s.classList.remove("show"), 1200); }
+}
+
+async function post(patch) {
+  const r = await fetch("/api/config", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    flash(d.detail || ("HTTP " + r.status), true);
+    return false;
+  }
+  CFG = (await r.json()).config;
+  flash("saved", false);
+  return true;
+}
+
+function toggleRow(section, key, label, desc, live) {
+  const on = CFG[section][key];
+  const div = document.createElement("div");
+  div.className = "row";
+  const age = live && live.age_sec != null ? Math.round(live.age_sec) + "s ago" : "—";
+  const rows = live ? (live.rows || 0).toLocaleString() : "";
+  div.innerHTML = `
+    <input type="checkbox" ${on ? "checked" : ""} />
+    <span class="name">${label}<span class="desc">${desc || ""}</span></span>
+    <span class="live">${live ? rows + " rows · " + age : ""}</span>
+    <span class="pill ${on ? "on" : "off"}">${on ? "ON" : "OFF"}</span>`;
+  div.querySelector("input").addEventListener("change", async (ev) => {
+    const ok = await post({[section]: {[key]: ev.target.checked}});
+    if (!ok) ev.target.checked = !ev.target.checked;
+    render();
+  });
+  return div;
+}
+
+function numRow(section, key, label, bounds) {
+  const div = document.createElement("div");
+  div.className = "num-row";
+  const val = CFG[section][key];
+  div.innerHTML = `
+    <span class="name">${label}<span class="desc">${key}</span></span>
+    <input type="number" value="${val}" step="1" min="${bounds[0]}" max="${bounds[1]}" />
+    <span class="bounds">${bounds[0]}–${bounds[1]}</span>`;
+  const input = div.querySelector("input");
+  input.addEventListener("change", async () => {
+    const v = parseFloat(input.value);
+    if (Number.isNaN(v)) return;
+    await post({[section]: {[key]: v}});
+    render();
+  });
+  return div;
+}
+
+function render() {
+  const b = document.getElementById("books"); b.innerHTML = "";
+  for (const k of META.books) {
+    const slot = BOOK_SLOT[k] || k;
+    b.appendChild(toggleRow("books", k, k, BOOK_DESC[k], (window.LIVE || {})[slot]));
+  }
+  const s = document.getElementById("scans"); s.innerHTML = "";
+  for (const k of META.scans) s.appendChild(toggleRow("scans", k, k, SCAN_DESC[k], null));
+  const c = document.getElementById("cadence"); c.innerHTML = "";
+  for (const k of Object.keys(CFG.cadence))
+    c.appendChild(numRow("cadence", k, CAD_DESC[k] || k, META.cadence_bounds[k]));
+  const l = document.getElementById("limits"); l.innerHTML = "";
+  for (const k of Object.keys(CFG.limits))
+    l.appendChild(numRow("limits", k, LIM_DESC[k] || k, META.limit_bounds[k]));
+  document.getElementById("idle-sec").textContent = META.idle_poll_sec;
+}
+
+async function load() {
+  const r = await fetch("/api/config");
+  const d = await r.json();
+  CFG = d.config; META = d.meta; window.LIVE = d.live;
+  render();
+}
+
+document.getElementById("reset").addEventListener("click", async () => {
+  if (!confirm("Reset every toggle and cadence back to the env-var defaults?")) return;
+  const r = await fetch("/api/config/reset", {method: "POST"});
+  if (r.ok) { CFG = (await r.json()).config; flash("saved", false); render(); }
+});
+
+load();
+setInterval(load, 10000);   // keep the live row counts / ages fresh
+</script>
+</body>
+</html>

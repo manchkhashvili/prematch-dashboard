@@ -113,6 +113,13 @@
     tr.bet-row-lost    { background: color-mix(in srgb, var(--bad) 7%, transparent); }
     tr.bet-row-cashout td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     tr.bet-row-cashout { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .bets-daterange {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 14px 0 6px; font-size: 12px;
+    }
+    .bets-daterange input[type=date] {
+      font-size: 12px; padding: 2px 6px;
+    }
     .bets-summary {
       padding: 10px 18px 4px;
       font-size: 12px;
@@ -235,6 +242,7 @@
       <a href="/anomalies.html">Anomalies</a>
       <a href="/bets.html" class="active">Bets</a>
       <a href="/calc.html">Calc</a>
+      <a href="/config.html">Config</a>
     </nav>
   </header>
 
@@ -281,6 +289,7 @@
               <option value="pin">Pinnacle</option>
               <option value="liderbet">Lider-Bet</option>
               <option value="betlive">Betlive</option>
+              <option value="setanta">Setanta</option>
               <option value="other">other</option>
             </datalist>
           </label>
@@ -402,6 +411,16 @@
   </details>
 
   <!-- ── Bets table (all bets, open first) ────────────────────────────── -->
+  <div class="bets-daterange" id="bets-daterange"
+       title="Filters on when a bet was PLACED. The Capital & PnL block above uses the same window, so picking a fresh start date reads zero everywhere — that is how you start a new period without deleting history.">
+    <span class="dim">Placed between</span>
+    <input type="date" id="bets-since" />
+    <span class="dim">and</span>
+    <input type="date" id="bets-until" />
+    <button class="chip-btn" id="bets-range-today">Today</button>
+    <button class="chip-btn" id="bets-range-month">This month</button>
+    <button class="chip-btn on" id="bets-range-clear">All time</button>
+  </div>
   <div class="bets-summary" id="bets-summary"></div>
 
   <div class="table-wrap">
@@ -712,9 +731,48 @@ function legsBlock(b) {
     </div>`;
 }
 
+// ── Date filter ───────────────────────────────────────────────────────────
+// Filters on placed_at, and drives the Capital & PnL window too — a fresh start
+// date must read zero EVERYWHERE, otherwise you get an empty bets table sitting
+// under a lifetime P&L. Persisted so the chosen period survives a reload.
+const RANGE_KEY = "bets_date_range_v1";
+let betsSince = "", betsUntil = "";
+
+function loadRange() {
+  try {
+    const raw = localStorage.getItem(RANGE_KEY);
+    if (raw) { const r = JSON.parse(raw); betsSince = r.since || ""; betsUntil = r.until || ""; }
+  } catch (e) {}
+  document.getElementById("bets-since").value = betsSince;
+  document.getElementById("bets-until").value = betsUntil;
+  markRangePreset();
+}
+
+function saveRange() {
+  try { localStorage.setItem(RANGE_KEY, JSON.stringify({ since: betsSince, until: betsUntil })); }
+  catch (e) {}
+}
+
+function rangeQuery() {
+  const p = [];
+  if (betsSince) p.push("since=" + encodeURIComponent(betsSince));
+  if (betsUntil) p.push("until=" + encodeURIComponent(betsUntil));
+  return p.length ? "&" + p.join("&") : "";
+}
+
+function markRangePreset() {
+  const clear = document.getElementById("bets-range-clear");
+  if (clear) clear.classList.toggle("on", !betsSince && !betsUntil);
+}
+
+async function applyRange() {
+  saveRange(); markRangePreset();
+  await Promise.all([fetchAndRender(), loadCapital()]);
+}
+
 async function fetchAndRender() {
   try {
-    const r = await fetch(`/api/bets?status=all`);
+    const r = await fetch(`/api/bets?status=all` + rangeQuery());
     let bets = await r.json();
     if (!Array.isArray(bets)) bets = [];
     // Open bets first (soonest kickoff first), then settled (newest first).
@@ -725,11 +783,17 @@ async function fetchAndRender() {
       return (b.settled_at || "").localeCompare(a.settled_at || "");
     });
     const nOpen = bets.filter(b => b.status === "open").length;
+    const win = (betsSince || betsUntil)
+      ? ` · <span class="dim">placed ${betsSince || "…"} → ${betsUntil || "now"}</span>`
+      : "";
     document.getElementById("bets-summary").innerHTML =
-      `<b>${nOpen}</b> open · <b>${bets.length}</b> total bets`;
+      `<b>${nOpen}</b> open · <b>${bets.length}</b> total bets${win}`;
     populateRollTarget(bets.filter(b => b.status === "open"));   // for the parlay picker
     if (bets.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="15" class="empty">no bets logged yet</td></tr>`;
+      tbody.innerHTML = (betsSince || betsUntil)
+        ? `<tr><td colspan="15" class="empty">no bets placed in this window — `
+          + `clear the date filter to see all history</td></tr>`
+        : `<tr><td colspan="15" class="empty">no bets logged yet</td></tr>`;
       return;
     }
     // Fetch history in parallel for sparklines.
@@ -914,7 +978,11 @@ let capShowNet = false;  // Total card: false = gross (starting+pnl), true = net
 
 async function loadCapital() {
   try {
-    const capUrl = "/api/capital" + (capWindowDays ? `?days=${capWindowDays}` : "");
+    // The explicit date filter wins over the 7d/30d/90d chips so both blocks
+    // always describe the same period.
+    const capUrl = "/api/capital"
+      + (betsSince ? `?since=${encodeURIComponent(betsSince)}`
+                   : (capWindowDays ? `?days=${capWindowDays}` : ""));
     const [capR, ledR] = await Promise.all([
       fetch(capUrl), fetch("/api/capital/ledger"),
     ]);
@@ -936,12 +1004,12 @@ async function loadCapital() {
       <div class="cap-card" id="card-starting" style="cursor:pointer"
            title="Click to set starting capital (adds an 'opening' entry to an account)">
         <div class="v">${fmtMoney(t.starting_capital)}</div>
-        <div class="k">Starting capital ✎${t.starting_capital ? "" : " — click to set"}</div>
+        <div class="k">Starting capital${(betsSince || capWindowDays) ? " (period)" : ""} ✎${t.starting_capital ? "" : " — click to set"}</div>
       </div>
       <div class="cap-card" title="Settled betting PnL ${fmtMoney(t.settled_pnl)} − withdrawal fees paid ${fmtMoney(t.commission_paid ?? 0)}. The books' withdrawal commission is a real cost, so it's deducted here."><div class="v ${moneyClass((t.net_pnl ?? t.settled_pnl))}">${fmtMoney(t.net_pnl ?? t.settled_pnl)}</div><div class="k">PnL − fees</div></div>
       <div class="cap-card"><div class="v">${fmtMoney(t.open_exposure)}</div><div class="k">Open exposure</div></div>
       <div class="cap-card" title="Withdrawal commissions actually PAID on book→bank transfers (the ${feePct}% gross fee). A real cost — deducted from PnL on the left."><div class="v ${t.commission_paid ? "neg" : ""}">${fmtMoney(t.commission_paid ?? 0)}</div><div class="k">Fees paid</div></div>
-      <div class="cap-card" title="Profit pulled OUT of the operation — transfer Bank → Dividend. Excluded from Total/equity; it's no longer working capital."><div class="v ${t.dividend_total ? "neg" : ""}">${fmtMoney(t.dividend_total ?? 0)}</div><div class="k">Dividend</div></div>
+      <div class="cap-card" title="Profit pulled OUT of the operation — transfer Bank → Dividend. Excluded from Total/equity; it's no longer working capital. With a date filter active this counts only dividends taken IN that window."><div class="v ${t.dividend_total ? "neg" : ""}">${fmtMoney(t.dividend_total ?? 0)}</div><div class="k">Dividend</div></div>
       <div class="cap-card"><div class="v ${moneyClass(t.yield_pct)}">${t.yield_pct == null ? "—" : t.yield_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / total settled stakes (turnover, excl. pushes)">Yield</div></div>
       <div class="cap-card"><div class="v ${moneyClass(t.roi_pct)}">${t.roi_pct == null ? "—" : (t.roi_pct >= 0 ? "+" : "") + t.roi_pct.toFixed(1) + "%"}</div><div class="k" title="settled PnL / starting capital — total return on the bankroll you put in">ROI</div></div>
       <div class="cap-card"><div class="v">${t.n_open ?? 0} <span style="color:var(--text-dim);font-size:12px">/ ${t.n_bets ?? 0}</span></div><div class="k" title="open / total bets">Bets open / total</div></div>
@@ -1169,7 +1237,38 @@ document.getElementById("cap-window").addEventListener("click", (e) => {
   loadCapital();
 });
 
+// ── Date-filter listeners ────────────────────────────────────────────────
+document.getElementById("bets-since").addEventListener("change", (e) => {
+  betsSince = e.target.value; applyRange();
+});
+document.getElementById("bets-until").addEventListener("change", (e) => {
+  betsUntil = e.target.value; applyRange();
+});
+document.getElementById("bets-range-today").addEventListener("click", () => {
+  const d = new Date().toISOString().slice(0, 10);
+  betsSince = d; betsUntil = "";
+  document.getElementById("bets-since").value = d;
+  document.getElementById("bets-until").value = "";
+  applyRange();
+});
+document.getElementById("bets-range-month").addEventListener("click", () => {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    .toISOString().slice(0, 10);
+  betsSince = d; betsUntil = "";
+  document.getElementById("bets-since").value = d;
+  document.getElementById("bets-until").value = "";
+  applyRange();
+});
+document.getElementById("bets-range-clear").addEventListener("click", () => {
+  betsSince = ""; betsUntil = "";
+  document.getElementById("bets-since").value = "";
+  document.getElementById("bets-until").value = "";
+  applyRange();
+});
+
 prefillFromQuery();
+loadRange();
 fetchAndRender();
 loadCapital();
 setInterval(fetchAndRender, POLL_MS);

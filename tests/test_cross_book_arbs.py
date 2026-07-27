@@ -33,7 +33,12 @@ def _ml(source, sr, home_odds, away_odds, sr_id="900001"):
 @pytest.fixture
 def two_books(monkeypatch):
     """Enable liderbet+betlive slots for the duration of a test."""
+    # Books are runtime-gated (Config tab) since 2026-07-26 — the read sites
+    # go through enabled_soft_books(), so a book the operator switched off
+    # never reaches the grid. Declare these three ON for the test.
     monkeypatch.setattr(app_mod, "SOFT_BOOKS", ("cb", "liderbet", "betlive"))
+    monkeypatch.setattr(app_mod, "enabled_soft_books",
+                        lambda: ("cb", "liderbet", "betlive"))
     snap = app_mod._state.get("tennis")
     app_mod._state["tennis"] = {
         "cb": app_mod._empty_source_state(),
