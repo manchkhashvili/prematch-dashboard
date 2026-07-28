@@ -8,6 +8,7 @@
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
   <script src="/alerts.js?v=20260601a" defer></script>
+  <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
   <header>
@@ -86,6 +87,9 @@
       vs full, quarter MLs vs full), plus betlive favourite-flips (incl-OT 2-way
       disagrees with the regulation 1X2 on the favourite). Diagnostic only:
       "something looks wrong here". Tuned to ignore normal period-to-period variation.
+      "Log" prefills a bet with the match, book and this finding as a note — it
+      leaves market/price/line blank, because the flag names a contradiction, not
+      one rung to back.
     </span>
   </h2>
   <div class="table-wrap">
@@ -101,10 +105,11 @@
           <th>Periods</th>
           <th>What's wrong</th>
           <th class="num" title="Bigger = weirder (pp or points)">Severity</th>
+          <th title="Log a bet on this match. Prefills match, book, start time and the finding as a note — you fill in market, price and line yourself, because a consistency flag says 'something is wrong here' without naming one bettable rung."></th>
         </tr>
       </thead>
       <tbody id="cons-body">
-        <tr><td colspan="7" class="empty">loading…</td></tr>
+        <tr><td colspan="10" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -209,10 +214,16 @@ async function fetchAndRender() {
   const minPct = parseFloat(minPctInput.value || "0.5");
   const url = `/api/anomalies?min_pct=${minPct}&spread_only=${spreadOnly.checked}`;
   try {
-    const j = await (await fetch(url)).json();
+    const [res] = await Promise.all([fetch(url), Marks.load()]);
+    const j = await res.json();
     meta = j; rows = j.anomalies || [];
     render();
     renderConsistency(j.consistency || []);
+    // Two tables on this page — BOTH need binding or the Mark button renders
+    // but does nothing on whichever one was missed.
+    const rerender = () => { render(); renderConsistency(j.consistency || []); };
+    Marks.bind(document.getElementById("anom-body"), rerender);
+    Marks.bind(document.getElementById("cons-body"), rerender);
   } catch (e) {
     document.getElementById("anom-body").innerHTML =
       `<tr><td colspan="12" class="empty">error loading anomalies</td></tr>`;
@@ -226,6 +237,7 @@ const KIND_LABEL = {
   quarter_ml_extreme: "quarter ML extreme",
   htft_combo: "HT/FT combo",
   htft_fair: "HT/FT fair (model)",
+  ht_vs_ft_divergence: "HT vs FT divergence",
   betlive_flip: "betlive: favourite flip",
   betlive_ot_fold: "betlive: OT-fold",
   soccer_htft: "soccer HT/FT (soft)",
@@ -235,17 +247,63 @@ const KIND_LABEL = {
   soccer_curve: "soccer curve",
 };
 function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
+
+// Build a /bets.html prefill for a consistency flag.
+//
+// Unlike a ladder anomaly, a consistency flag does NOT identify one bettable
+// rung: it says two markets contradict each other, so either leg could be the
+// bet. We therefore prefill only what the flag actually establishes — match,
+// book, sport, start time, event id — plus the finding itself as a note, and
+// leave market/side/line/odds for whichever leg you decide to take. Guessing a
+// market_type here would silently put a wrong leg on a real bet.
+const BET_SIDES   = new Set(["home", "away", "draw", "over", "under"]);
+const BET_PERIODS = new Set(["FT", "H1", "Q1", "Q2", "Q3", "Q4"]);
+const BET_SPORTS  = new Set(["basketball", "soccer", "tennis"]);
+// Only kinds where every leg of the check lives in ONE market type.
+const KIND_MARKET = {
+  favourite_flip: "moneyline",
+  quarter_ml_extreme: "moneyline",
+  betlive_flip: "moneyline",
+  betlive_ot_fold: "moneyline",
+  basketball_fav: "moneyline",
+  soccer_identity: "moneyline",
+  total_additivity: "total",
+};
+
+function buildConsistencyBetUrl(f) {
+  const label = KIND_LABEL[f.kind] || f.kind;
+  const sev = f.severity == null ? "" : ` sev ${Number(f.severity).toFixed(1)}`;
+  // periods is a label like "FT" or "H1 vs FT" — only usable as a period when
+  // the check sits inside a single period.
+  const period = BET_PERIODS.has((f.periods || "").trim()) ? f.periods.trim() : null;
+  const market = KIND_MARKET[f.kind] || null;
+  const side = BET_SIDES.has(f.outcome || "") ? f.outcome : null;
+  const p = new URLSearchParams({
+    ...(BET_SPORTS.has(f.sport) ? { sport: f.sport } : {}),
+    match_label: (f.match_label || "").replace(" — ", " vs "),
+    book: f.book || "cb",
+    ...(period ? { period } : {}),
+    ...(market ? { market_type: market } : {}),
+    ...(side ? { side } : {}),
+    stake: "20",
+    note: (`${label} [${f.periods || "?"}]${sev}`
+           + (f.detail ? ` — ${f.detail}` : "")).slice(0, 300),
+    ...(f.book_event_id ? { cb_event_id: f.book_event_id } : {}),
+    ...(f.start_time ? { start_time: f.start_time } : {}),
+  });
+  return "/bets.html?" + p.toString();
+}
 function renderConsistency(flags) {
   const body = document.getElementById("cons-body");
   if (!meta.enabled) {
-    body.innerHTML = `<tr><td colspan="7" class="empty">scanner off — enable under `
+    body.innerHTML = `<tr><td colspan="10" class="empty">scanner off — enable under `
       + `<a href="/config.html">Config</a> &rarr; Scans</td></tr>`; return;
   }
   if (!flags.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty">no consistency flags</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="10" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
-    <tr${f.stale ? ' style="opacity:.5"' : ''}>
+    <tr class="${Marks.rowClass(Marks.key(f))}"${f.stale ? ' style="opacity:.5"' : ''}>
       <td class="mono dim">${fmtTime(f.first_seen)}${f.stale ? ' ⚠︎' : ''}</td>
       <td><span class="conf conf-medium">${f.book || "cb"}</span></td>
       <td class="dim">${(f.sport || "").slice(0, 2)}</td>
@@ -255,6 +313,8 @@ function renderConsistency(flags) {
       <td class="dim mono">${f.periods}</td>
       <td>${f.detail}${f.stale ? ' <span class="dim">(stale — book unreachable last sweep)</span>' : ''}</td>
       <td class="num ${consClass(f.severity)}">${Number(f.severity).toFixed(1)}</td>
+      <td><a class="log-bet-link" href="${buildConsistencyBetUrl(f)}"
+             title="Log a bet on this match — market, price and line are left blank for you to fill from the book">Log</a>${Marks.buttonHTML(Marks.key(f), f)}</td>
     </tr>
   `).join("");
 }
@@ -308,7 +368,7 @@ function render() {
   }
 
   body.innerHTML = rows.map(r => `
-    <tr>
+    <tr class="${Marks.rowClass(Marks.key(r))}">
       <td class="mono dim">${fmtTime(r.start_time)}</td>
       <td><span class="conf conf-medium">${r.book || "cb"}</span></td>
       <td class="dim">${(r.sport || "").slice(0, 2)}</td>
@@ -322,7 +382,7 @@ function render() {
       <td class="num mono">${fmtNum(r.pin_fair_odds, 3)}</td>
       <td class="num ${edgeClass(r.pin_edge_pct)}">${r.pin_edge_pct == null ? "—" : fmtSigned(r.pin_edge_pct) + "%"}</td>
       <td class="num" title="${r.pin_move_label || ""}">${r.pin_move_pp == null ? "—" : fmtSigned(r.pin_move_pp) + "pp"}</td>
-      <td><a class="log-bet-link" href="${buildBetPrefillUrl(r)}" title="Log a CB bet on the flagged rung">Log</a></td>
+      <td><a class="log-bet-link" href="${buildBetPrefillUrl(r)}" title="Log a CB bet on the flagged rung">Log</a>${Marks.buttonHTML(Marks.key(r), r)}</td>
     </tr>
   `).join("");
 }

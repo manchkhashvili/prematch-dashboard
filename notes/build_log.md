@@ -4099,3 +4099,245 @@ and labels the card "Starting capital (fresh)" vs "(period)".
 Still deliberately NOT done: a destructive close-the-books that writes
 closing/opening ledger entries. "Start fresh" is reversible by clearing the
 filter; that would not be.
+
+
+─────────────────────────────────────────────────────────────────────────────
+2026-07-28 — CB DNS wedge, consistency-flag Log button, unmatched-log audit
+─────────────────────────────────────────────────────────────────────────────
+
+## CB "not loading" was the OS resolver, not CrystalBet
+
+Same failure as the 1xbet wedge in 333b848, on a new host. macOS `getaddrinfo`
+hung its full 30 s on `www.crystalbet.com` and returned "Could not resolve
+host", while the bare `crystalbet.com` resolved fine and both public resolvers
+answered instantly:
+
+    dscacheutil www.crystalbet.com   NO RESOLVE (3/3)
+    8.8.8.8 / 1.1.1.1                91.233.15.162
+    curl --resolve                   HTTP 200, 1.98 MB, 2.5 s
+
+So the site was healthy the whole time. Notably the raw UDP query succeeded
+*through the same router* (192.168.0.2) that `dscacheutil` failed on — the
+wedge is in mDNSResponder, not the network.
+
+The bypass already existed but only inside `xbet.py`. Extracted it to
+`src/scrapers/dns_pin.py` (raw-UDP A lookup, TTL cache, `CURLOPT_RESOLVE` pin,
+no-op when our own query also fails) and wired it into both CB request sites.
+CB warm went 30.1 s `DNSError` → 1.5 s; a full soccer scrape returns 1023 games
+/ 2067 rows, 0 invalid prices, 1X2 book% median 112.9.
+
+**The user was running the wrong transport.** Their process was launched from a
+VS Code terminal with no env vars, so `CB_TRANSPORT` defaulted to `playwright`
+— CB through Chromium, which uses the OS resolver and therefore ate a 60 s
+`Page.goto` timeout per attempt (and 71.5 % CPU). The pin covers the curl_cffi
+path only. Run with `CB_TRANSPORT=http`; the Playwright path was deliberately
+left alone rather than grown a second workaround.
+
+## Log button on consistency flags
+
+A consistency flag names a *contradiction between two markets*, not one
+bettable rung, so the prefill carries only what the flag establishes — match,
+book, sport, start time, event id, and the finding as a note. `market_type`
+only for the seven single-market kinds, `period` only when the check sits in
+one period, `side` only when `outcome` is a real side. **Never** `odds_taken`
+or `line`: guessing a leg here would put a wrong bet on a real ticket.
+Verified against all 72 live flags — no unknown params, zero invented prices.
+
+## unmatched_log.csv audit → four defects
+
+13 803 338 rows / 2.1 GB describing 49 520 distinct fixtures — **279x
+duplication**, ~45 MB/day, because every unmatched fixture was re-appended
+every poll cycle.
+
+1. **CB was the only book not filtering simulated leagues** — 427 839 rows.
+   `is_simulated_league()` already returned True for every SRL string; croco,
+   betlive, setanta and liderbet all called it, `crystalbet.py` never did. SRL
+   reuses real team names, so this was phantom-match bait too.
+2. **Stray tabs in CB league names** — 1 378 462 rows (`'Finland\t, Nelonen'`),
+   splitting league grouping. Now whitespace-collapsed.
+3. **8 026 fixtures matched on NAME but died on the clock — 91 % tennis.**
+   Tennis is scheduled "not before"/follow-on-court, so the books legitimately
+   post start times hours apart. `TIME_LOOSE_BY_SPORT = {"tennis": 6h}`,
+   **strong tier only** — the 65-79 band keeps ±1 h, because that is exactly
+   where surname collisions live. Live A/B on 946 CB / 3719 Pin tennis odds:
+   matched 184 → 188, **gained 4, lost 0**, every gain score 100.0 at +1.3 to
+   +2.5 h (Cecchinato M.→Marco Cecchinato, Vasami J.→Jacopo Vasami, …).
+4. **Initialisms were unmatchable** — `'seinajoen jk'` vs `'sjk'` = 26.7.
+   Added an exact-expansion bridge, fenced hard: single 2-4 char token vs
+   multi-token, exact match against two constructions, lifts only to
+   SCORE_TIGHT (never the strong tier), and only when the *other* side already
+   clears SCORE_LOOSE — so it can never build a fixture from two weak sides.
+   `CR Brasil AL` ↔ `CRB` went to team_aliases.yaml instead: reaching it
+   generically needs token-dropping, which is how phantom fixtures get made.
+
+Log hygiene: dedupe on (fixture, best-candidate, score, reason) with a 24 h
+refresh, 10-day retention pruned hourly (atomic temp+replace; unparseable ts is
+KEPT — housekeeping must never eat data), legacy 9-column layout migrated on
+first prune, and a bounded dedupe map. Two new columns, `best_pin_start_time`
+and `reject_reason`, are what turn the log self-diagnosing: finding (3) took a
+scoring experiment precisely because neither existed.
+
+The real file: 2.1 GB → **7.8 MB** (13 754 458 rows dropped, 48 880 kept).
+
+## 20-minute soak
+
+All six books cycling, zero tracebacks, ~1 core, 2.9 % RSS. Dedupe proven on
+repeat cycles — `appended 21 of 357`, `appended 1 of 517` where the old code
+wrote all of them. 27 +EV opportunities, max edge 13.9 %, none above 20 %.
+Live CB board: 0 SRL leagues, 0 tabbed league names.
+
+`reject_reason` earned itself immediately: `Mogi das Cruzes U22` vs
+`Mogi das Cruzes` logs at score **100.0 / youth** — previously an inexplicable
+perfect-score rejection, now self-explaining.
+
+## CB_TRANSPORT default flipped playwright → http (2026-07-28)
+
+Re-ran `scripts/cb_parity_check.py` against live boards before flipping, since
+a test had deliberately pinned the old default:
+
+    soccer     list 1017/1017 games, 1017/1017 metadata exact,
+               1017 loadinfo byte-identical; detail A/B/A 311/311 agree,
+               drift 0, structural 0                → PARITY OK
+    basketball detail A/B/A 515/515 agree, drift 0, structural 0
+               (2 list loadinfo diffs = a WNBA spread moving between
+               captures, classified DRIFT not STRUCTURAL)  → PARITY OK
+
+Same measurement also shows the cost difference: the playwright list fetch is
+10,217,984 B in 26.7 s; http returns the panel in 4.1 s.
+
+Why flip rather than document harder: every run command in main.py/README
+already set `CB_TRANSPORT=http`, so the old default only applied when someone
+launched `main.py` bare — which is exactly what a VS Code task does, and is how
+it kept biting. The browser path also resolves DNS through Chromium, so it
+sidesteps the `dns_pin` fix entirely: when the OS resolver wedged, playwright
+ate a 60 s `Page.goto` per poll at ~70 % CPU while http stayed up.
+
+Playwright remains fully selectable (`CB_TRANSPORT=playwright`) as an escape
+hatch if CB changes the postback protocol; tests now cover the new default, the
+escape hatch, and rejection of a bad value. Verified on a bare launch: 3
+`CB http: session warmed`, **0** `CB browser: goto`, 0 Playwright processes,
+soccer 1985 / tennis 962 Odds, 0 tracebacks. 891 tests green under both
+`python3` and `.venv/bin/python`.
+
+
+─────────────────────────────────────────────────────────────────────────────
+2026-07-28 — Game marks, global pause
+─────────────────────────────────────────────────────────────────────────────
+
+## Mark: "I have money on this GAME"
+
+A Log button records ONE POSITION as a bet. Mark records exposure on the
+FIXTURE, with an optional total across however many positions and books. No
+odds, no settlement, never touches PnL or capital (two tests pin that down).
+Sits next to Log on Matches, Arbs, Moves and both Anomalies tables.
+
+**Keying was the hard part, and a name-only key silently fails the actual
+requirement.** Live, one fixture appeared on the Arbs page three times:
+
+    Lincoln Red Imps FC — Mjallby AIF   (setanta)
+    Lincoln Red Imps FC — Mjallby       (liderbet)
+    Lincoln Red Imps — Mjallby Aif      (betlive)
+
+Three spellings, one game, all sharing `pin_event_id=1632802084` — every book
+is matched against Pinnacle, so that id is the real cross-book identity. Marks
+key on it when present. But consistency flags carry NO pin_event_id and
+871/1592 matches rows have no Pinnacle counterpart, so each mark also stores a
+normalized name key as `alt_key`, and the server upserts on either. Verified:
+marking that game as setanta's row, then liderbet's (different name), then an
+anomaly row (name key only) left exactly ONE mark with `created_at` unchanged.
+
+Distinct games on the Arbs page: 28 → 22. Cross-page coverage: 17/28 → 20/22.
+
+Known gap: two rows that both lack pin_event_id AND spell the teams
+differently still key apart ("Seinajoen JK" vs "SJK") — the name key cannot
+bridge initialisms.
+
+**Two bugs in my own work, both caught by testing rather than review:**
+1. `alt_key` was added after the table had already been created on the real
+   bets.db. `CREATE TABLE IF NOT EXISTS` does not backfill a column → added a
+   migration, verified against the real DB.
+2. A test then caught that `CREATE INDEX … (alt_key)` ran BEFORE that
+   migration, which would have crashed startup on exactly that DB.
+
+**Shipped half-wired.** anomalies.html rendered the buttons and row classes but
+never called `Marks.load()` / `Marks.bind()`, so nothing highlighted and clicks
+did nothing — reported by the user. The failure is silent (the page looks
+right), so tests/test_marks_wiring.py now statically asserts that every page
+rendering a Mark button also loads marks, binds a handler, and binds EVERY
+tbody (anomalies has two). Confirmed the guard fails with the bug reintroduced.
+
+## Global pause
+
+Stop everything overnight without killing the terminal; the server keeps
+serving so you can resume from the Config tab.
+
+Pause is a TOP-LEVEL override, never a mutation of the book/scan switches —
+so there is no "previous state" to restore, because nothing was changed. It is
+checked in `_gated`/`_sleep_gated` (the choke point every toggleable loop
+already passes through, so a loop added later cannot escape it) plus an
+explicit `_paused_idle()` in the two loops that bypass those: Pinnacle has no
+toggle at all, and the extra-book loop owns its gate because switching a book
+OFF also clears its odds. Pause deliberately does NOT clear state — resume
+should look exactly as you left it.
+
+`is_on()` still reports the SWITCH while paused (otherwise the Config tab and
+every "scanner off" notice would show a page of false OFFs); `active()` is
+on-and-not-paused and is what the loops use.
+
+Measured live:
+
+    pause  → 27 distinct loops idled, incl. all 3 Pinnacle loops and every scan
+             0 of 21 sources advanced over 150 s
+             CPU ~100 % → 1.9 %,  /api/status still HTTP 200
+    resume → all 6 books polling again within 90 s, 24 loops logged back ON
+             books/scans/cadence/limits byte-identical across the pause
+
+One honest caveat: the pause is cooperative, so work already in flight
+finishes. A CB tennis scrape (538 games) that started before the pause wrote
+its result after it. Nothing starts a new cycle.
+
+956 tests green under both `python3` and `.venv/bin/python`.
+
+### Pause v1 was incomplete — "paused but the terminal is still moving"
+
+The user pasted a log showing, after pausing: loops reporting `PAUSED — idling`
+(good) but also `CB tennis anomaly-scan expansion: 100/420 … 125/420 … 150/420`
+and a wall of `src.matcher: matched 515 / 1019 CB events` repeating forever.
+Two things v1 missed, both real:
+
+**1. Request-driven recompute — the big one.** `/api/opportunities`,
+`/api/matches`, `/api/unmatched` and `/api/cross_book` each re-run the MATCHER
+per sport per book on every request. An open dashboard polls them every few
+seconds from every tab, so "paused" still burned CPU proportional to how many
+tabs were open. Matching was previously measured at 64 % of a cycle's CPU.
+
+Fixed with `_paused_memo(key, compute)`: while paused the odds in `_state`
+cannot change (every writer is an idling poll loop), so the result for a given
+set of request params is frozen and computed once. The whole cache is dropped
+the moment we are not paused, so resume cannot serve stale rows.
+
+**2. Long scans ran to completion.** The gate is checked at the TOP of a loop
+iteration, but a CB full-detail anomaly sweep is one iteration that expands
+hundreds of games — 420 for tennis. `should_continue` already existed for
+exactly this, but only ONE call site used it and it was built on
+`book_on(...)`, which reports the switch and deliberately ignores pause. Now
+all three long scans pass `runtime_config.active(...)`, so they abort mid-flight.
+
+Measured with 3 simulated tabs polling opportunities + matches + cross_book:
+
+    RUNNING (45 s):  189 matcher runs,  99.6 % CPU
+    PAUSED  (45 s):    0 matcher runs,   0.2 % CPU
+
+Resume: all 6 books polling again within 90 s, 0 tracebacks.
+
+Two behaviours worth knowing rather than fixing:
+  * The pause is cooperative — work already in flight finishes (a CB tennis
+    scrape that started before the pause wrote its result after it). Nothing
+    starts a new cycle, and the long scans now abort at their next progress
+    checkpoint rather than at the end.
+  * Pause PERSISTS across restarts (`test_paused_survives_a_reload_from_disk`).
+    That is intended — pausing then closing the laptop must not silently
+    resume — but it means a fresh start stays paused until you resume, with the
+    Config section showing PAUSED in red.
+
+966 tests green under both interpreters.

@@ -72,7 +72,7 @@ The per-game expansion is the slowest path (~3s/game for soccer with all
 alt-lines). `SPORTS=basketball:list` short-circuits this entire step — list
 view only, no alt-lines, no H1 markets, but ~30s/cycle instead of minutes.
 
-#### Browser-free transport (`src/scrapers/cb_http.py`, `CB_TRANSPORT=http`)
+#### Browser-free transport (`src/scrapers/cb_http.py`, `CB_TRANSPORT=http` — the default since 2026-07-28)
 
 The Playwright layer above is only a TRANSPORT — it produces two HTML
 artifacts (the list-view page, the per-game detail table) that the parsers

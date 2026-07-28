@@ -678,3 +678,50 @@ tr.opp-row.user-muted.user-hidden {
   color: var(--good-bold);
   background: var(--good-bg-soft);
 }
+
+/* ── Game marks (2026-07-28) ───────────────────────────────────────────────
+   "I have money on this GAME" — set from the Mark button next to Log, shared
+   across every board page via static/marks.js.
+
+   Distinct from .has-bet on purpose. has-bet is automatic and per-MARKET
+   ("you logged a bet on this exact side/line"); game-marked is manual and per
+   -FIXTURE ("I'm on this game, here's my total"). A row can be both, so the
+   two must not use the same colour or you cannot tell them apart. has-bet
+   uses --accent; marks use a green stripe and no background fill, so a marked
+   row stays readable underneath whatever tint has-bet / user-highlighted put
+   on it. */
+tr.game-marked td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--good);
+}
+tr.game-marked:not(.has-bet):not(.user-highlighted) {
+  background: var(--good-bg-soft, rgba(26, 127, 55, 0.06));
+}
+
+/* Mark button — same footprint as .log-bet-link so the pair lines up. */
+.mark-btn {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.mark-btn:hover {
+  color: var(--good);
+  border-color: var(--good);
+}
+.mark-btn.marked {
+  color: var(--good);
+  border-color: var(--good);
+  text-transform: none;      /* the amount reads better un-shouted */
+  letter-spacing: 0;
+}
+

@@ -35,6 +35,15 @@ aliases:
   "Connecticut": "Connecticut Sun"
   "Phoenix": "Phoenix Mercury"
 
+  # ── Brazil — initialism vs full name (2026-07-28 unmatched-log audit) ─
+  # "CR Brasil AL" vs Pinnacle "CRB" fuzzy-scores 26.7, far below the
+  # never-accept floor. The generic initialism bridge in matcher.py can't
+  # reach it either: it would have to drop the "AL" state suffix, and
+  # dropping tokens is exactly the loosening that invents fixtures. An
+  # exact alias is the safe mechanism for a one-off like this.
+  "CR Brasil AL": "CRB"
+  "CR Brasil": "CRB"
+
   # ── Examples — uncomment + edit when you observe these mismatches ───
   # Italian Serie A — CB carries full club name with founding year
   # "Pallacanestro Trieste 2004": "Trieste"

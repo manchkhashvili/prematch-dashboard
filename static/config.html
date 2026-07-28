@@ -43,6 +43,14 @@
     #saved.show { opacity: 1; }
     #err { font-size: 12px; color: #b42318; }
     input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+    .pause-row { display: flex; gap: 12px; align-items: center; }
+    #pause-btn { min-width: 190px; }
+    /* Paused is a loud state on purpose: nothing is updating and the board on
+       every other tab is frozen, so it must not be missable. */
+    #pause-section.paused { border-color: var(--bad); }
+    #pause-section.paused h2 { color: var(--bad); }
+    #pause-state.on  { color: var(--bad); border-color: var(--bad); font-weight: 600; }
+    #pause-state.off { color: var(--good); border-color: var(--good); }
   </style>
 </head>
 <body>
@@ -62,6 +70,24 @@
   </header>
 
   <div class="cfg-wrap">
+    <div class="cfg-section" id="pause-section">
+      <h2>Everything</h2>
+      <p class="hint">
+        Pause stops every poll loop — all books, Pinnacle, and every scan —
+        while leaving the server running, so you can unpause from this page
+        instead of killing the terminal. Takes effect within
+        <span id="idle-sec-2">5</span>s.
+        <br />
+        It does <b>not</b> change any switch below, so resuming continues
+        exactly as it was. The last odds stay on screen while paused and go
+        stale — the age counters in each page's status bar keep counting up.
+      </p>
+      <div class="pause-row">
+        <button class="btn" id="pause-btn">Pause everything</button>
+        <span id="pause-state" class="pill">…</span>
+      </div>
+    </div>
+
     <div class="cfg-section">
       <h2>Books</h2>
       <p class="hint">
@@ -215,6 +241,20 @@ function render() {
   for (const k of Object.keys(CFG.limits))
     l.appendChild(numRow("limits", k, LIM_DESC[k] || k, META.limit_bounds[k]));
   document.getElementById("idle-sec").textContent = META.idle_poll_sec;
+  const idle2 = document.getElementById("idle-sec-2");
+  if (idle2) idle2.textContent = META.idle_poll_sec;
+  renderPause();
+}
+
+function renderPause() {
+  const paused = !!CFG.paused;
+  const sec  = document.getElementById("pause-section");
+  const btn  = document.getElementById("pause-btn");
+  const pill = document.getElementById("pause-state");
+  sec.classList.toggle("paused", paused);
+  btn.textContent = paused ? "Resume everything" : "Pause everything";
+  pill.textContent = paused ? "PAUSED — nothing is polling" : "running";
+  pill.className = "pill " + (paused ? "on" : "off");
 }
 
 async function load() {
@@ -223,6 +263,13 @@ async function load() {
   CFG = d.config; META = d.meta; window.LIVE = d.live;
   render();
 }
+
+document.getElementById("pause-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("pause-btn");
+  btn.disabled = true;
+  try { await post({ paused: !CFG.paused }); } finally { btn.disabled = false; }
+  render();
+});
 
 document.getElementById("reset").addEventListener("click", async () => {
   if (!confirm("Reset every toggle and cadence back to the env-var defaults?")) return;

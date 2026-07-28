@@ -114,6 +114,13 @@ def _defaults() -> dict[str, Any]:
         },
         "cadence": {k: f() for k, (f, _lo, _hi) in CADENCES.items()},
         "limits": {k: f() for k, (f, _lo, _hi) in LIMITS.items()},
+        # Global pause (2026-07-28). Deliberately a TOP-LEVEL override rather
+        # than something that switches the book/scan toggles off: pausing must
+        # not destroy what you had enabled, so resuming needs no memory of the
+        # previous state — the toggles were never touched. The web server keeps
+        # running while paused, which is the point (unpause from the Config
+        # tab instead of killing the terminal).
+        "paused": False,
     }
 
 
@@ -124,6 +131,8 @@ def _merge(base: dict, saved: dict) -> dict:
         for k, v in (saved.get(section) or {}).items():
             if k in out[section]:
                 out[section][k] = v
+    if isinstance(saved.get("paused"), bool):
+        out["paused"] = saved["paused"]
     return out
 
 
@@ -151,7 +160,28 @@ def get() -> dict[str, Any]:
 
 
 def is_on(section: str, key: str) -> bool:
+    """Is this toggle switched on? Reports the SWITCH, not whether work is
+    currently running — see `active()`. The Config tab and the per-tab
+    "scanner off" notices read this, so a paused app still shows you what you
+    had enabled rather than a page of false OFFs."""
     return bool(load().get(section, {}).get(key, False))
+
+
+def is_paused() -> bool:
+    return bool(load().get("paused", False))
+
+
+def active(section: str, key: str) -> bool:
+    """Should this loop do work right now? The gate every poll loop uses."""
+    return is_on(section, key) and not is_paused()
+
+
+def set_paused(value: bool) -> dict[str, Any]:
+    cfg = load()
+    with _lock:
+        cfg["paused"] = bool(value)
+        _save_locked(cfg)
+    return get()
 
 
 def book_on(book: str) -> bool:
@@ -176,6 +206,11 @@ def update(patch: dict[str, Any]) -> dict[str, Any]:
     cfg = load()
     with _lock:
         for section, values in (patch or {}).items():
+            if section == "paused":
+                if not isinstance(values, bool):
+                    raise ValueError("paused must be true/false")
+                cfg["paused"] = values
+                continue
             if section not in ("books", "scans", "cadence", "limits"):
                 raise ValueError(f"unknown config section {section!r}")
             if not isinstance(values, dict):

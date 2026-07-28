@@ -10,6 +10,7 @@
   <!-- Phase 3.12: cross-page alert poller. Defer = fine; first poll runs 2s after load. -->
   <script src="/alerts.js?v=20260601a" defer></script>
   <script src="/chart.js?v=20260613" defer></script>
+  <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
   <header>
@@ -316,9 +317,11 @@ async function fetchAndRender() {
     const [oppsRes] = await Promise.all([
       fetch("/api/opportunities?" + params.toString()),
       refreshLoggedBets(),
+      Marks.load(),
     ]);
     cache = await oppsRes.json();
     render();
+    Marks.bind(document.getElementById("opps-body"), render);
     // Alert ping handled by shared /alerts.js (Phase 3.12) — runs on every
     // page, polls independently, persists seen-set in localStorage.
   } catch (e) {
@@ -390,6 +393,7 @@ function render() {
     const isMuted = userMuted.has(key);
     const rowClasses = [
       "opp-row",
+      Marks.rowClass(Marks.key(o)),
       hasBet         ? "has-bet"          : "",
       isHighlighted  ? "user-highlighted" : "",
       isMuted        ? "user-muted"       : "",
@@ -425,6 +429,7 @@ function render() {
             title: o.match_label, sub: o.market,
           })}" title="Odds history — CB + Pinnacle">📈</button>
           <a class="log-bet-link" href="/bets.html?${prefill}" title="Log this bet">Log</a>
+          ${Marks.buttonHTML(Marks.key(o), o)}
           <button class="row-flag-btn${isHighlighted ? ' active' : ''}"
                   data-action="highlight" data-key="${key}"
                   title="Highlight this row (amber). Toggle on/off.">★</button>
@@ -444,6 +449,7 @@ function render() {
     tr.style.cursor = "pointer";
     tr.addEventListener("click", (ev) => {
       if (ev.target.closest("a.log-bet-link")) return;
+      if (ev.target.closest("button.mark-btn")) return;
       if (ev.target.closest("button.row-flag-btn")) return;
       if (ev.target.closest("button.chart-btn")) return;  // open chart, don't navigate
       window.location.href = `/matches.html#match-${eid}`;
