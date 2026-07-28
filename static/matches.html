@@ -13,6 +13,7 @@
   <script src="/alerts.js?v=20260601a" defer></script>
   <!-- Shared odds-history chart drawer (src/ticks.py) -->
   <script src="/chart.js?v=20260613" defer></script>
+  <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
   <header>
@@ -249,9 +250,10 @@ async function pollStatus() {
 
 async function pollMatches() {
   try {
-    const r = await fetch("/api/matches");
+    const [r] = await Promise.all([fetch("/api/matches"), Marks.load()]);
     matchesCache = await r.json();
     render();
+    Marks.bind(document.getElementById("matches-body"), render);
   } catch (e) {
     document.getElementById("matches-body").innerHTML =
       `<tr><td colspan="15" class="empty">error loading matches</td></tr>`;
@@ -284,7 +286,7 @@ function render() {
   body.innerHTML = "";
   for (const r of rows) {
     const tr = document.createElement("tr");
-    tr.className = "match-row";
+    tr.className = ("match-row " + Marks.rowClass(Marks.key(r))).trim();
     tr.id = `match-${r.cb_event_id}`;
     tr.dataset.eid = r.cb_event_id;
     tr.innerHTML = `
@@ -313,6 +315,7 @@ function render() {
         })}" title="Odds history chart — CB + Pinnacle moneyline over time">📈 chart</button>
         <a class="log-bet-link" title="Log a bet on this match — fill in market/side/odds in the form"
            href="${buildBetPrefillUrl(r)}">Log</a>
+        ${Marks.buttonHTML(Marks.key(r), r)}
         <button class="expand-btn" data-eid="${r.cb_event_id}">+</button>
       </td>
     `;

@@ -36,9 +36,10 @@ from __future__ import annotations
 
 import csv
 import logging
+import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import NamedTuple
 
@@ -77,6 +78,24 @@ SCORE_LOOSE = 80.0
 SCORE_TIGHT = 65.0
 TIME_LOOSE_SECONDS = 3600   # ±1 h (was 600 = ±10 min — Phase 3.10)
 TIME_TIGHT_SECONDS = 3600   # ±1 h (was 300 = ±5  min — Phase 3.10; both tiers per user 2026-05-27)
+
+# Tennis is not scheduled to a clock (2026-07-28 unmatched-log audit).
+# Matches are "not before" / follow-on-court, so CB and Pinnacle legitimately
+# post start times hours apart for the same match. 8 026 fixtures scored at the
+# STRONG name tier and were still dropped by the ±1 h gate — 91 % of them
+# tennis (Wimbledon alone: 3 201). Spot-checked: 'landaluce m' vs
+# 'martin landaluce' = 90, 'humbert u' vs 'ugo humbert' = 90.
+#
+# Applied to the STRONG tier only. The medium tier keeps ±1 h because tennis is
+# exactly where surname collisions live ("lots of similar surnames" — the
+# Phase 3.10 note above), and a 65-79 name score plus a loose clock is how a
+# phantom match gets made. Both players must clear SCORE_LOOSE to earn the
+# wider window.
+TIME_LOOSE_BY_SPORT = {"tennis": 6 * 3600}    # ±6 h
+
+
+def _time_loose_for(sport: str | None) -> int:
+    return TIME_LOOSE_BY_SPORT.get((sport or "").lower(), TIME_LOOSE_SECONDS)
 
 # Backwards-compat alias (one legacy reference may still import this name).
 SCORE_THRESHOLD = SCORE_LOOSE
@@ -122,6 +141,53 @@ def _tokens_contradict(a_norm: str, b_norm: str) -> bool:
     return True
 
 
+# ── Initialism bridge (2026-07-28 unmatched-log audit) ───────────────────────
+# token_set_ratio cannot see that an initialism is the same club:
+#   'seinajoen jk' vs 'sjk'  = 26.7      (real match, dropped)
+#   'cr brasil al' vs 'crb'  = 26.7      (real match, dropped)
+# Both are below SCORE_TIGHT, so they were never matchable at any clock.
+#
+# This is the highest-risk fix in the audit — a wrong initialism invents a
+# fixture and therefore a phantom edge — so it is fenced in hard:
+#   * one side must be a single 2-4 char token, the other multi-token;
+#   * the expansion must be EXACT (no fuzz) against one of two constructions;
+#   * it only lifts the score to SCORE_TIGHT, never to the strong tier, so the
+#     pair still has to satisfy the ±1 h medium-tier clock; and
+#   * _initialism_bonus is only consulted when the OTHER side of the fixture
+#     already scores >= SCORE_LOOSE (see the caller) — it can never on its own
+#     turn two weak sides into a match.
+_INITIALISM_MAX = 4
+_ACRONYM_TOKEN_MAX = 3      # a token this short is itself likely an acronym
+
+
+def _acronym_variants(tokens: list[str]) -> set[str]:
+    """Ways a multi-word club name is shortened.
+
+    A: first letter of every token          seinajoen jk -> 'sj'
+    B: short tokens kept whole               seinajoen jk -> 's' + 'jk' = 'sjk'
+                                             cr brasil    -> 'cr' + 'b' = 'crb'
+    """
+    if len(tokens) < 2:
+        return set()
+    first = "".join(t[0] for t in tokens if t)
+    whole = "".join(t if len(t) <= _ACRONYM_TOKEN_MAX else t[0] for t in tokens if t)
+    return {first, whole}
+
+
+def _initialism_bonus(a_norm: str, b_norm: str) -> float:
+    """SCORE_TIGHT when one name is exactly the other's initialism, else 0."""
+    at, bt = a_norm.split(), b_norm.split()
+    for short, long_ in ((at, bt), (bt, at)):
+        if len(short) != 1 or len(long_) < 2:
+            continue
+        s = short[0]
+        if not (2 <= len(s) <= _INITIALISM_MAX) or not s.isalpha():
+            continue
+        if s in _acronym_variants(long_):
+            return SCORE_TIGHT
+    return 0.0
+
+
 def _flip_odds(o: Odds) -> Odds:
     """Home/away-swapped view of a reference Odds row (reversed fixture)."""
     import dataclasses
@@ -154,6 +220,12 @@ class UnmatchedEvent:
     best_pin_away: str | None
     best_pin_league: str | None
     best_score: float
+    # Why the best candidate was not accepted. Without these the log could not
+    # explain its own rejections: the 2026-07-28 audit needed a separate
+    # scoring experiment to discover that 8 026 perfect-NAME fixtures (91 %
+    # tennis) were being dropped purely by the ±1 h kickoff gate.
+    best_pin_start_time: datetime | None = None
+    reject_reason: str = ""
 
 
 class MatchResults(NamedTuple):
@@ -174,13 +246,13 @@ def match_events(cb_odds: list[Odds], pin_odds: list[Odds]) -> list[MatchedEvent
     return match_with_diagnostics(cb_odds, pin_odds, diagnostics=False).matched
 
 
-def _time_compatible(cb_time, pin_time) -> bool:
+def _time_compatible(cb_time, pin_time, sport: str | None = None) -> bool:
     """Could this pair EVER pass `_accept`, on time alone?
 
-    Both acceptance tiers currently use the same bound (TIME_LOOSE_SECONDS ==
-    TIME_TIGHT_SECONDS), so a pair outside it is rejected whatever it scores —
-    scoring it is pure waste. If the two bounds ever diverge again, the max of
-    them is still the correct, conservative gate.
+    The prefilter must never be tighter than the widest bound `_accept` could
+    use for this sport, or it would prune pairs that would have matched — so
+    it takes the max of the tight bound and this sport's loose bound (±6 h for
+    tennis, ±1 h elsewhere).
 
     An unknown kickoff on either side must stay compatible: `_accept` falls
     back to name confidence alone there, so those pairs are still matchable.
@@ -188,7 +260,7 @@ def _time_compatible(cb_time, pin_time) -> bool:
     if cb_time is None or pin_time is None:
         return True
     return abs((cb_time - pin_time).total_seconds()) <= max(
-        TIME_LOOSE_SECONDS, TIME_TIGHT_SECONDS)
+        _time_loose_for(sport), TIME_TIGHT_SECONDS)
 
 
 def match_with_diagnostics(
@@ -227,13 +299,23 @@ def match_with_diagnostics(
     scored: list[tuple[float, tuple, tuple, bool]] = []
     _cb_start = {k: v[0].start_time for k, v in cb_events.items()}
     _pin_start = {k: v[0].start_time for k, v in pin_events.items()}
+    _cb_sport = {k: v[0].sport for k, v in cb_events.items()}
     for cb_key, (ch_n, ca_n) in cb_norm.items():
         cb_t = _cb_start[cb_key]
+        cb_sp = _cb_sport[cb_key]
         for pin_key, (ph_n, pa_n) in pin_norm.items():
-            if not diagnostics and not _time_compatible(cb_t, _pin_start[pin_key]):
+            if not diagnostics and not _time_compatible(
+                    cb_t, _pin_start[pin_key], cb_sp):
                 continue
             score_h = fuzz.token_set_ratio(ch_n, ph_n)
             score_a = fuzz.token_set_ratio(ca_n, pa_n)
+            # Initialism bridge, anchored: only the side whose PARTNER already
+            # matches strongly may be lifted, so a bad expansion can never
+            # manufacture a fixture out of two weak sides.
+            if score_h >= SCORE_LOOSE and score_a < SCORE_TIGHT:
+                score_a = max(score_a, _initialism_bonus(ca_n, pa_n))
+            elif score_a >= SCORE_LOOSE and score_h < SCORE_TIGHT:
+                score_h = max(score_h, _initialism_bonus(ch_n, ph_n))
             score = (score_h + score_a) / 2.0
             # Orientation check: the reference book sometimes lists the same
             # fixture with home/away reversed. When the swapped orientation
@@ -283,6 +365,7 @@ def match_with_diagnostics(
                 c[0],
                 cb_events[c[1]][0].start_time,
                 pin_events[c[2]][0].start_time,
+                cb_events[c[1]][0].sport,
             )
         ),
         key=lambda c: -c[0],
@@ -316,13 +399,13 @@ def match_with_diagnostics(
     # For every unmatched CB event, find its best (still-unused) Pin candidate
     # regardless of threshold — for the curation loop.
     unmatched: list[UnmatchedEvent] = []
-    best_by_cb: dict[tuple, tuple[float, tuple]] = {}
-    for score, cb_key, pin_key, _flipped, _eligible in scored:
+    best_by_cb: dict[tuple, tuple[float, tuple, bool, bool]] = {}
+    for score, cb_key, pin_key, flipped, eligible in scored:
         if pin_key in used_pin:
             continue  # already taken by another CB event
         prev = best_by_cb.get(cb_key)
         if prev is None or score > prev[0]:
-            best_by_cb[cb_key] = (score, pin_key)
+            best_by_cb[cb_key] = (score, pin_key, flipped, eligible)
 
     for cb_key in cb_events:
         if cb_key in used_cb:
@@ -336,9 +419,10 @@ def match_with_diagnostics(
                 cb_start_time=cb_first.start_time,
                 best_pin_home=None, best_pin_away=None,
                 best_pin_league=None, best_score=0.0,
+                best_pin_start_time=None, reject_reason="no_candidate",
             ))
             continue
-        bscore, bkey = best
+        bscore, bkey, bflip, belig = best
         bpin_first = pin_events[bkey][0]
         unmatched.append(UnmatchedEvent(
             cb_home=cb_key[0], cb_away=cb_key[1],
@@ -348,6 +432,15 @@ def match_with_diagnostics(
             best_pin_away=bkey[1],
             best_pin_league=bpin_first.league,
             best_score=bscore,
+            best_pin_start_time=bpin_first.start_time,
+            reject_reason=_reject_reason(
+                bscore, belig,
+                cb_first.start_time, bpin_first.start_time,
+                cb_youth[cb_key] == ((pin_youth[bkey][1], pin_youth[bkey][0])
+                                     if bflip else pin_youth[bkey]),
+                cb_key[2] == bkey[2],
+                cb_first.sport,
+            ),
         ))
 
     log.info(
@@ -357,28 +450,143 @@ def match_with_diagnostics(
     return MatchResults(matched=matched, unmatched=unmatched)
 
 
+UNMATCHED_HEADER = [
+    "ts", "cb_home", "cb_away", "cb_league", "cb_start_time",
+    "best_pin_home", "best_pin_away", "best_pin_league", "best_score",
+    "best_pin_start_time", "reject_reason",
+]
+
+# Re-log a fixture only when something about it CHANGES, or once a day.
+#
+# The log is a curation input — it wants the SET of unmatched fixtures, not one
+# row per fixture per poll. Before this, every unmatched event was appended
+# every cycle: the 2026-07-28 audit found 13 803 338 rows describing 49 520
+# distinct fixtures (279x duplication, 2.1 GB over 47 days, ~45 MB/day).
+UNMATCHED_REFRESH_SEC = 86_400.0
+UNMATCHED_RETENTION_DAYS = 10.0
+UNMATCHED_PRUNE_EVERY_SEC = 3600.0
+_SEEN_MAX = 100_000        # dedupe-map eviction trigger (~2x a full live board)
+
+# fixture key -> (last_logged_monotonic-ish ts, state tuple)
+_unmatched_seen: dict[tuple, tuple[float, tuple]] = {}
+_last_prune = 0.0
+
+
+def _unmatched_key(u: UnmatchedEvent) -> tuple:
+    return (u.cb_home, u.cb_away,
+            u.cb_start_time.isoformat() if u.cb_start_time else "")
+
+
+def _unmatched_state(u: UnmatchedEvent) -> tuple:
+    """What we consider a meaningful change worth a new row."""
+    return (u.best_pin_home or "", u.best_pin_away or "",
+            round(u.best_score, 0), u.reject_reason)
+
+
+def prune_unmatched_log(path: Path = UNMATCHED_LOG_PATH, *,
+                        days: float = UNMATCHED_RETENTION_DAYS) -> int:
+    """Drop rows older than `days`. Returns the number removed.
+
+    Rewrites via a temp file + atomic replace so a crash mid-prune cannot
+    truncate the log. A row whose ts cannot be parsed is KEPT — pruning is
+    housekeeping and must never be the thing that eats data.
+
+    Also migrates the legacy 9-column layout (pre best_pin_start_time /
+    reject_reason) by padding surviving rows out to the current header, so an
+    existing log keeps working instead of interleaving two row widths.
+    """
+    if not path.exists():
+        return 0
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+    width = len(UNMATCHED_HEADER)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    removed = kept = 0
+    try:
+        with path.open(newline="", encoding="utf-8", errors="replace") as src, \
+             tmp.open("w", newline="", encoding="utf-8") as dst:
+            r = csv.reader(src)
+            w = csv.writer(dst)
+            try:
+                next(r)                       # old header discarded on purpose
+            except StopIteration:
+                tmp.unlink(missing_ok=True)
+                return 0
+            w.writerow(UNMATCHED_HEADER)
+            for row in r:
+                if not row:
+                    continue
+                try:
+                    if datetime.fromisoformat(row[0]) < cutoff:
+                        removed += 1
+                        continue
+                except (ValueError, IndexError):
+                    pass                      # unparseable ts → keep
+                w.writerow((row + [""] * width)[:width])
+                kept += 1
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    if removed:
+        log.info("unmatched_log: pruned %d row(s) older than %.0fd (%d kept) → %s",
+                 removed, days, kept, path)
+    return removed
+
+
 def log_unmatched(result: MatchResults, *, path: Path = UNMATCHED_LOG_PATH) -> None:
-    """Append every unmatched CB event + its best Pinnacle candidate to CSV."""
+    """Append unmatched CB events whose state changed since we last saw them."""
+    global _last_prune
     if not result.unmatched:
         return
+    # Housekeeping lives here so it cannot be forgotten by a caller. It must
+    # never be able to stop us writing the log, hence the bare guard.
+    if time.time() - _last_prune > UNMATCHED_PRUNE_EVERY_SEC:
+        _last_prune = time.time()
+        try:
+            prune_unmatched_log(path)
+        except Exception as e:
+            log.warning("unmatched_log prune failed: %s", e)
+    now_dt = datetime.now(tz=timezone.utc)
+    now = now_dt.isoformat(timespec="seconds")
+    ts = now_dt.timestamp()
+
+    # Evict fixtures we have not seen for two refresh windows. Without this the
+    # dedupe map grows for the life of the process — fixtures churn as events
+    # kick off, and nothing ever removed them.
+    if len(_unmatched_seen) > _SEEN_MAX:
+        stale = ts - 2 * UNMATCHED_REFRESH_SEC
+        for k in [k for k, (seen, _) in _unmatched_seen.items() if seen < stale]:
+            del _unmatched_seen[k]
+
+    fresh: list[UnmatchedEvent] = []
+    for u in result.unmatched:
+        key = _unmatched_key(u)
+        state = _unmatched_state(u)
+        prev = _unmatched_seen.get(key)
+        if prev is not None and prev[1] == state and ts - prev[0] < UNMATCHED_REFRESH_SEC:
+            continue
+        _unmatched_seen[key] = (ts, state)
+        fresh.append(u)
+    if not fresh:
+        return
+
     path.parent.mkdir(parents=True, exist_ok=True)
     new_file = not path.exists()
-    now = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if new_file:
-            w.writerow([
-                "ts", "cb_home", "cb_away", "cb_league", "cb_start_time",
-                "best_pin_home", "best_pin_away", "best_pin_league", "best_score",
-            ])
-        for u in result.unmatched:
+            w.writerow(UNMATCHED_HEADER)
+        for u in fresh:
             w.writerow([
                 now, u.cb_home, u.cb_away, u.cb_league or "",
                 u.cb_start_time.isoformat() if u.cb_start_time else "",
                 u.best_pin_home or "", u.best_pin_away or "",
                 u.best_pin_league or "", f"{u.best_score:.1f}",
+                u.best_pin_start_time.isoformat() if u.best_pin_start_time else "",
+                u.reject_reason,
             ])
-    log.info("unmatched_log: appended %d row(s) → %s", len(result.unmatched), path)
+    log.info("unmatched_log: appended %d of %d unmatched (rest unchanged) → %s",
+             len(fresh), len(result.unmatched), path)
 
 
 # Kickoff bucket for the event key, in seconds. Two same-named fixtures this far
@@ -437,13 +645,15 @@ def _normalize_event(home: str, away: str, sport: str) -> tuple[str, str]:
     return normalize_team(home), normalize_team(away)
 
 
-def _accept(score: float, cb_time, pin_time) -> bool:
+def _accept(score: float, cb_time, pin_time, sport: str | None = None) -> bool:
     """
     Two-tier acceptance for a candidate match.
 
     Below SCORE_TIGHT: never accept.
-    At/above SCORE_LOOSE: accept within ±TIME_LOOSE_SECONDS.
-    Between [SCORE_TIGHT, SCORE_LOOSE): require the tighter ±TIME_TIGHT_SECONDS.
+    At/above SCORE_LOOSE: accept within ±_time_loose_for(sport) — ±1 h for
+    everything except tennis, which gets ±6 h (see TIME_LOOSE_BY_SPORT).
+    Between [SCORE_TIGHT, SCORE_LOOSE): require ±TIME_TIGHT_SECONDS, which
+    stays at ±1 h for every sport.
     Either time unknown: fall back to the strong tier only — the time signal
     is unavailable, so name confidence has to carry the entire decision.
     """
@@ -453,5 +663,31 @@ def _accept(score: float, cb_time, pin_time) -> bool:
         return score >= SCORE_LOOSE
     delta = abs((cb_time - pin_time).total_seconds())
     if score >= SCORE_LOOSE:
-        return delta <= TIME_LOOSE_SECONDS
+        return delta <= _time_loose_for(sport)
     return delta <= TIME_TIGHT_SECONDS
+
+
+def _reject_reason(score: float, eligible: bool, cb_time, pin_time,
+                   youth_ok: bool, gender_ok: bool, sport: str | None) -> str:
+    """Why the best candidate lost. Ordered most-specific first.
+
+    Purely diagnostic — it never influences matching. Written into
+    unmatched_log.csv so the log can answer "why" without a separate
+    experiment (see UnmatchedEvent).
+    """
+    # Name first: a pair that never scored is simply not the same fixture.
+    # Reserving "wrong_fixture_guard" for pairs that DID score well enough to
+    # be candidates is what makes that reason worth reading.
+    if score < SCORE_TIGHT:
+        return "name"
+    if not gender_ok:
+        return "gender"
+    if not youth_ok:
+        return "youth"
+    if not eligible:
+        return "wrong_fixture_guard"
+    if _accept(score, cb_time, pin_time, sport):
+        return "taken"        # would have matched, but its Pin event was used
+    if cb_time is None or pin_time is None:
+        return "no_kickoff"   # medium tier needs a clock and we have none
+    return "time"

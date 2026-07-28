@@ -72,7 +72,7 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -236,6 +236,46 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             note TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger(account_id);
+        -- game_marks = "I have money on this GAME" (2026-07-28).
+        --
+        -- Deliberately NOT a bet: a bet is one position in one market, and the
+        -- question this answers is "how much am I on this fixture in total",
+        -- across however many positions and books. It records no odds, no side
+        -- and no settlement, and never touches PnL.
+        --
+        -- Two keys, because no single identifier covers every page (measured
+        -- live 2026-07-28):
+        --   game_key — "pin:<pin_event_id>" where the row has one. This is the
+        --     real cross-book identity: every book is matched against
+        --     Pinnacle, so the same fixture priced by setanta, liderbet and
+        --     betlive shares one pin_event_id even though all three spell the
+        --     teams differently ("Mjallby AIF" / "Mjallby" / "Mjallby Aif").
+        --     A name-only key gave that one game two different keys.
+        --   alt_key  — the name key (sport|home|away, normalized) computed by
+        --     static/marks.js. Consistency flags carry no pin_event_id at all,
+        --     and 871/1592 matches rows have no Pinnacle counterpart, so the
+        --     name key is the only handle those rows have.
+        -- upsert matches on EITHER key so marking a game from Arbs and then
+        -- from Anomalies updates one row instead of creating two.
+        --
+        -- Kickoff is in neither key: books disagree on start time by up to an
+        -- hour (that disagreement is the whole matching problem). start_time
+        -- is stored for display and pruning only.
+        CREATE TABLE IF NOT EXISTS game_marks (
+            game_key    TEXT PRIMARY KEY,
+            alt_key     TEXT,
+            sport       TEXT,
+            match_label TEXT NOT NULL,
+            start_time  TEXT,
+            amount      REAL,               -- nullable: marking without an amount is fine
+            note        TEXT,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_marks_start ON game_marks(start_time);
+        -- idx_marks_alt is created after the migration block below: on a DB
+        -- whose game_marks predates alt_key, indexing it here would fail
+        -- before the ALTER has had a chance to add the column.
     """)
     # Migration: bets.account_id (nullable) — which account a bet's stake/payout
     # flows through. NULL = legacy row, attributed via accounts.book_tag.
@@ -254,6 +294,15 @@ def _create_schema(conn: sqlite3.Connection) -> None:
     # manual_open_stake (2026-07-01): manually-set open-bet exposure per account.
     if "manual_open_stake" not in acct_cols:
         conn.execute("ALTER TABLE accounts ADD COLUMN manual_open_stake REAL NOT NULL DEFAULT 0")
+    # game_marks.alt_key (2026-07-28): the name-key alias, added a few hours
+    # after the table itself. CREATE TABLE IF NOT EXISTS does not backfill a
+    # column, so a DB created in between needs this ALTER or every mark write
+    # fails on the missing column.
+    mark_cols = {r[1] for r in conn.execute("PRAGMA table_info(game_marks)")}
+    if mark_cols and "alt_key" not in mark_cols:
+        conn.execute("ALTER TABLE game_marks ADD COLUMN alt_key TEXT")
+    # Safe for both paths now that the column is guaranteed to exist.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_marks_alt ON game_marks(alt_key)")
 
 
 def _require_conn() -> sqlite3.Connection:
@@ -688,6 +737,114 @@ def open_bet_ids() -> list[int]:
             "SELECT id FROM bets WHERE status = 'open'"
         ).fetchall()
     return [r["id"] for r in rows]
+
+
+# ── Game marks ───────────────────────────────────────────────────────────────
+# "I have money on this game" — see the game_marks DDL for why this is not a
+# bet. Marks are display state: they never enter PnL, capital or CLV.
+
+MARK_PRUNE_DAYS = 2.0
+
+
+def list_marks() -> list[dict]:
+    conn = _require_conn()
+    with _conn_lock:
+        rows = conn.execute(
+            "SELECT * FROM game_marks ORDER BY COALESCE(start_time, updated_at)"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _find_mark(conn, keys: list[str]):
+    """The existing mark reachable by any of `keys`, on either key column.
+
+    This is what makes a mark one-per-GAME: marking from Arbs stores a
+    pin-event key, marking the same fixture from Anomalies offers only a name
+    key, and either must find the other.
+    """
+    ks = [k for k in keys if k]
+    if not ks:
+        return None
+    q = ",".join("?" * len(ks))
+    return conn.execute(
+        f"SELECT * FROM game_marks WHERE game_key IN ({q}) OR alt_key IN ({q})",
+        ks + ks,
+    ).fetchone()
+
+
+def upsert_mark(game_key: str, *, match_label: str, alt_key: str | None = None,
+                sport: str | None = None, start_time: str | None = None,
+                amount: float | None = None, note: str | None = None) -> dict:
+    """Create or update one mark. Re-marking an existing game updates the
+    amount rather than stacking a second row — the mark is per game, and its
+    amount is the total you have on that fixture."""
+    if not game_key or not str(game_key).strip():
+        raise ValueError("game_key is required")
+    if not match_label or not str(match_label).strip():
+        raise ValueError("match_label is required")
+    if amount is not None and (amount < 0 or amount != amount):   # NaN-safe
+        raise ValueError("amount must be >= 0")
+    now = datetime.now(tz=timezone.utc).isoformat()
+    conn = _require_conn()
+    with _conn_lock:
+        existing = _find_mark(conn, [game_key, alt_key])
+        if existing is not None:
+            conn.execute(
+                """UPDATE game_marks SET
+                       alt_key     = COALESCE(?, alt_key),
+                       sport       = COALESCE(?, sport),
+                       match_label = ?,
+                       start_time  = COALESCE(?, start_time),
+                       amount      = ?,
+                       note        = ?,
+                       updated_at  = ?
+                   WHERE game_key = ?""",
+                (alt_key, sport, match_label, start_time, amount, note, now,
+                 existing["game_key"]),
+            )
+            found = existing["game_key"]
+        else:
+            conn.execute(
+                """INSERT INTO game_marks
+                       (game_key, alt_key, sport, match_label, start_time,
+                        amount, note, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (game_key, alt_key, sport, match_label, start_time, amount,
+                 note, now, now),
+            )
+            found = game_key
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM game_marks WHERE game_key = ?", (found,)
+        ).fetchone()
+    return dict(row)
+
+
+def delete_mark(game_key: str) -> bool:
+    """Delete by either key — the caller may only hold the name key."""
+    conn = _require_conn()
+    with _conn_lock:
+        cur = conn.execute(
+            "DELETE FROM game_marks WHERE game_key = ? OR alt_key = ?",
+            (game_key, game_key))
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def prune_marks(days: float = MARK_PRUNE_DAYS) -> int:
+    """Drop marks for games that kicked off more than `days` ago.
+
+    A mark with no start_time is KEPT — we cannot tell whether it is stale, and
+    silently deleting the user's own annotation is worse than leaving it.
+    """
+    cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days)).isoformat()
+    conn = _require_conn()
+    with _conn_lock:
+        cur = conn.execute(
+            "DELETE FROM game_marks WHERE start_time IS NOT NULL "
+            "AND start_time != '' AND start_time < ?", (cutoff,))
+        conn.commit()
+    return cur.rowcount
 
 
 # ── Test/dev helpers ─────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@
   <!-- Phase 3.12: cross-page alert poller. -->
   <script src="/alerts.js?v=20260601a" defer></script>
   <script src="/chart.js?v=20260613" defer></script>
+  <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
   <header>
@@ -232,9 +233,10 @@ async function fetchAndRender() {
     ? "/api/moves/cumulative?min_move=" + minMove + refQ
     : "/api/moves?min_move=" + minMove + refQ;
   try {
-    const [res] = await Promise.all([fetch(url), refreshLoggedBets()]);
+    const [res] = await Promise.all([fetch(url), refreshLoggedBets(), Marks.load()]);
     cache = await res.json();
     render();
+    Marks.bind(document.getElementById("moves-body"), render);
   } catch (e) {
     document.getElementById("moves-body").innerHTML =
       `<tr><td colspan="12" class="empty">error loading moves</td></tr>`;
@@ -301,7 +303,7 @@ function render() {
 
   if (mode === "cumulative") {
     body.innerHTML = cache.map(m => `
-      <tr class="${loggedBetKeys.has(moveBetKey(m)) ? 'has-bet' : ''}"
+      <tr class="${loggedBetKeys.has(moveBetKey(m)) ? 'has-bet' : ''} ${Marks.rowClass(Marks.key(m))}"
           ${loggedBetKeys.has(moveBetKey(m)) ? 'title="You already have a bet logged on this market"' : ''}>
         <td class="mono dim">${fmtTime(m.first_seen)}</td>
         <td class="mono dim">${fmtTime(m.start_time)}</td>
@@ -314,7 +316,7 @@ function render() {
         <td class="num mono">${fmtNum(m.first_prob_pct, 1)}% → ${fmtNum(m.last_prob_pct, 1)}%</td>
         <td class="num ${deltaClass(m.net_pp)}">${fmtSignedPp(m.net_pp)}</td>
         <td class="num dim">—</td>
-        <td>${chartCellMove(m)}<a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
+        <td>${chartCellMove(m)}<a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a>${Marks.buttonHTML(Marks.key(m), m)}</td>
       </tr>
     `).join("");
     return;
@@ -322,7 +324,7 @@ function render() {
 
   // Per-cycle mode
   body.innerHTML = cache.map(m => `
-    <tr class="${loggedBetKeys.has(moveBetKey(m)) ? 'has-bet' : ''}"
+    <tr class="${loggedBetKeys.has(moveBetKey(m)) ? 'has-bet' : ''} ${Marks.rowClass(Marks.key(m))}"
         ${loggedBetKeys.has(moveBetKey(m)) ? 'title="You already have a bet logged on this market"' : ''}>
       <td class="mono dim">${fmtTime(m.recorded_at)}</td>
       <td class="mono dim">${fmtTime(m.start_time)}</td>
@@ -335,7 +337,7 @@ function render() {
       <td class="num mono">${fmtNum(m.old_prob_pct, 1)}% → ${fmtNum(m.new_prob_pct, 1)}%</td>
       <td class="num ${deltaClass(m.delta_pp)}" title="${m.window_sec != null ? 'shift accumulated over ' + Math.max(1, Math.round(m.window_sec / 60)) + ' min' : ''}">+${m.delta_pp.toFixed(2)}${m.window_sec != null && m.window_sec > 90 ? `<span class="dim" style="font-size:10px"> /${Math.round(m.window_sec / 60)}m</span>` : ''}</td>
       <td class="num dim">${m.max_stake != null ? "$" + Math.round(m.max_stake) : "—"}</td>
-      <td>${chartCellMove(m)}<a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a></td>
+      <td>${chartCellMove(m)}<a class="log-bet-link" href="${buildMovePrefillUrl(m)}" title="Log a bet on this side">Log</a>${Marks.buttonHTML(Marks.key(m), m)}</td>
     </tr>
   `).join("");
 }

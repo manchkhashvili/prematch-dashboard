@@ -99,13 +99,14 @@ Everything that used to need a restart is switchable at `/config.html`:
 
 | Section | What |
 |---|---|
+| Everything | **Pause / Resume** — idles every poll loop (all books, Pinnacle, every scan) while leaving the server up, so you can resume from the page instead of killing the terminal. See below. |
 | Books | `crystalbet`, `liderbet`, `betlive`, `crocobet`, `setanta`, `xbet` (Pinnacle is the reference — always on) |
 | Scans | `anomaly`, `anomaly_extra`, `anomaly_watch`, `betlive_anomaly`, `soft_scan` |
 | Cadence | per-loop poll intervals, clamped server-side to a safe range |
 | Limits | CB anomaly horizon, Setanta / Crocobet full-ladder horizons |
 
 API: `GET /api/config`, `POST /api/config` (partial, e.g.
-`{"books":{"setanta":false}}`), `POST /api/config/reset`.
+`{"books":{"setanta":false}}` or `{"paused":true}`), `POST /api/config/reset`.
 
 **Why it saves real money:** the scans are the expensive part — a cold
 CrystalBet full-detail soccer sweep is ~278 s of CPU (html5lib + bs4). Books
@@ -125,7 +126,7 @@ back to the env-seeded defaults.
 | `SPORTS`                   | all-full      | Per-sport mode: `sport:mode` comma-separated. Modes: `full` (CB+Pin+detail), `list` (CB list-view only, no alt-lines), `off`. Example: `SPORTS=basketball:full,soccer:list`. |
 | `PINNACLE_POLL_SEC`        | 60            | Pinnacle poll cadence per sport. |
 | `CRYSTALBET_POLL_SEC`      | 60            | CrystalBet poll cadence per sport (was 180 in the Playwright era; a browser-free list cycle is ~1-2s). |
-| `CB_TRANSPORT`             | playwright    | CB byte-mover: `playwright` (browser) or `http` (browser-free ASP.NET postbacks via curl_cffi — same data, ~10× faster detail, no Chromium; parity-verified, see `scripts/cb_parity_check.py`). |
+| `CB_TRANSPORT`             | http          | CB byte-mover: `http` (browser-free ASP.NET postbacks via curl_cffi — ~10× faster detail, no Chromium) or `playwright` (browser, escape hatch if CB changes the postback protocol). Same data either way — parity-verified 2026-06-12 and re-verified 2026-07-28 (soccer 1017/1017 games + 311/311 markets, basketball 515/515, zero structural diffs): `scripts/cb_parity_check.py`. Note the browser path resolves DNS itself and so bypasses the `dns_pin` fix in `cb_http.py`. |
 | `CB_HEADLESS`              | 1             | `1` = headless Chromium, `0` = headed (useful for debugging selectors). Playwright transport only. |
 | `CB_USE_SAVED`             | 0             | `1` = parse saved HTML instead of scraping. Dev mode. |
 | `LIDERBET`                 | 0 (off)       | `1` = add Lider-Bet as a soft book (browser-free JSON; see `docs/liderbet.md`). Matched vs Pinnacle like CB (filter by book on Arbs) and cross-book on the Cross-book tab. |
@@ -149,9 +150,9 @@ supersedes them when set.
 - **`/arbs.html`** — opportunities sorted by edge%. `+EV` rows are bets where
   CB's price beats Pinnacle's no-vig fair; `ARB` rows lock in a guaranteed
   profit across both sides. Click any row to deep-link into the matches page.
-  Right-side action buttons: `Log` (prefill the bet form), `★` (manually
-  highlight in amber), `−` (mute and dim). A book filter (CB / Lider / Betlive /
-  All) appears when extra books are enabled.
+  Right-side action buttons: `Log` (prefill the bet form), `Mark` (see below),
+  `★` (manually highlight in amber), `−` (mute and dim). A book filter (CB /
+  Lider / Betlive / All) appears when extra books are enabled.
 - **`/cross-book.html`** — best price per market across your soft books, with
   Pinnacle's no-vig fair as the reference: `Edge%` = best book vs Pinnacle fair
   (**+EV**), and an `Arb` badge when the best opposing prices across books lock a
@@ -182,6 +183,47 @@ supersedes them when set.
   See "Runtime config" below.
 
 ---
+
+### Mark a game (`Mark`, next to `Log`)
+
+`Log` records **one position** as a bet. `Mark` records that you have money on
+the **fixture** — optionally a total across however many positions and books —
+and highlights that game's row on every board page. It carries no odds and no
+settlement, and never enters PnL, capital or CLV.
+
+Click `Mark` → optional amount → the row gets a green stripe everywhere the game
+appears, and the button reads `✓ 450`. Click again to change the amount; enter
+`0` to remove it. Stored in `game_marks` in `data/bets.db`; marks for games that
+kicked off more than 2 days ago are pruned automatically.
+
+Marks are keyed on `pin_event_id` where a row has one — that is the real
+cross-book identity, since every book is matched against Pinnacle, and one
+fixture can appear under three different spellings from three books. Rows with
+no Pinnacle counterpart (consistency flags, CB-only games) fall back to a
+normalized name key, which is also stored as an alias so a mark set from one
+page is found from another. Known gap: two rows that *both* lack
+`pin_event_id` **and** spell the teams differently (`Seinajoen JK` vs `SJK`)
+still key apart.
+
+API: `GET /api/marks`, `POST /api/marks`, `DELETE /api/marks/{game_key}`.
+
+### Pause everything
+
+Config tab → **Pause everything**. Every poll loop idles; the web server keeps
+serving so you unpause from the same page. Measured: CPU ~100 % → ~0.2 %.
+
+Pause is a top-level override and never touches the book/scan switches, so
+resuming continues exactly as before — there is no prior state to restore. It
+also does not clear any odds: the board stays as you left it and goes stale
+(the per-page status ages keep counting up), rather than emptying.
+
+Two things to know:
+
+- **Cooperative.** Work already in flight finishes; long CB detail sweeps abort
+  at their next progress checkpoint rather than running all 400+ games.
+- **Persists across restarts.** Pausing then closing the laptop will not
+  silently resume — a fresh start stays paused, with the Config section red,
+  until you press Resume.
 
 ## Edge math
 

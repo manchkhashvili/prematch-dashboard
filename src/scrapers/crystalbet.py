@@ -76,6 +76,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.models import Odds
+from src.normalize import is_simulated_league
 from src.scrapers import cb_detail, cb_http, change_cache
 from src.scrapers.sports import basketball, soccer, tennis
 
@@ -101,25 +102,39 @@ USER_AGENT = (
 
 # CB_TRANSPORT env knob — which transport moves the bytes. Parsing is
 # identical either way (same list/detail HTML fed to the same parsers).
-#   "playwright" (default) — the original browser-driven path.
-#   "http"                 — browser-free ASP.NET postbacks via cb_http
-#                            (~0.3-0.5s/game detail vs ~3s, no Chromium).
-# Verified live + parity-checked 2026-06-12 (scripts/cb_parity_check.py).
-CB_TRANSPORT = os.environ.get("CB_TRANSPORT", "playwright").strip().lower()
+#   "http" (default) — browser-free ASP.NET postbacks via cb_http
+#                      (~0.3-0.5s/game detail vs ~3s, no Chromium).
+#   "playwright"     — the original browser-driven path, kept as an escape
+#                      hatch if CB ever changes the postback protocol.
+#
+# Default flipped to http on 2026-07-28. Three reasons:
+#   * Parity re-verified that day with scripts/cb_parity_check.py — soccer
+#     1017/1017 games and 311/311 detail markets identical, basketball
+#     515/515 identical, zero structural diffs on either. Also verified
+#     2026-06-12 when the transport landed.
+#   * It is what every documented run command already used, so the old
+#     default only ever applied when someone launched main.py bare — e.g.
+#     from a VS Code task, which is how it kept biting.
+#   * The browser path resolves DNS through Chromium, which sidesteps the
+#     dns_pin fix in cb_http.py. When the OS resolver wedged on
+#     www.crystalbet.com, playwright ate a 60 s Page.goto timeout per poll
+#     at ~70 % CPU while http stayed up. Fewer moving parts is the point.
+CB_TRANSPORT = os.environ.get("CB_TRANSPORT", "http").strip().lower()
 if CB_TRANSPORT not in ("playwright", "http"):
     raise ValueError(
         f"CB_TRANSPORT={CB_TRANSPORT!r} — must be 'playwright' or 'http'"
     )
 _USE_HTTP_TRANSPORT = CB_TRANSPORT == "http"
-if _USE_HTTP_TRANSPORT:
-    log.info("CB_TRANSPORT=http — browser-free transport (no Playwright)")
+if not _USE_HTTP_TRANSPORT:
+    log.info("CB_TRANSPORT=playwright — browser transport (Chromium required; "
+             "note it resolves DNS itself and so bypasses the dns_pin fix)")
 
 # The hourly anomaly scan sweeps the WHOLE basketball board in full detail, so it
-# is the most transport-sensitive job. It defaults to the browser-free HTTP path
-# even when the main app runs Playwright — ExpandDetail is ~355 KB / ~0.3 s per
-# game over HTTP vs seconds of browser nav, and needs no Chromium. The cb_http
-# sessions are independent of the Playwright pages, so the two transports coexist
-# fine. Override with CB_ANOMALY_TRANSPORT=playwright to force the browser path.
+# is the most transport-sensitive job. It uses the browser-free HTTP path even
+# when the main app is forced back to Playwright — ExpandDetail is ~355 KB /
+# ~0.3 s per game over HTTP vs seconds of browser nav, and needs no Chromium.
+# The cb_http sessions are independent of the Playwright pages, so the two
+# transports coexist fine. Override with CB_ANOMALY_TRANSPORT=playwright.
 CB_ANOMALY_TRANSPORT = os.environ.get("CB_ANOMALY_TRANSPORT", "http").strip().lower()
 if CB_ANOMALY_TRANSPORT not in ("playwright", "http"):
     raise ValueError(
@@ -131,6 +146,30 @@ if _ANOMALY_USE_HTTP and not _USE_HTTP_TRANSPORT:
              "(no Playwright) even though CB_TRANSPORT=playwright")
 
 LEAGUE_SKIP = frozenset({"outright", "outrights"})
+
+
+def _clean_league(text: str) -> str:
+    """CB's league cell carries stray tabs/newlines from the markup.
+
+    Seen live: 'Finland\\t, Nelonen', 'Italy\\t, Serie A' — 1.4 M rows of the
+    unmatched log (2026-07-28 audit). The tab splits league grouping and makes
+    the same competition read as two different strings. Collapsing whitespace
+    alone leaves 'Finland , Nelonen'; the space before the separator is dropped
+    too so it reads like every other league ('England, Premier League').
+    """
+    return re.sub(r"\s+([,;:])", r"\1", re.sub(r"\s+", " ", text or "")).strip()
+
+
+def _skip_league(text: str) -> bool:
+    """Outrights, plus SIMULATED/esports shelves.
+
+    Every other book (crocobet, betlive, setanta, liderbet) already filters
+    simulated leagues at the scraper; CB was the only one that did not, so its
+    SRL fixtures flowed into matching — 427 839 rows (3.1 %) of the unmatched
+    log. SRL reuses REAL team names, so these are also phantom-match bait.
+    """
+    low = text.lower()
+    return any(s in low for s in LEAGUE_SKIP) or is_simulated_league(text)
 
 # Saved-HTML sample paths (one per sport — used by dry_run_parse_saved
 # and the CB_USE_SAVED path in app.py).
@@ -361,8 +400,8 @@ def _parse_html_for_sport(
             event_id = container["data-id"]
 
             hint = container.select_one("div.game_hint label")
-            league_text = hint.text.strip() if hint else ""
-            if any(skip in league_text.lower() for skip in LEAGUE_SKIP):
+            league_text = _clean_league(hint.text if hint else "")
+            if _skip_league(league_text):
                 skipped_outrights += 1
                 continue
 
@@ -742,8 +781,8 @@ def _extract_games_from_list_html(
         for container in game_table.select("div.GContainerList[data-id]"):
             event_id = container["data-id"]
             hint = container.select_one("div.game_hint label")
-            league_text = hint.text.strip() if hint else ""
-            if any(s in league_text.lower() for s in LEAGUE_SKIP):
+            league_text = _clean_league(hint.text if hint else "")
+            if _skip_league(league_text):
                 continue
 
             teams_div = container.select_one("div.teams_name")
@@ -1233,7 +1272,7 @@ _ANOMALY_SPORT_TABLE = {
 
 async def fetch_crystalbet_anomaly_ladders(
     sport_name: str, *, headed: bool = False,
-    start_within_hours: float | None = None,
+    start_within_hours: float | None = None, should_continue: Any = None,
 ) -> list[Odds]:
     """Full-detail anomaly scrape for ANY supported sport (2026-07-11 —
     the scan was basketball-only before). Same semantics as the basketball
@@ -1243,12 +1282,12 @@ async def fetch_crystalbet_anomaly_ladders(
     return await _fetch_for_sport(
         mod, headed=headed, force_detail=True,
         classify_override=clf, bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
-        start_within_hours=start_within_hours,
+        start_within_hours=start_within_hours, should_continue=should_continue,
     )
 
 
 async def fetch_crystalbet_basketball_anomaly_ladders(
-    *, headed: bool = False,
+    *, headed: bool = False, should_continue: Any = None,
 ) -> list[Odds]:
     """Full-detail basketball scrape for the hourly anomaly scanner.
 
@@ -1265,6 +1304,7 @@ async def fetch_crystalbet_basketball_anomaly_ladders(
         basketball, headed=headed, force_detail=True,
         classify_override=basketball.classify_market_title_permissive,
         bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
+        should_continue=should_continue,
     )
 
 

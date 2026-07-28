@@ -16,8 +16,8 @@ Common flavors (per-sport mode via SPORTS env var — see below):
 
     # Anomalies tab — separate hourly full-detail basketball scan, on top of
     # whatever (light) modes you run. Works even with everything in list mode.
-    # The scan is browser-free by default now (CB_ANOMALY_TRANSPORT=http), so it
-    # needs no Chromium even when CB_TRANSPORT=playwright. Add BETLIVE_ANOMALY=1
+    # Everything is browser-free by default now (CB_TRANSPORT=http), so no
+    # Chromium is needed anywhere. Add BETLIVE_ANOMALY=1
     # for the betlive favourite-flip watch (incl-OT vs regulation 1X2):
     ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 BETLIVE=1 \
       SPORTS=basketball:list,soccer:list,tennis:list python main.py 2>&1 | tee dashboard.log
@@ -41,8 +41,8 @@ Environment variables (dashboard mode):
                               by book on the Arbs tab) AND against each other for
                               cross-book arbs joined on the SportRadar match id
                               (/api/cross_arbs). Example (fully browser-free —
-                              all books over HTTP/JSON, anomaly scan incl.):
-                                CB_TRANSPORT=http ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 \
+                              all books over HTTP/JSON by default):
+                                ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 \
                                   SPORTS=basketball:list,soccer:list,tennis:list \
                                   LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
     EXTRA_BOOK_POLL_SEC=120   poll cadence for Lider-Bet / Betlive (JSON, cheap)
@@ -52,6 +52,11 @@ Environment variables (dashboard mode):
                               cheap refreshOdds watch (BETLIVE_WATCH_SEC=8,
                               ~50 KB/tick). BETLIVE_MIN_GAP_PP=2.0,
                               BETLIVE_ANOMALY_SPORT_IDS=6. Independent of BETLIVE=1.
+    CB_TRANSPORT=http         CB byte-mover. Default http (browser-free, no
+                              Chromium, ~10x faster detail; parity-verified via
+                              scripts/cb_parity_check.py). =playwright for the
+                              browser path — note it resolves DNS itself and so
+                              bypasses the dns_pin fix in cb_http.py.
     CB_ANOMALY_TRANSPORT=http anomaly scan transport (default http = browser-free,
                               even when CB_TRANSPORT=playwright). =playwright to force.
 
@@ -63,8 +68,8 @@ Environment variables (dashboard mode):
                               Independent of the CB basketball ladder scan. Heavy per
                               sweep (~30 MB/40 s); raise SOFT_SCAN_SEC if it bites.
 
-    Full example (browser-free CB + all anomaly checks + multi-book):
-      CB_TRANSPORT=http ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 SOFT_SCAN=1 \
+    Full example (all anomaly checks + multi-book; CB is browser-free by default):
+      ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 SOFT_SCAN=1 \
         SPORTS=basketball:list,soccer:list,tennis:list \
         LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
 

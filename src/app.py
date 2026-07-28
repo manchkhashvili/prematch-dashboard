@@ -23,7 +23,17 @@ Endpoints
   GET /api/opportunities  — +EV + ARB rows across both sports, sorted by edge%.
   GET /api/status         — per-sport last-update timestamps + error indicators.
   GET /api/unmatched      — CB events with no Pinnacle match (basketball + soccer).
+  GET/POST /api/config    — runtime toggles (Config tab), incl. the global
+                            `paused` override that idles every poll loop while
+                            leaving the server up.
+  /api/marks              — GET/POST/DELETE game marks ("I have money on this
+                            fixture"): display-only, never touches PnL.
   /                       — static dashboard (matches.html as index).
+
+While `paused`, the four handlers that re-run the matcher per request
+(/api/matches, /api/opportunities, /api/unmatched, /api/cross_book) serve a
+memoised result — the odds cannot change, and an open dashboard polls them from
+every tab.
 """
 from __future__ import annotations
 
@@ -304,6 +314,50 @@ _IDLE_POLL_SEC = 5
 _gate_state: dict[str, bool] = {}
 
 
+# While paused, the odds in _state cannot change — every writer is a poll loop
+# and they are all idling. So the matcher output for a given set of request
+# params is frozen too, and recomputing it per request is pure waste.
+#
+# This matters more than it looks: matching was measured at 64 % of a full
+# cycle's CPU, /api/opportunities runs it once per sport per book, and an open
+# dashboard polls that endpoint every few seconds from every tab. Without this,
+# "paused" still burned CPU proportional to how many tabs were open — which is
+# exactly what the user saw in the terminal.
+#
+# Correctness rests on one invariant: entries are only ever served while
+# paused, and the whole cache is dropped the moment we are not.
+_paused_result_cache: dict[tuple, Any] = {}
+
+
+def _paused_memo(key: tuple, compute):
+    """Compute `key` once per pause; recompute normally when running."""
+    if not runtime_config.is_paused():
+        if _paused_result_cache:
+            _paused_result_cache.clear()
+        return compute()
+    if key not in _paused_result_cache:
+        _paused_result_cache[key] = compute()
+    return _paused_result_cache[key]
+
+
+async def _paused_idle(what: str) -> bool:
+    """True (after a short sleep) while the app is globally paused.
+
+    For loops that don't go through `_gated` — Pinnacle has no toggle at all,
+    and the extra-book loop owns its own gate because switching a book OFF
+    also has to clear that book's odds. Pause deliberately does NOT clear
+    anything: resuming should show the board exactly as you left it, and the
+    per-source age counters make the staleness obvious meanwhile.
+    """
+    if not runtime_config.is_paused():
+        return False
+    if _gate_state.get(what) is not False:
+        log.info("%s: PAUSED — idling (config)", what)
+        _gate_state[what] = False
+    await asyncio.sleep(_IDLE_POLL_SEC)
+    return True
+
+
 async def _gated(section: str, key: str, what: str) -> bool:
     """Runtime on/off gate for a poll loop, called at the top of each iteration.
 
@@ -312,9 +366,16 @@ async def _gated(section: str, key: str, what: str) -> bool:
     no fetch, no parse, no CPU. Logs only on transitions so an off loop is
     silent in the log.
     """
-    on = runtime_config.is_on(section, key)
+    # `active` = switched on AND not globally paused. Pause is checked here,
+    # at the single gate every loop already passes through, so "pause
+    # everything" cannot miss a loop someone adds later.
+    on = runtime_config.active(section, key)
     if _gate_state.get(what) != on:
-        log.info("%s: %s (config)", what, "ON" if on else "OFF — idling")
+        if not on and runtime_config.is_paused():
+            reason = "PAUSED — idling"
+        else:
+            reason = "ON" if on else "OFF — idling"
+        log.info("%s: %s (config)", what, reason)
         _gate_state[what] = on
     if not on:
         await asyncio.sleep(_IDLE_POLL_SEC)
@@ -334,7 +395,9 @@ async def _sleep_gated(total: float, section: str, key: str) -> None:
         slice_s = min(remaining, _IDLE_POLL_SEC)
         await asyncio.sleep(slice_s)
         remaining -= slice_s
-        if not runtime_config.is_on(section, key):
+        # Wake early on a switch-off OR a global pause, so hitting Pause takes
+        # effect within _IDLE_POLL_SEC instead of up to a full cadence.
+        if not runtime_config.active(section, key):
             return
 
 
@@ -574,6 +637,11 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
     """
     sport = cfg.sport_name
     while True:
+        # Pinnacle is the reference and has no on/off toggle, but a global
+        # pause must still stop it — otherwise "pause everything" leaves the
+        # heaviest poller running.
+        if await _paused_idle(f"pinnacle {sport}"):
+            continue
         try:
             t0 = time.monotonic()
             odds = await cfg.pin_fetcher()
@@ -682,6 +750,12 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
         return
     was_on: bool | None = None
     while True:
+        # Global pause first, and WITHOUT the state-clearing below: a pause is
+        # "stop working, keep what you have", a toggle-off is "stop working and
+        # forget, so nothing downstream prices off a frozen snapshot".
+        if await _paused_idle(f"{book} {sport}"):
+            was_on = None       # force a fresh ON/OFF log line on resume
+            continue
         # Runtime gate (Config tab). Checked BEFORE any work, so an off book
         # costs one dict lookup per idle tick and nothing else — no fetch, no
         # parse, no tick write, no ladder-anomaly pass.
@@ -1005,7 +1079,7 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
                 _h = runtime_config.num("limits", "cb_expand_within_hours", 0.0)
                 odds = await cfg.cb_fetcher(
                     headed=not CB_HEADLESS,
-                    should_continue=lambda: runtime_config.book_on("crystalbet"),
+                    should_continue=lambda: runtime_config.active("books", "crystalbet"),
                     expand_within_hours=(_h if _h > 0 else None),
                 )
                 src_label = "live"
@@ -1107,6 +1181,7 @@ async def _compute_anomalies() -> bool:
             # ladder (incl. "Asian Handicap 1st Period" the strict classifier drops).
             cb_odds = await fetch_crystalbet_basketball_anomaly_ladders(
                 headed=not CB_HEADLESS,
+                should_continue=lambda: runtime_config.active("scans", "anomaly"),
             )
     except Exception as e:
         log.exception("anomaly scan: CB full-detail scrape failed")
@@ -1385,7 +1460,9 @@ async def _anomaly_extra_loop():
             try:
                 odds = await fetch_crystalbet_anomaly_ladders(
                     sport, headed=not CB_HEADLESS,
-                    start_within_hours=ANOMALY_EXTRA_HORIZON_H)
+                    start_within_hours=ANOMALY_EXTRA_HORIZON_H,
+                    should_continue=lambda: runtime_config.active(
+                        "scans", "anomaly_extra"))
                 anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
                 rows = [_anomaly_base_row(a) for a in anoms]
                 ts = datetime.now(tz=timezone.utc)
@@ -1875,6 +1952,8 @@ async def api_status() -> dict:
                 }
     return {
         "sports": sports_status,
+        # Top-level so any page can show a paused banner without parsing config.
+        "paused": runtime_config.is_paused(),
         "config": {
             "pin_poll_sec":  PINNACLE_POLL_SEC,
             "cb_poll_sec":   CRYSTALBET_POLL_SEC,
@@ -1892,6 +1971,10 @@ async def api_matches() -> list[dict]:
     when the matched Pin moneyline is 3-way (presence of "draw" key).
     Basketball rows have those fields null.
     """
+    return _paused_memo(("matches",), _compute_matches_now)
+
+
+def _compute_matches_now() -> list[dict]:
     all_rows: list[dict] = []
     # Per-sport detail-status / last-expanded maps. Each maintains its own
     # change_cache namespaced by sport (cb_detail caching).
@@ -2055,6 +2138,10 @@ async def api_anomalies_status() -> dict:
 @app.get("/api/unmatched")
 async def api_unmatched() -> list[dict]:
     """CB events across sports with no Pin match + their best below-threshold candidate."""
+    return _paused_memo(("unmatched",), _compute_unmatched_now)
+
+
+def _compute_unmatched_now() -> list[dict]:
     rows: list[dict] = []
     for sport in SPORT_NAMES:
         cb_odds = _state[sport]["cb"]["odds"]
@@ -2088,6 +2175,14 @@ async def api_opportunities(
     soft books against 1xbet instead of Pinnacle (the 1xbet Arbs tab); default
     ref=pin is byte-identical to the original CB-vs-Pin feed.
     """
+    return _paused_memo(
+        ("opportunities", min_edge, kind, book, ref),
+        lambda: _compute_opportunities_now(min_edge, kind, book, ref),
+    )
+
+
+def _compute_opportunities_now(min_edge, kind, book, ref) -> list[dict]:
+    """The real work. Split out so it can be memoised while paused."""
     ref = ref if isinstance(ref, str) and ref in ("pin", "xbet") else "pin"
     # 1xbet is a reference, never a soft book to price against itself.
     books = [b for b in enabled_soft_books() if b != ref]
@@ -2352,6 +2447,11 @@ async def api_cross_book(
     >=2 books price a side appear. Needs >=2 soft books enabled (LIDERBET=1 /
     BETLIVE=1, and/or CB).
     """
+    return _paused_memo(("cross_book", min_edge, kind),
+                        lambda: _compute_cross_book_now(min_edge, kind))
+
+
+def _compute_cross_book_now(min_edge, kind) -> list[dict]:
     rows: list[dict] = []
     for sport in SPORT_NAMES:
         rows.extend(_cross_book_for_sport(sport, min_edge, kind))
@@ -2552,6 +2652,50 @@ async def api_list_bets(
 ) -> list[dict]:
     rows = bets.list_bets(status=status, since=since, until=until)
     return [_bet_to_dict(r) for r in rows]
+
+
+# ── Game marks ───────────────────────────────────────────────────────────────
+# "I have money on this game" — a display-only annotation, deliberately not a
+# bet (see the game_marks DDL in src/bets.py). Nothing here feeds PnL, capital
+# or CLV; the marks tables is read by every board page to highlight the row.
+
+@app.get("/api/marks")
+async def api_list_marks() -> list[dict]:
+    try:
+        bets.prune_marks()          # drop games that kicked off >2 days ago
+    except Exception as e:
+        log.warning("mark prune failed: %s", e)
+    return bets.list_marks()
+
+
+@app.post("/api/marks")
+async def api_upsert_mark(payload: dict) -> dict:
+    """Create or update the mark on one game. Idempotent per game_key."""
+    from fastapi import HTTPException
+    amount = payload.get("amount")
+    if amount is not None:
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="amount must be a number")
+    try:
+        return bets.upsert_mark(
+            str(payload.get("game_key") or "").strip(),
+            match_label=str(payload.get("match_label") or "").strip(),
+            alt_key=(payload.get("alt_key") or None),
+            sport=payload.get("sport"),
+            start_time=payload.get("start_time"),
+            amount=amount,
+            note=payload.get("note"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.delete("/api/marks/{game_key:path}")
+async def api_delete_mark(game_key: str) -> dict:
+    """`:path` because a game_key contains '|' separators and team names."""
+    return {"deleted": bets.delete_mark(game_key)}
 
 
 @app.get("/api/bets/{bet_id}")

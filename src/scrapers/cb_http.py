@@ -50,12 +50,19 @@ import logging
 import re
 import time
 from typing import Iterator, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
+
+from src.scrapers import dns_pin
 
 log = logging.getLogger(__name__)
 
 BASE = "https://www.crystalbet.com"
 SPORTS_URL = f"{BASE}/Pages/Sports.aspx"
+
+# The OS resolver wedges on this host on the dev network (30s hang → "Could not
+# resolve host") while public resolvers answer instantly. Pin host→IP ourselves;
+# see src/scrapers/dns_pin.py. No-op on networks that resolve normally.
+_PIN = dns_pin.DnsPin(urlparse(BASE).hostname, urlparse(BASE).port or 443)
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -231,6 +238,7 @@ class CbHttpSession:
             **HEADERS,
             "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
         }
+        _PIN.pin(self.s)          # per-request: curl handle is per-thread
         r = self.s.post(SPORTS_URL, data=urlencode(body), headers=hdrs,
                         cookies=self.cookies, timeout=POST_TIMEOUT)
         txt = r.text
@@ -255,6 +263,7 @@ class CbHttpSession:
 
         self.close()
         self.s = Session(impersonate=IMPERSONATE)
+        _PIN.pin(self.s)
         r0 = self.s.get(SPORTS_URL, headers=HEADERS, timeout=GET_TIMEOUT)
         r0.raise_for_status()
         self.fields = hidden_fields(r0.text)

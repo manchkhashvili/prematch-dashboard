@@ -308,10 +308,38 @@ class TestModuleWrappers:
 # ── crystalbet.py transport dispatch ──────────────────────────────────────────
 
 class TestTransportDispatch:
-    def test_default_transport_is_playwright(self):
+    def test_default_transport_is_http(self):
+        """Flipped 2026-07-28 after re-running scripts/cb_parity_check.py:
+        soccer 1017/1017 games + 311/311 detail markets identical, basketball
+        515/515 identical, zero structural diffs. The browser path stays
+        available via CB_TRANSPORT=playwright, but it needs Chromium and
+        resolves DNS itself, bypassing the dns_pin fix in cb_http."""
         from src.scrapers import crystalbet
-        assert crystalbet.CB_TRANSPORT == "playwright"
-        assert crystalbet._USE_HTTP_TRANSPORT is False
+        assert crystalbet.CB_TRANSPORT == "http"
+        assert crystalbet._USE_HTTP_TRANSPORT is True
+
+    def test_playwright_transport_still_selectable(self, monkeypatch):
+        """The escape hatch must keep working if CB changes the postback
+        protocol — the flip is a default change, not a removal."""
+        import importlib
+        monkeypatch.setenv("CB_TRANSPORT", "playwright")
+        mod = importlib.reload(importlib.import_module("src.scrapers.crystalbet"))
+        try:
+            assert mod.CB_TRANSPORT == "playwright"
+            assert mod._USE_HTTP_TRANSPORT is False
+        finally:
+            monkeypatch.delenv("CB_TRANSPORT", raising=False)
+            importlib.reload(mod)
+
+    def test_invalid_transport_rejected(self, monkeypatch):
+        import importlib
+        monkeypatch.setenv("CB_TRANSPORT", "curl")
+        try:
+            with pytest.raises(ValueError, match="CB_TRANSPORT"):
+                importlib.reload(importlib.import_module("src.scrapers.crystalbet"))
+        finally:
+            monkeypatch.delenv("CB_TRANSPORT", raising=False)
+            importlib.reload(importlib.import_module("src.scrapers.crystalbet"))
 
     def test_expand_game_routes_to_http(self, monkeypatch):
         from datetime import datetime, timezone
