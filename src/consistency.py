@@ -85,15 +85,61 @@ HTFT_SHAPE_MIN_PROB = 0.05  # shape check only on outcomes the model gives >=5%
 # longer than 4.5 is longshot territory where flags were noise.
 HTFT_ODDS_MIN = 1.15
 HTFT_ODDS_MAX = 4.5
-# HT-vs-FT divergence: flag when the home win-prob at half time differs from the
-# full-time win-prob by at least this many percentage points. Surfaces matches
-# where the half and the full match are priced very differently (the HT/FT value
-# zone — e.g. a heavy FT favourite that's only lightly favoured at the break).
-HT_FT_DIV_PP = 13.0   # e.g. River Plate: 80% FT favourite but ~65% at HT (~14pp)
+# Sports the consistency engine evaluates. Basketball (its original home),
+# soccer (1X2 + HT/FT), and tennis (set winners vs match winner — see
+# set_vs_match below; tennis detail pages carry 15 markets that are all
+# functions of the same four best-of-3 outcomes).
+CONSISTENCY_SPORTS = ("basketball", "soccer", "tennis")
 
-# Sports the consistency engine evaluates. Basketball (its original home) and
-# soccer (1X2 + HT/FT). Other sports lack these cross-market relationships.
-CONSISTENCY_SPORTS = ("basketball", "soccer")
+# set_vs_match: how far the per-set win probability implied by the MATCH price
+# may sit from the one the book posts on the FIRST SET, in percentage points.
+# Both describe the same player's per-set strength, so a real gap is a genuine
+# contradiction rather than a modelling choice.
+#
+# Calibrated over ALL 525 checkable live tennis matches (2026-08-11), not a
+# sample — an early 130-match sample only covered CB's tighter naming scheme and
+# suggested 8.0, but the full board runs looser: p50 2.09pp, p90 6.13, p99 8.48,
+# max 9.32. 10.0 therefore sits just above every observation on a full board
+# (zero soft flags) while the case that prompted the check measured 21-26pp.
+SET_MATCH_PP = 10.0
+
+# The HARD order rule — P(match) must not sit below P(set 1) — only carries
+# information when the player is a CLEAR favourite. At p_set = 0.50 the match
+# probability is also 0.50, so there is no cushion and a one-tick pricing
+# difference flips which player is "favourite" between the two markets. That
+# produced 15 bogus violations on the full board, all near-even matches such as
+# match 1.70/1.80 against set 1.80/1.70 (a 2.4pp "impossibility").
+# At p_set = 0.60 the model gives a 4.8pp cushion, so require both a real
+# favourite and a violation big enough to clear devig noise.
+SET_MATCH_HARD_MIN_FAV = 0.60
+SET_MATCH_HARD_MIN_PP = 3.0
+
+
+def _match_prob_from_set(p: float) -> float:
+    """P(win a best-of-3) given a constant per-set win probability p.
+
+    Win 2-0 (p^2) or 2-1 (two orderings of one loss): p^2 + 2*p^2*(1-p)
+    = p^2 * (3 - 2p). Sets are treated as independent and identically
+    distributed — the standard first-order tennis model. It is an approximation
+    (serve order and momentum matter), which is exactly why the tolerance is a
+    generous 8pp rather than something tight.
+    """
+    return p * p * (3.0 - 2.0 * p)
+
+
+def _set_prob_from_match(p_match: float) -> Optional[float]:
+    """Invert _match_prob_from_set by bisection — it is strictly increasing on
+    [0,1], so the root is unique. Returns None outside the open interval."""
+    if not 0.0 < p_match < 1.0:
+        return None
+    lo, hi = 0.0, 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if _match_prob_from_set(mid) < p_match:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
 
 
 @dataclass(frozen=True)
@@ -249,7 +295,7 @@ def find_consistency_flags(
     decisive_prob: float = DECISIVE_PROB,
     extreme_pp: float = EXTREME_PP,
     htft_gap_pct: float = HTFT_GAP_PCT,
-    ht_ft_div_pp: float = HT_FT_DIV_PP,
+    ht_set_match_pp: float = SET_MATCH_PP,
 ) -> list[ConsistencyFlag]:
     """Find CB-internal contradictions across markets/periods. See module docs."""
     # Group: event_id -> period -> market_type -> [Odds]
@@ -329,20 +375,63 @@ def find_consistency_flags(
                            f"FT {ft.ml_phome*100:.0f}% (a short period should be closer "
                            f"to 50%)", q_dev - ft_dev)
 
-        # 4b. HT vs FT divergence — the home win-prob swings a lot between the
-        #     half and the full match (the HT/FT value zone: e.g. a heavy FT
-        #     favourite only lightly favoured at the break). Sport-agnostic;
-        #     uses the 2-way ML or the 3-way 1X2 home prob, whichever exists.
-        h1v, ftv = views.get("H1"), views.get("FT")
-        if h1v and ftv:
-            p_h1, p_ft = h1v.home_winprob, ftv.home_winprob
-            if p_h1 is not None and p_ft is not None:
-                div_pp = abs(p_ft - p_h1) * 100.0
-                if div_pp >= ht_ft_div_pp:
-                    mk("ht_vs_ft_divergence", "H1 vs FT",
-                       f"home win-prob {p_h1*100:.0f}% (HT) → {p_ft*100:.0f}% (FT), "
-                       f"{div_pp:.0f}pp apart — the half and the full match are "
-                       f"priced very differently", div_pp)
+        # (removed 2026-08-03) 4b. ht_vs_ft_divergence — flagged |P_home(H1) −
+        # P_home(FT)| >= 13pp. Deleted because it tested no relation: a large
+        # HT→FT gap is what a goal model REQUIRES, not a contradiction. Half-time
+        # carries far more draw mass than full time, so a favourite's win-prob is
+        # always compressed at the break. Measured over its own 1151 historical
+        # flags: ZERO fired on a balanced match (FT 35-65%) — the FT distribution
+        # was perfectly bimodal (all flags at FT <=29% or >=70%), i.e. it detected
+        # "this game has a big favourite". Severity was the raw gap, so it sorted
+        # the dashboard by favourite strength. It was also 26% of ALL consistency
+        # flags (1151/4452), crowding out the real ones. The genuine HT<->FT
+        # relationship is already modelled properly by htft_fair below (bivariate
+        # normal on the two margins, rho 0.70, mu from CB's own devigged ladder) —
+        # a raw percentage-point gap is the crude, wrong version of that.
+
+        # 4c. TENNIS: the first-set price vs the match price.
+        #
+        # A best-of-3 match is won by taking 2 sets, so with per-set win
+        # probability p the match probability is p^2*(3-2p) — strictly ABOVE p
+        # whenever p > 0.5, because you may lose the opening set and still win.
+        # That gives one hard structural rule and one quantitative one:
+        #
+        #   HARD  : a player favoured to win set 1 (p_set > 0.5) must be at least
+        #           as likely to win the MATCH. P(match) < P(set 1) is impossible,
+        #           not merely aggressive.
+        #   SOFT  : invert the match price to a per-set probability and compare it
+        #           with the posted first-set probability. Both are the same
+        #           quantity, so a gap beyond SET_MATCH_PP is a contradiction.
+        #
+        # Real case that prompted this (CB, ITF Campos Do Jordao women, 2026-08-11):
+        # match 1.40/2.35 -> P(win) 0.627, first set 1.11/4.30 -> P(win) 0.795.
+        # The match was priced BELOW its own first set by 16.8pp, and the two
+        # implied per-set numbers were 0.585 vs 0.795 — 21pp apart.
+        if m.sport == "tennis":
+            h1v, ftv = views.get("H1"), views.get("FT")
+            if h1v and ftv:
+                p_set, p_ft = h1v.home_winprob, ftv.home_winprob
+                if p_set is not None and p_ft is not None:
+                    # orient onto whichever player the SET market favours, so the
+                    # rule is always stated about a favourite
+                    ps, pm = (p_set, p_ft) if p_set >= 0.5 else (1 - p_set, 1 - p_ft)
+                    if (pm < ps and ps >= SET_MATCH_HARD_MIN_FAV
+                            and (ps - pm) * 100.0 >= SET_MATCH_HARD_MIN_PP):
+                        mk("tennis_set_match", "H1 vs FT",
+                           f"first-set favourite {ps*100:.0f}% is only {pm*100:.0f}% "
+                           f"to win the MATCH — impossible in a best-of-3, where "
+                           f"losing the opening set still leaves a route to victory",
+                           (ps - pm) * 100.0)
+                    else:
+                        implied = _set_prob_from_match(pm)
+                        if implied is not None:
+                            gap = abs(implied - ps) * 100.0
+                            if gap >= ht_set_match_pp:
+                                mk("tennis_set_match", "H1 vs FT",
+                                   f"match price implies a {implied*100:.0f}% per-set "
+                                   f"favourite but the first set is priced at "
+                                   f"{ps*100:.0f}% — {gap:.0f}pp apart on the same "
+                                   f"quantity", gap)
 
         # 5. HT/FT combo vs its own legs (1/1 and 2/2; raw odds, see module doc)
         combo = _first_htft(periods)

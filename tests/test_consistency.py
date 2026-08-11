@@ -272,29 +272,17 @@ def test_soccer_htft_combo_longer_than_product_flagged():
     assert combo and combo[0].sport == "soccer"
 
 
-def test_ht_vs_ft_divergence_flagged():
-    rows = [
-        _so("moneyline", "FT", {"home": 1.12, "draw": 8.0, "away": 15.0}),   # P_home ~0.82
-        _so("moneyline", "H1", {"home": 1.70, "draw": 2.9, "away": 5.0}),    # P_home ~0.52
+def test_ht_vs_ft_divergence_is_gone():
+    """ht_vs_ft_divergence was removed 2026-08-03 — a big HT→FT win-prob gap is
+    what a goal model requires (half time carries far more draw mass), not a
+    contradiction. These are the exact shapes it used to flag: an ordinary heavy
+    favourite. Nothing may fire on them again."""
+    ordinary_favourites = [
+        [_so("moneyline", "FT", {"home": 1.12, "draw": 8.0, "away": 15.0}),   # ~82% FT
+         _so("moneyline", "H1", {"home": 1.70, "draw": 2.9, "away": 5.0})],   # ~52% HT
+        [_o("moneyline", "FT", {"home": 1.12, "away": 4.35}),                 # ~80% FT
+         _o("moneyline", "H1", {"home": 1.35, "away": 2.55})],                # ~65% HT
     ]
-    div = [f for f in find_consistency_flags(rows) if f.kind == "ht_vs_ft_divergence"]
-    assert div and div[0].severity >= 18 and div[0].sport == "soccer"
-
-
-def test_soccer_small_ht_ft_gap_not_flagged():
-    rows = [
-        _so("moneyline", "FT", {"home": 1.9, "draw": 3.3, "away": 4.0}),
-        _so("moneyline", "H1", {"home": 2.2, "draw": 2.9, "away": 3.6}),
-    ]
-    div = [f for f in find_consistency_flags(rows) if f.kind == "ht_vs_ft_divergence"]
-    assert not div
-
-
-def test_basketball_ht_ft_divergence_river_plate():
-    # River Plate: FT 2-way 1.12/4.35 (~80% home), HT 2-way 1.35/2.55 (~65%) → ~14pp.
-    rows = [
-        _o("moneyline", "FT", {"home": 1.12, "away": 4.35}),
-        _o("moneyline", "H1", {"home": 1.35, "away": 2.55}),
-    ]
-    div = [f for f in find_consistency_flags(rows) if f.kind == "ht_vs_ft_divergence"]
-    assert div and 12 <= div[0].severity <= 16
+    for rows in ordinary_favourites:
+        kinds = {f.kind for f in find_consistency_flags(rows)}
+        assert "ht_vs_ft_divergence" not in kinds

@@ -4,10 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Anomalies — Prematch Dashboard</title>
-  <link rel="stylesheet" href="/style.css?v=20260527e" />
+  <link rel="stylesheet" href="/style.css?v=20260810a" />
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
-  <script src="/alerts.js?v=20260601a" defer></script>
+  <script src="/alerts.js?v=20260810a" defer></script>
   <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
@@ -39,7 +39,7 @@
       <input type="checkbox" id="spread-only" />
       Spread only
     </label>
-    <label class="alert-controls" title="Play a distinct chime (on any page) when the anomaly scan refreshes — every ~30 min.">
+    <label class="alert-controls" title="Play a distinct chime (on any page) when the anomaly scan refreshes — every ~30 min. This fires on EVERY refresh regardless of what was found; use Alert settings below to chime only on findings that clear a threshold.">
       <input type="checkbox" id="scan-alert" />
       Chime on refresh
     </label>
@@ -53,6 +53,59 @@
       full-detail basketball scrape. "Log" prefills a CB bet on the flagged rung.
     </span>
   </div>
+
+  <!-- Alert config (2026-08-10). "Chime on refresh" above fires on EVERY scan
+       regardless of what it found; these two fire only on findings that clear a
+       threshold, each with its own sound. Settings persist in localStorage and
+       are read by the shared alerts.js, so the chimes follow you across pages. -->
+  <details class="alert-config" id="alert-config">
+    <summary>Alert settings <span class="hint" id="alert-cfg-summary"></span></summary>
+    <div class="cfg-body">
+
+      <fieldset id="lad-alert-set">
+        <legend><label><input type="checkbox" id="lad-alert-on" /> Ladder alerts</label></legend>
+        <p class="cfg-note">
+          Chimes when a ladder violation appears — or when an existing one gets
+          materially worse. Fires if <b>any</b> filled criterion is met; leave a
+          box blank to ignore it. All blank = nothing fires.
+        </p>
+        <div class="cfg-row">
+          <label for="lad-alert-pct" title="Wrong-direction move as a % of the smaller price — the '% off' column.">% off ≥</label>
+          <input type="number" id="lad-alert-pct" step="0.5" min="0" placeholder="off" />
+          <span class="kind-unit">%</span>
+        </div>
+        <div class="cfg-row">
+          <label for="lad-alert-delta" title="Wrong-direction move in absolute decimal odds — the size of the jump in the 'Odds → odds' column.">Odds change ≥</label>
+          <input type="number" id="lad-alert-delta" step="0.01" min="0" placeholder="off" />
+          <span class="kind-unit">dec</span>
+        </div>
+        <div class="cfg-row">
+          <label for="lad-alert-step" title="Gap between the two adjacent rungs the violation sits across — the size of the jump in the 'Ladder (line → line)' column.">Ladder step ≥</label>
+          <input type="number" id="lad-alert-step" step="0.5" min="0" placeholder="off" />
+          <span class="kind-unit">pts</span>
+        </div>
+      </fieldset>
+
+      <fieldset id="cons-alert-set">
+        <legend><label><input type="checkbox" id="cons-alert-on" /> Consistency alerts</label></legend>
+        <p class="cfg-note">
+          Severity means a different thing per check — percentage points for the
+          moneyline checks, points for period totals, % for the HT/FT ones — so
+          each check gets its own bar. Blank inherits the default; unticking a
+          check silences it.
+        </p>
+        <div class="cfg-row">
+          <label for="cons-alert-default">Default severity ≥</label>
+          <input type="number" id="cons-alert-default" step="0.5" min="0" />
+        </div>
+        <details>
+          <summary class="cfg-note" style="cursor:pointer;">Per-check thresholds</summary>
+          <div class="kind-grid" id="cons-kind-grid"></div>
+        </details>
+      </fieldset>
+
+    </div>
+  </details>
 
   <div class="table-wrap">
     <table id="anomalies">
@@ -237,7 +290,7 @@ const KIND_LABEL = {
   quarter_ml_extreme: "quarter ML extreme",
   htft_combo: "HT/FT combo",
   htft_fair: "HT/FT fair (model)",
-  ht_vs_ft_divergence: "HT vs FT divergence",
+  tennis_set_match: "tennis: set vs match",
   betlive_flip: "betlive: favourite flip",
   betlive_ot_fold: "betlive: OT-fold",
   soccer_htft: "soccer HT/FT (soft)",
@@ -247,6 +300,140 @@ const KIND_LABEL = {
   soccer_curve: "soccer curve",
 };
 function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
+
+// ── Alert config (2026-08-10) ──────────────────────────────────────────────
+// Written here, read by the shared alerts.js so the chimes follow you across
+// pages. The localStorage key names below MUST mirror the ones in alerts.js —
+// tests/test_anomaly_alerts_wiring.py asserts they match, because a silent
+// typo here would leave the panel writing settings nothing ever reads.
+const LAD_ON      = "anom_ladder_alert_enabled";
+const LAD_PCT     = "anom_ladder_alert_pct";
+const LAD_DELTA   = "anom_ladder_alert_delta";
+const LAD_STEP    = "anom_ladder_alert_step";
+const CONS_ON     = "anom_cons_alert_enabled";
+const CONS_DEF    = "anom_cons_alert_default";
+const CONS_KINDS  = "anom_cons_alert_kinds";
+
+// Severity means a different quantity per check, so the panel labels each one.
+// Verified against the code that builds the flag, not guessed:
+//   pp  — ml_vs_spread (gap), favourite_flip (summed edges), quarter_ml_extreme,
+//         betlive_* (gap_pp), basketball_fav (gap_pp), soccer_identity,
+//         soccer_curve (off-curve deviation)
+//   pts — total_additivity (points the periods miss their parent by)
+//   %   — htft_combo, htft_fair, soccer_htft (ratio over the leg), soccer_fair (EV)
+const KIND_UNIT = {
+  ml_vs_spread: "pp", favourite_flip: "pp", total_additivity: "pts",
+  quarter_ml_extreme: "pp", htft_combo: "%", htft_fair: "%",
+  betlive_flip: "pp", betlive_ot_fold: "pp", soccer_htft: "%",
+  basketball_fav: "pp", soccer_fair: "%", soccer_identity: "pp",
+  soccer_curve: "pp",
+  // tennis_set_match severity is a probability gap in percentage points —
+  // either P(set1) − P(match) on the hard order violation, or the per-set
+  // disagreement on the soft one. Both are pp.
+  tennis_set_match: "pp",
+};
+
+function lsGet(k, dflt) {
+  try { const v = localStorage.getItem(k); return v === null ? dflt : v; }
+  catch (e) { return dflt; }
+}
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+function loadKindCfg() {
+  try { return JSON.parse(localStorage.getItem(CONS_KINDS) || "{}") || {}; }
+  catch (e) { return {}; }
+}
+function saveKindCfg(cfg) { lsSet(CONS_KINDS, JSON.stringify(cfg)); }
+
+const ladOn    = document.getElementById("lad-alert-on");
+const ladPct   = document.getElementById("lad-alert-pct");
+const ladDelta = document.getElementById("lad-alert-delta");
+const ladStep  = document.getElementById("lad-alert-step");
+const consOn   = document.getElementById("cons-alert-on");
+const consDef  = document.getElementById("cons-alert-default");
+
+// Defaults chosen to line up with what the tables already highlight: the % off
+// column goes bold at 10, and consClass() goes bold at severity 12.
+ladOn.checked   = lsGet(LAD_ON, "0") === "1";
+ladPct.value    = lsGet(LAD_PCT, "10");
+ladDelta.value  = lsGet(LAD_DELTA, "");
+ladStep.value   = lsGet(LAD_STEP, "");
+consOn.checked  = lsGet(CONS_ON, "0") === "1";
+consDef.value   = lsGet(CONS_DEF, "12");
+
+function renderKindGrid() {
+  const cfg = loadKindCfg();
+  const grid = document.getElementById("cons-kind-grid");
+  grid.innerHTML = Object.keys(KIND_LABEL).map(k => {
+    const c = cfg[k] || {};
+    const on = c.on !== false;                       // default: alert on
+    const sev = (c.sev === null || c.sev === undefined) ? "" : c.sev;
+    return `
+      <label title="Untick to never alert on this check">
+        <input type="checkbox" data-kind-on="${k}" ${on ? "checked" : ""} />
+        ${KIND_LABEL[k]}
+      </label>
+      <input type="number" data-kind-sev="${k}" step="0.5" min="0"
+             value="${sev}" placeholder="default" />
+      <span class="kind-unit">${KIND_UNIT[k] || ""}</span>`;
+  }).join("");
+}
+
+function readKindGrid() {
+  const cfg = {};
+  for (const el of document.querySelectorAll("[data-kind-on]")) {
+    const k = el.getAttribute("data-kind-on");
+    cfg[k] = cfg[k] || {};
+    cfg[k].on = el.checked;
+  }
+  for (const el of document.querySelectorAll("[data-kind-sev]")) {
+    const k = el.getAttribute("data-kind-sev");
+    cfg[k] = cfg[k] || {};
+    const raw = el.value.trim();
+    cfg[k].sev = raw === "" ? null : Number(raw);
+  }
+  return cfg;
+}
+
+function syncAlertCfg() {
+  lsSet(LAD_ON, ladOn.checked ? "1" : "0");
+  lsSet(LAD_PCT, ladPct.value.trim());
+  lsSet(LAD_DELTA, ladDelta.value.trim());
+  lsSet(LAD_STEP, ladStep.value.trim());
+  lsSet(CONS_ON, consOn.checked ? "1" : "0");
+  lsSet(CONS_DEF, consDef.value.trim());
+  saveKindCfg(readKindGrid());
+  paintAlertCfg();
+}
+
+function paintAlertCfg() {
+  document.getElementById("lad-alert-set").classList.toggle("off", !ladOn.checked);
+  document.getElementById("cons-alert-set").classList.toggle("off", !consOn.checked);
+  // Summarise in the closed state so the settings are legible without opening.
+  const parts = [];
+  if (ladOn.checked) {
+    const c = [];
+    if (ladPct.value.trim())   c.push(`${ladPct.value.trim()}% off`);
+    if (ladDelta.value.trim()) c.push(`Δ${ladDelta.value.trim()}`);
+    if (ladStep.value.trim())  c.push(`step ${ladStep.value.trim()}`);
+    parts.push(c.length ? `ladders: ${c.join(" or ")}` : "ladders: no criterion set");
+  }
+  if (consOn.checked) {
+    const cfg = loadKindCfg();
+    const off = Object.keys(KIND_LABEL).filter(k => (cfg[k] || {}).on === false).length;
+    parts.push(`consistency: sev ≥ ${consDef.value.trim() || "?"}`
+               + (off ? ` (${off} check${off === 1 ? "" : "s"} silenced)` : ""));
+  }
+  document.getElementById("alert-cfg-summary").textContent =
+    parts.length ? "— " + parts.join(" · ") : "— off";
+}
+
+renderKindGrid();
+paintAlertCfg();
+for (const el of [ladOn, ladPct, ladDelta, ladStep, consOn, consDef]) {
+  el.addEventListener("change", syncAlertCfg);
+}
+document.getElementById("cons-kind-grid").addEventListener("change", syncAlertCfg);
 
 // Build a /bets.html prefill for a consistency flag.
 //

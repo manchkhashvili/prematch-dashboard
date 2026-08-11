@@ -27,6 +27,13 @@
   "use strict";
 
   const POLL_MS = 30_000;
+  // Collapse guard (2026-08-03). If a poll returns fewer than COLLAPSE_RATIO of
+  // the keys we were tracking, treat it as a feed glitch rather than genuine
+  // expiry and do NOT prune the seen-set — otherwise the recovery poll re-alerts
+  // on everything. MIN_KEYS_FOR_PRUNE keeps the guard from tripping on tiny
+  // boards where 2 → 1 rows is a normal change.
+  const COLLAPSE_RATIO = 0.5;
+  const MIN_KEYS_FOR_PRUNE = 4;
   const ENABLED_KEY   = "alert_enabled";
   const THRESHOLD_KEY = "alert_threshold";
   const SEEN_KEY      = "arbs_seen_alerts_v1";
@@ -51,6 +58,30 @@
   // scan timestamp so we chime once per new scan (every ~30 min), not per poll.
   const SCAN_ENABLED_KEY = "anomaly_scan_alert_enabled";
   const SCAN_SEEN_TS_KEY = "anomaly_scan_seen_ts";
+
+  // 2026-08-10: CONTENT-based anomaly alerts, as opposed to SCAN_ENABLED_KEY
+  // above which chimes on every refresh regardless of what was found. Two
+  // independent paths with their own sounds, because a ladder violation is
+  // bettable (family A, the detector we trust most) while a consistency flag is
+  // diagnostic — worth telling apart by ear without looking at the screen.
+  // Config is written by the panel on /anomalies.html; these key names MUST
+  // mirror the constants there (tests/test_anomaly_alerts_wiring.py pins that).
+  const LAD_ON      = "anom_ladder_alert_enabled";
+  const LAD_PCT     = "anom_ladder_alert_pct";
+  const LAD_DELTA   = "anom_ladder_alert_delta";
+  const LAD_STEP    = "anom_ladder_alert_step";
+  const CONS_ON     = "anom_cons_alert_enabled";
+  const CONS_DEF    = "anom_cons_alert_default";
+  const CONS_KINDS  = "anom_cons_alert_kinds";
+  const LAD_SEEN_KEY    = "anom_ladder_seen_v1";
+  const LAD_SEEDED_KEY  = "anom_ladder_seeded";
+  const CONS_SEEN_KEY   = "anom_cons_seen_v1";
+  const CONS_SEEDED_KEY = "anom_cons_seeded";
+  // Re-alert when a finding gets materially worse, not on every poll it stays
+  // above the bar. Deliberately RELATIVE: consistency severity is pp for some
+  // checks, points for others and % for the HT/FT ones, so a fixed "+5" step
+  // would mean wildly different things per check. 1.5x is unit-free.
+  const RE_ALERT_FACTOR = 1.5;
 
   // ── Persistence ────────────────────────────────────────────────────────
   function loadSeen() {
@@ -204,6 +235,59 @@
     });
   }
 
+  function playLadderAlert() {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    // DISTINCT from the other three: a fast DESCENDING 4-note sawtooth run
+    // (~0.4s) — reads as "warning", and nothing else here uses a sawtooth.
+    // A ladder violation is the most trustworthy thing we flag, so it gets a
+    // sound with some bite, but far shorter than the 2.5s +EV buzzer.
+    const now = ctx.currentTime;
+    const notes = [880, 740, 622, 523];
+    const noteDur = 0.10;
+    const master = ctx.createGain();
+    master.gain.value = 0.13;
+    master.connect(ctx.destination);
+    notes.forEach((freq, i) => {
+      const t = now + i * noteDur;
+      const osc = ctx.createOscillator();
+      const env = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.value = freq;
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.exponentialRampToValueAtTime(1.0, t + 0.008);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + noteDur - 0.008);
+      osc.connect(env).connect(master);
+      osc.start(t);
+      osc.stop(t + noteDur);
+    });
+  }
+
+  function playConsistencyAlert() {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    // Deliberately the QUIETEST and softest of the four: one low sine note with
+    // a downward pitch bend (~0.35s). A consistency flag is diagnostic — "go
+    // look" — so it should register without demanding attention the way the
+    // ladder run or the +EV buzzer do.
+    const now = ctx.currentTime;
+    const dur = 0.35;
+    const master = ctx.createGain();
+    master.gain.value = 0.11;
+    master.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(294, now + dur);
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.exponentialRampToValueAtTime(1.0, now + 0.02);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(env).connect(master);
+    osc.start(now);
+    osc.stop(now + dur);
+  }
+
   function loadMoveSeen() {
     try {
       const raw = localStorage.getItem(MOVE_SEEN_KEY);
@@ -316,8 +400,25 @@
     // Prune keys that no longer appear (game settled, line pulled, dropped
     // below min_edge=1). Keeps localStorage bounded — the dashboard runs
     // for hours; without pruning the map would grow indefinitely.
-    for (const k of [...seenKeys.keys()]) {
-      if (!currentKeys.has(k)) seenKeys.delete(k);
+    //
+    // BUT never prune on a COLLAPSE. The feed can briefly go empty or near-empty
+    // (a reference-book fetch returning 0 rows blanks every opportunity for that
+    // sport). Pruning then forgets every key, so when the list returns one poll
+    // later EVERY row looks brand new and the alarm re-fires on opportunities
+    // the user already dismissed — the exact "list disappears, fake alerts fire
+    // again" bug. A real list never loses most of its rows in one 30 s poll, so
+    // treat that as a feed glitch and keep the seen-set intact.
+    const collapsed = seenKeys.size >= MIN_KEYS_FOR_PRUNE
+      && currentKeys.size < seenKeys.size * COLLAPSE_RATIO;
+    if (!collapsed) {
+      for (const k of [...seenKeys.keys()]) {
+        if (!currentKeys.has(k)) seenKeys.delete(k);
+      }
+    } else {
+      try {
+        console.warn(`[alert] feed collapsed ${seenKeys.size} → ${currentKeys.size} `
+                     + `opportunities; keeping seen-set (no re-alert on recovery)`);
+      } catch (e) {}
     }
     saveSeen(seenKeys);
 
@@ -421,6 +522,152 @@
     } catch (e) {}
   }
 
+  // ── Anomaly CONTENT alerts (2026-08-10) ─────────────────────────────────
+  // Ladder violations and consistency flags, each gated on its own thresholds
+  // from the Alert settings panel on /anomalies.html. Feeds off
+  // /api/anomalies/alerts, which is the cheap sibling of /api/anomalies — no
+  // Pinnacle re-matching, so this is safe to poll every 30s from every tab.
+
+  function cfgNum(key) {
+    // Blank/absent/garbage → null, meaning "this criterion is off". Explicitly
+    // NOT 0: a 0 threshold would fire on every row, which is the opposite of
+    // what leaving a box empty should mean.
+    let raw;
+    try { raw = localStorage.getItem(key); } catch (e) { return null; }
+    if (raw === null || String(raw).trim() === "") return null;
+    const n = Number(raw);
+    return isNaN(n) ? null : n;
+  }
+
+  function loadSeenMap(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return new Map();
+      return new Map(JSON.parse(raw));
+    } catch (e) { return new Map(); }
+  }
+  function saveSeenMap(key, map) {
+    try { localStorage.setItem(key, JSON.stringify([...map])); } catch (e) {}
+  }
+
+  function ladderKey(r) {
+    return ["lad", r.book || "", r.event_id || "", r.market || "", r.period || "",
+            r.side || "", r.line_lo, r.line_hi].join("|");
+  }
+  function consKey(f) {
+    return ["cons", f.book || "", f.event_id || "", f.kind || "",
+            f.periods || "", f.outcome || ""].join("|");
+  }
+
+  // OR across the filled criteria, exactly as the panel describes it. Every
+  // criterion blank → nothing fires (rather than everything).
+  function ladderPasses(r) {
+    const pct = cfgNum(LAD_PCT), delta = cfgNum(LAD_DELTA), step = cfgNum(LAD_STEP);
+    if (pct   !== null && r.pct   != null && r.pct   >= pct)   return true;
+    if (delta !== null && r.delta != null && r.delta >= delta) return true;
+    if (step  !== null && r.step  != null && r.step  >= step)  return true;
+    return false;
+  }
+
+  function consPasses(f, kindCfg, dflt) {
+    const k = kindCfg[f.kind] || {};
+    if (k.on === false) return false;               // check silenced
+    const bar = (k.sev === null || k.sev === undefined) ? dflt : k.sev;
+    if (bar === null || bar === undefined || isNaN(bar)) return false;
+    return f.severity != null && f.severity >= bar;
+  }
+
+  /* Shared "new or materially worse" pass over one feed.
+   *
+   * Mirrors the opportunity path: a row fires when we have not seen its key, or
+   * when its magnitude has grown by RE_ALERT_FACTOR since we last fired on it.
+   * Rows BELOW threshold are still tracked (magnitude recorded) so that a row
+   * which drifts up into range later reads as new rather than being suppressed.
+   * Returns the number of rows that should sound.
+   */
+  function evaluateFeed(rows, seen, passes, magnitudeOf, seededKey) {
+    const isFirstPass = !localStorage.getItem(seededKey);
+    const currentKeys = new Set();
+    let fires = 0;
+    for (const r of rows) {
+      const k = r.__key;
+      currentKeys.add(k);
+      const mag = magnitudeOf(r);
+      const ok = passes(r);
+      const prev = seen.get(k);
+      if (!ok) {
+        // Track it at its current magnitude WITHOUT arming a re-alert: if it
+        // later clears the bar we want that to read as new.
+        if (prev === undefined) seen.set(k, null);
+        continue;
+      }
+      const isNew = prev === undefined || prev === null
+                    || (mag != null && mag >= prev * RE_ALERT_FACTOR);
+      if (isNew) {
+        seen.set(k, mag);
+        if (!isFirstPass) fires++;
+      }
+    }
+    // Prune vanished keys, with the same collapse guard the opportunity path
+    // uses: a feed that briefly empties (scan mid-write, book unreachable) must
+    // not wipe the seen-set, or the recovery poll re-alerts on everything.
+    const collapsed = seen.size >= MIN_KEYS_FOR_PRUNE
+      && currentKeys.size < seen.size * COLLAPSE_RATIO;
+    if (!collapsed) {
+      for (const k of [...seen.keys()]) if (!currentKeys.has(k)) seen.delete(k);
+    }
+    if (isFirstPass) {
+      try { localStorage.setItem(seededKey, "1"); } catch (e) {}
+      return 0;
+    }
+    return fires;
+  }
+
+  let ladderSeen = loadSeenMap(LAD_SEEN_KEY);
+  let consSeen   = loadSeenMap(CONS_SEEN_KEY);
+
+  async function pollAnomalyFindings() {
+    const ladOn  = (localStorage.getItem(LAD_ON) === "1");
+    const consOn = (localStorage.getItem(CONS_ON) === "1");
+    if (!ladOn && !consOn) return;      // nothing enabled → don't even fetch
+
+    let feed;
+    try {
+      const r = await fetch("/api/anomalies/alerts");
+      if (!r.ok) return;
+      feed = await r.json();
+    } catch (e) { return; }
+    if (!feed.enabled) return;          // scanner off — nothing to say
+
+    if (ladOn) {
+      const rows = (feed.ladders || []).map(r => { r.__key = ladderKey(r); return r; });
+      const n = evaluateFeed(rows, ladderSeen, ladderPasses,
+                             r => r.pct, LAD_SEEDED_KEY);
+      saveSeenMap(LAD_SEEN_KEY, ladderSeen);
+      if (n > 0) {
+        if (claimSound("anom-ladder")) playLadderAlert();
+        try { console.log(`[ladder-alert] ${n} new/worsened ladder violation(s)`); }
+        catch (e) {}
+      }
+    }
+
+    if (consOn) {
+      let kindCfg = {};
+      try { kindCfg = JSON.parse(localStorage.getItem(CONS_KINDS) || "{}") || {}; }
+      catch (e) { kindCfg = {}; }
+      const dflt = cfgNum(CONS_DEF);
+      const rows = (feed.consistency || []).map(f => { f.__key = consKey(f); return f; });
+      const n = evaluateFeed(rows, consSeen, f => consPasses(f, kindCfg, dflt),
+                             f => f.severity, CONS_SEEDED_KEY);
+      saveSeenMap(CONS_SEEN_KEY, consSeen);
+      if (n > 0) {
+        if (claimSound("anom-cons")) playConsistencyAlert();
+        try { console.log(`[consistency-alert] ${n} new/worsened flag(s)`); }
+        catch (e) {}
+      }
+    }
+  }
+
   // Initial poll + interval. Stagger by 2s so we don't slam the API on
   // page-load alongside the page's own /api/opportunities fetch.
   setTimeout(poll, 2_000);
@@ -432,4 +679,18 @@
   // Scan-refresh poll offset another 1s.
   setTimeout(pollScan, 4_000);
   setInterval(pollScan, POLL_MS);
+  // Anomaly content alerts, offset another 1s again.
+  setTimeout(pollAnomalyFindings, 5_000);
+  setInterval(pollAnomalyFindings, POLL_MS);
+
+  // Test seam. `module` does not exist in a browser, so this is inert there and
+  // changes nothing about how the page behaves. It exists because the alert
+  // DECISION rules — OR across filled criteria, blank-means-off, the
+  // new-or-worsened re-alert, silent seeding, the collapse guard — are exactly
+  // the kind of logic that has broken here before while the page still looked
+  // fine. tests/test_anomaly_alerts_logic.py drives these under node.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { ladderPasses, consPasses, evaluateFeed, cfgNum,
+                       ladderKey, consKey, RE_ALERT_FACTOR };
+  }
 })();

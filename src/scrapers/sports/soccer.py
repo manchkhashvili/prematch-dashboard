@@ -497,7 +497,7 @@ _RE_HTFT_EXCLUDE = re.compile(r"\band\b|&|correct|exact|\btotal\b|score|goals")
 
 def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
     """Strict soccer classification PLUS the Halftime/Fulltime combo, for the
-    anomaly scanner's HT/FT checks (htft_combo, ht_vs_ft_divergence, soft_scan).
+    anomaly scanner's HT/FT checks (htft_combo, htft_fair, soft_scan).
 
     The strict/+EV path SKIPS Halftime/Fulltime (not matchable against Pinnacle);
     here we capture it as market_type 'htft' so the engine can compare the 1/1

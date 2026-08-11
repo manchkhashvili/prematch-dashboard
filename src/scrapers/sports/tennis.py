@@ -34,6 +34,9 @@ Pinnacle sport_id: 33 (verify on first live run; if wrong, adjust in pinnacle.py
 """
 from __future__ import annotations
 
+import re
+
+from src.scrapers.cb_detail import MarketClassification
 from src.scrapers.sports import basketball
 
 SPORT_ID = 22
@@ -57,11 +60,92 @@ def parse_div_odds(container, event_id, home, away, league, start_time, fetched_
 
 
 def classify_market_title(title):
-    """List-only mode — no detail-page expansion for tennis in v1.
+    """Tennis detail-page market titles → canonical MarketClassification.
 
-    Returns None for every title so any accidental call into
-    cb_detail.parse_detail_page emits no Odds. Phase 3.x can revisit if
-    tennis ever needs full-mode detail expansion (the per-game work would
-    be heavier than basketball given 500+ tennis matches/day).
+    Tennis used to return None for everything (list-only mode), so ML / games
+    spread / games total were the only tennis markets that ever existed. But a CB
+    tennis detail page carries **15 markets on every match** (surveyed live
+    2026-08-11, present on 8/8 sampled matches), and they are all functions of the
+    SAME four best-of-3 outcomes (2:0, 2:1, 1:2, 0:2). That over-determination is
+    what makes tennis worth classifying: the markets must satisfy exact arithmetic
+    identities, so contradictions are provable without any model.
+
+    IMPORTANT — CB serves tennis under **two different naming schemes**, almost
+    certainly two upstream feeds. Surveyed across ALL 546 live matches
+    (2026-08-11), not a sample: an early 30-match sample saw only scheme B and
+    missed the dominant one entirely, which left match-winner coverage at 43
+    events against 218 with a first-set winner.
+
+      scheme A — 71% of matches (the one in the live board screenshot)
+        Winner                          1/2      -> moneyline FT
+        1st Period Winner Home/Away     1/2      -> moneyline H1
+        2nd Period Winner Home/Away     1/2      -> moneyline H2
+        Under/Over Sets                 Und/Over -> total FT
+        Number Of Sets                  2/3 sets -> same market, different words
+        Correct Score                   2-0 ...  -> skipped (4-way)
+        To win 1st set & win the match  1/2      -> skipped; this is P(1/1), the
+                                                    combo leg, worth wiring next
+        Asian Handicap Sets/Games/1st Period, Under/Over Games, Odd/Even, ...
+
+      scheme B — 29% of matches
+        Which player will win the match 1/2      -> moneyline FT
+        1st Set - Winner                1/2      -> moneyline H1
+        2nd Set - Winner                1/2      -> moneyline H2
+        1st Set / Match*                1/1..2/2 -> htft FT  (structurally identical
+                                                    to soccer's HT/FT combo, so the
+                                                    existing htft_combo dominance +
+                                                    correlation bounds apply as-is)
+        Total sets                      Und/over -> total FT, line 2.5
+        Exact Sets                      2/3 sets -> same market as "Total sets"
+        Set Handicap                    1(-1.5)  -> skipped (see note below)
+        Home/Away Team To Win a Set     Yes/No   -> skipped
+        Home/Away to win exactly 1 set  Yes/No   -> skipped
+        Correct score                   2:0 ...  -> skipped (4-way)
+        Match to end 2:0 / 0:2          Yes/No   -> skipped
+        Odd/even games                  odd/even -> skipped
+
+    Matching "winner" must be EXACT — a substring test would also swallow
+    "Winner & total", "1 set - winner & total" and the per-set winners.
+
+    The skipped ones are real and useful — every one is a linear function of the
+    four correct-score probabilities — but Odds has no representation for a
+    yes/no or 4-way correct-score market, so wiring them needs a schema change.
+    They are catalogued here so the next pass knows exactly what is on the table.
+
+    NOTE the spread here is a SET handicap (±1.5 sets), while the list-view
+    spread for tennis is a GAMES handicap. Both land on market_type "spread",
+    period "FT" — so the detail one is deliberately NOT emitted as spread to
+    avoid colliding with (and overwriting) the list-view games line. It is left
+    unclassified until Odds can carry the distinction.
     """
+    t = (title or "").strip().lower()
+    if not t:
+        return None
+
+    # ── match winner ────────────────────────────────────────────────────────
+    # Exact "winner" only. Substring matching would swallow "Winner & total",
+    # "1 set - winner & total" and the per-set winners.
+    if t == "winner":
+        return MarketClassification(market_type="moneyline", period="FT", n_way=2)
+    if "win the match" in t and "set" not in t and "&" not in t:
+        return MarketClassification(market_type="moneyline", period="FT", n_way=2)
+
+    # ── per-set winners ─────────────────────────────────────────────────────
+    # "1st Set - Winner" (scheme B) and "1st Period Winner Home/Away" (scheme A).
+    m = re.match(r"^(1st|2nd)\s+(set|period)\s*[-–]?\s*winner", t)
+    if m:
+        return MarketClassification(market_type="moneyline",
+                                    period="H1" if m.group(1) == "1st" else "H2",
+                                    n_way=2)
+
+    # ── set/match combo — same 4-cell shape as soccer HT/FT ─────────────────
+    if re.match(r"^1st\s+set\s*/\s*match", t):
+        return MarketClassification(market_type="htft", period="FT")
+
+    # ── total SETS (the 2.5 line on best-of-3) ──────────────────────────────
+    # Three different wordings for the same market across the two schemes;
+    # "Number Of Sets" and "Exact Sets" are the same thing said differently,
+    # which is itself a consistency opportunity once Odds can hold both.
+    if t.startswith("total sets") or t.startswith("under/over sets"):
+        return MarketClassification(market_type="total", period="FT", n_way=2)
     return None

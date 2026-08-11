@@ -14,6 +14,10 @@ import pytest
 from src import bets
 
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+# api_list_marks() prunes games that kicked off >2 days ago against the REAL
+# clock, so any mark it must still return has to be anchored on wall-clock now.
+# A frozen NOW ages out of that window and fails on a date, not on a regression.
+REAL_NOW = datetime.now(tz=timezone.utc)
 KEY = "soccer|lahti|sjk"
 
 
@@ -155,7 +159,7 @@ from src import app as app_mod  # noqa: E402
 def test_api_upsert_and_list():
     m = asyncio.run(app_mod.api_upsert_mark({
         "game_key": KEY, "match_label": "Lahti vs SJK",
-        "sport": "soccer", "start_time": NOW.isoformat(), "amount": 75,
+        "sport": "soccer", "start_time": REAL_NOW.isoformat(), "amount": 75,
     }))
     assert m["amount"] == 75.0
     assert [x["game_key"] for x in asyncio.run(app_mod.api_list_marks())] == [KEY]

@@ -510,7 +510,51 @@ SOFT_SCAN_SEC = int(os.environ.get("SOFT_SCAN_SEC", "150"))
 
 # ── Shared state (per-sport namespaced) ───────────────────────────────────────
 def _empty_source_state() -> dict[str, Any]:
-    return {"odds": [], "fetched_at": None, "error": None, "count": 0}
+    return {"odds": [], "fetched_at": None, "error": None, "count": 0,
+            "empty_since": None}
+
+
+# A fetch that RAISES leaves the previous odds in place (the except branches only
+# set "error"). A fetch that returns an EMPTY LIST used to overwrite them — and
+# that is the flapping bug: measured on dashboard.log, Pinnacle returned 0 rows on
+# 19 of 984 cycles (~2%). Pinnacle is the REFERENCE, and
+# _compute_opportunities_now does `if not pin_odds: continue`, so one empty
+# Pinnacle cycle blanks the ENTIRE arb/+EV list for that sport. Next cycle it
+# returns, every row looks brand new to alerts.js, and the alarm re-fires on
+# opportunities the user already dismissed.
+#
+# So an empty result is treated as a soft failure and the last good snapshot is
+# held — but only for a bounded window, because "no games" is legitimate at 4am
+# and we must not serve stale odds forever.
+EMPTY_HOLD_SEC = int(os.environ.get("EMPTY_HOLD_SEC", "900"))   # 15 min
+
+
+def _store_odds(sport: str, book: str, odds: list, *, now: datetime) -> bool:
+    """Write a fetch result into _state. Returns True if it was accepted.
+
+    Caller must hold _state_lock. An empty result is REJECTED (previous odds
+    kept) while a non-empty snapshot exists and is younger than EMPTY_HOLD_SEC;
+    after that the empty is accepted as genuine.
+    """
+    slot = _state[sport][book]
+    if not odds and slot.get("odds"):
+        since = slot.get("empty_since") or now
+        slot["empty_since"] = since
+        held = (now - since).total_seconds()
+        if held < EMPTY_HOLD_SEC:
+            slot["error"] = (f"empty fetch held ({held:.0f}s) — serving last good "
+                             f"{slot['count']} rows")
+            log.warning("%s %s: EMPTY fetch — holding last good %d rows (%.0fs)",
+                        book, sport, slot["count"], held)
+            return False
+        log.warning("%s %s: empty for %.0fs > %ds — accepting empty",
+                    book, sport, held, EMPTY_HOLD_SEC)
+    slot["odds"] = odds
+    slot["fetched_at"] = now
+    slot["error"] = None
+    slot["count"] = len(odds)
+    slot["empty_since"] = None if odds else (slot.get("empty_since") or now)
+    return True
 
 
 # ── 1xbet as a second reference (opt-in) ──────────────────────────────────────
@@ -647,11 +691,16 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
             odds = await cfg.pin_fetcher()
             dt = time.monotonic() - t0
             async with _state_lock:
-                _state[sport]["pin"]["odds"] = odds
-                _state[sport]["pin"]["fetched_at"] = datetime.now(tz=timezone.utc)
-                _state[sport]["pin"]["error"] = None
-                _state[sport]["pin"]["count"] = len(odds)
+                accepted = _store_odds(sport, "pin", odds,
+                                       now=datetime.now(tz=timezone.utc))
             log.info("pinnacle %s: %d Odds rows in %.1fs", sport, len(odds), dt)
+            if not accepted:
+                # Empty reference fetch, last good snapshot held. Skip the rest of
+                # the cycle: recording ticks / detecting moves off an empty list
+                # would write a phantom "everything vanished" step into history.
+                await asyncio.sleep(
+                    runtime_config.secs("pinnacle_poll_sec", PINNACLE_POLL_SEC))
+                continue
 
             # Change-only tick history (charts) — see src/ticks.py.
             try:
@@ -707,10 +756,7 @@ async def _xbet_loop_for_sport(cfg: SportConfig):
             odds = await cfg.xbet_fetcher()
             dt = time.monotonic() - t0
             async with _state_lock:
-                _state[sport]["xbet"]["odds"] = odds
-                _state[sport]["xbet"]["fetched_at"] = datetime.now(tz=timezone.utc)
-                _state[sport]["xbet"]["error"] = None
-                _state[sport]["xbet"]["count"] = len(odds)
+                _store_odds(sport, "xbet", odds, now=datetime.now(tz=timezone.utc))
             log.info("xbet %s: %d Odds rows in %.1fs", sport, len(odds), dt)
             try:
                 await asyncio.to_thread(
@@ -779,10 +825,7 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
             odds = await fetcher()
             dt = time.monotonic() - t0
             async with _state_lock:
-                _state[sport][book]["odds"] = odds
-                _state[sport][book]["fetched_at"] = datetime.now(tz=timezone.utc)
-                _state[sport][book]["error"] = None
-                _state[sport][book]["count"] = len(odds)
+                _store_odds(sport, book, odds, now=datetime.now(tz=timezone.utc))
             log.info("%s %s: %d Odds rows in %.1fs", book, sport, len(odds), dt)
             try:
                 await asyncio.to_thread(
@@ -1085,10 +1128,7 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
                 src_label = "live"
             dt = time.monotonic() - t0
             async with _state_lock:
-                _state[sport]["cb"]["odds"] = odds
-                _state[sport]["cb"]["fetched_at"] = datetime.now(tz=timezone.utc)
-                _state[sport]["cb"]["error"] = None
-                _state[sport]["cb"]["count"] = len(odds)
+                _store_odds(sport, "cb", odds, now=datetime.now(tz=timezone.utc))
             log.info("crystalbet %s (%s): %d Odds rows in %.1fs",
                      sport, src_label, len(odds), dt)
 
@@ -2132,6 +2172,89 @@ async def api_anomalies_status() -> dict:
         "consistency": (len(_recent_consistency) + len(_betlive_consistency)
                         + len(_cb_soft_flags) + len(_betlive_soft_flags)),
         "coverage": _anomaly_coverage,
+    }
+
+
+# Cap on rows returned to the alert poller. Rows are sorted by magnitude
+# DESCENDING before truncation, so what gets dropped is always the smallest —
+# and alerting is a magnitude threshold, so dropping the smallest cannot hide a
+# row that would have fired. Purely a payload guard for a board with hundreds of
+# tiny violations.
+ALERT_FEED_CAP = 500
+
+
+def _ladder_alert_rows() -> list[dict]:
+    """Compact ladder rows for the alert poller, biggest wrong-move first."""
+    src = (list(_recent_anomalies)
+           + [r for rows_ in _extra_anomalies.values() for r in rows_]
+           + [r for rows_ in _book_anomalies.values() for r in rows_])
+    out = []
+    for a in src:
+        lo, hi = a.get("line_lo"), a.get("line_hi")
+        # `step` is the ladder-step change — the gap between the two adjacent
+        # rungs the violation sits across. It is NOT stored on the row (the
+        # table renders line_lo → line_hi), so derive it here rather than
+        # making every client recompute it.
+        step = abs(hi - lo) if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) else None
+        out.append({
+            "book": a.get("book") or "cb",
+            "sport": a.get("sport"),
+            "match_label": a.get("match_label"),
+            "event_id": a.get("cb_event_id"),
+            "market": a.get("market"),
+            "period": a.get("period"),
+            "side": a.get("side"),
+            "line_lo": lo, "line_hi": hi,
+            "odds_lo": a.get("odds_lo"), "odds_hi": a.get("odds_hi"),
+            "pct": a.get("pct"),        # wrong-direction move, % of smaller price
+            "delta": a.get("delta"),    # wrong-direction move, absolute decimal
+            "step": step,               # ladder-step change between the rungs
+        })
+    out.sort(key=lambda r: (r["pct"] or 0.0), reverse=True)
+    return out[:ALERT_FEED_CAP]
+
+
+def _consistency_alert_rows() -> list[dict]:
+    """Compact consistency rows for the alert poller, most severe first."""
+    extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
+    book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
+    src = (_recent_consistency + _betlive_consistency + _soft_scan_flags
+           + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons)
+    out = [{
+        "book": f.get("book") or "cb",
+        "sport": f.get("sport"),
+        "match_label": f.get("match_label"),
+        "event_id": f.get("book_event_id"),
+        "kind": f.get("kind"),
+        "periods": f.get("periods"),
+        "outcome": f.get("outcome"),
+        "severity": f.get("severity"),
+    } for f in src]
+    out.sort(key=lambda r: (r["severity"] or 0.0), reverse=True)
+    return out[:ALERT_FEED_CAP]
+
+
+@app.get("/api/anomalies/alerts")
+async def api_anomalies_alerts() -> dict:
+    """Content feed for the Anomalies alert config (2026-08-10).
+
+    Separate from /api/anomalies because that one runs the fuzzy matcher to
+    attach Pinnacle fair prices — real CPU, and the alert poller runs on EVERY
+    page every 30 s from every open tab. This reads the same in-memory scan
+    state and does no matching, no enrichment and no I/O.
+
+    Thresholds are deliberately NOT applied here: they live in localStorage
+    beside the other alert settings, and the client needs per-row identity for
+    its seen-set anyway. The server just hands over the compact rows.
+    """
+    return {
+        "enabled": (runtime_config.is_on("scans", "anomaly")
+                    or runtime_config.is_on("scans", "anomaly_extra")
+                    or runtime_config.is_on("scans", "betlive_anomaly")
+                    or runtime_config.is_on("scans", "soft_scan")),
+        "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
+        "ladders": _ladder_alert_rows(),
+        "consistency": _consistency_alert_rows(),
     }
 
 

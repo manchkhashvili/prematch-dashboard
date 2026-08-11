@@ -40,6 +40,11 @@ from src.normalize import normalize_team
 from src.scrapers.crystalbet import _clean_league, _skip_league
 
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+# Retention is measured against the REAL clock inside prune_unmatched_log, so
+# the prune tests must anchor on wall-clock now — a frozen NOW silently ages
+# past the window and turns them red on a calendar date, not on a regression.
+# Everything else here uses NOW only relatively (NOW vs NOW+3h) and stays frozen.
+REAL_NOW = datetime.now(tz=timezone.utc)
 
 
 def _ml(source, home, away, start, sport="soccer"):
@@ -243,8 +248,8 @@ def test_log_treats_different_fixtures_separately(tmp_path):
 
 def test_prune_drops_only_rows_older_than_the_window(tmp_path):
     p = tmp_path / "u.csv"
-    old = (NOW - timedelta(days=11)).isoformat()
-    new = (NOW - timedelta(days=1)).isoformat()
+    old = (REAL_NOW - timedelta(days=11)).isoformat()
+    new = (REAL_NOW - timedelta(days=1)).isoformat()
     with p.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(matcher.UNMATCHED_HEADER)
@@ -311,7 +316,7 @@ def test_prune_migrates_the_legacy_nine_column_layout(tmp_path):
     p = tmp_path / "u.csv"
     legacy = ["ts", "cb_home", "cb_away", "cb_league", "cb_start_time",
               "best_pin_home", "best_pin_away", "best_pin_league", "best_score"]
-    recent = (NOW - timedelta(days=1)).isoformat()
+    recent = (REAL_NOW - timedelta(days=1)).isoformat()
     with p.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(legacy)

@@ -68,11 +68,95 @@ totals summed within 0.5pt).
 - A short period should compress toward 50%. Flag when a quarter's `|P−0.5|`
   exceeds FT's by ≥ **6.0pp** (`EXTREME_PP`).
 
-### B5. `ht_vs_ft_divergence` — half vs full priced very differently
-- Home win-prob swings ≥ **13.0pp** (`HT_FT_DIV_PP`) between H1 and FT. Uses the
-  2-way ML where present, else the 3-way 1X2 home prob (sport-agnostic). This is
-  the **HT/FT value zone** — e.g. River Plate ~80% FT favourite but ~65% at the
-  break (~14pp). Added this session; the entry point into HT/FT research.
+### B5. `ht_vs_ft_divergence` — **REMOVED 2026-08-03**
+Flagged `|P_home(H1) − P_home(FT)| ≥ 13pp`. Deleted: it tested **no relation**, so
+it could not detect a contradiction. A large HT→FT gap is what a goal model
+*requires* — half time carries far more draw mass than full time, so a
+favourite's win-prob is always compressed at the break.
+
+Evidence, measured over its own **1151 historical flags**:
+- **0 of 1151** fired on a balanced match (FT 35–65%). The FT win-prob
+  distribution was perfectly bimodal — every flag sat at FT ≤ 29% or ≥ 70%. It
+  was a "does this game have a big favourite?" detector.
+- Severity was the raw gap, so it sorted the dashboard by **favourite strength**,
+  not by wrongness.
+- It was **26% of all consistency flags** (1151/4452) — the second-largest
+  source, crowding out the real ones.
+- The genuine HT↔FT relationship is already modelled correctly by **B7
+  `htft_fair`** (bivariate normal on the two margins, ρ ≈ 0.70, μ from CB's own
+  devigged handicap ladder). A raw percentage-point gap is the crude, wrong
+  version of that.
+
+Not to be confused with **B6 `htft_combo`**, which is a real bound check and is
+kept.
+
+### B8. `tennis_set_match` — the first set priced richer than the whole match · **BETTABLE direction exists**
+Added 2026-08-11. Tennis was previously excluded from the consistency engine
+(`CONSISTENCY_SPORTS` was basketball + soccer) and ran **list-only**, so the only
+tennis markets that existed were match ML, games spread and games total. A CB
+tennis **detail** page actually carries **15 markets on every match** — all
+functions of the same four best-of-3 outcomes, so they must agree arithmetically.
+
+Two rules, both from the structure of a best-of-3:
+
+- **HARD (order).** With per-set win probability `p`, the match probability is
+  `p²(3−2p)`, which is strictly **above** `p` once `p > 0.5` — you can lose the
+  opening set and still win. So a first-set favourite priced **below** that on the
+  match is impossible, not merely aggressive.
+- **SOFT (magnitude).** Invert the match price back to a per-set probability and
+  compare it with the posted first-set probability. Both describe the same
+  quantity; a gap of ≥ **10.0pp** (`SET_MATCH_PP`) is a contradiction.
+
+The hard rule is gated on the player actually being a favourite
+(`SET_MATCH_HARD_MIN_FAV = 0.60`, `SET_MATCH_HARD_MIN_PP = 3.0`). At p ≈ 0.5 the
+match and set probabilities coincide, so a one-tick pricing difference flips
+which player looks favoured — ungated, that produced 15 bogus "impossible" flags
+on the full board, all near-even matches like match `1.70/1.80` against set
+`1.80/1.70` (a 2.4pp "impossibility").
+
+The case that prompted it (CB, ITF Campos Do Jordao women):
+
+| market | odds | devigged P(win) |
+|---|---|---|
+| Which player will win the match | 1.40 / 2.35 | **0.63** |
+| 1st Set - Winner | 1.11 / 4.30 | **0.79** |
+
+The match was priced **below its own first set** by ~17pp, and the two implied
+per-set numbers were 0.585 vs 0.795 — **21pp apart** on the same quantity.
+
+**Calibration — the whole board, not a sample.** An early 130-match sample
+covered only scheme B (below) and suggested a much tighter spread; measuring ALL
+**525 checkable matches** gave median **2.07pp**, p90 **6.13**, p99 **8.48**,
+**max 9.32**. The 10.0pp threshold sits above every observation on a full board
+and roughly 2x below the flagged case. A full-board scan produces **0 flags** —
+a rare-event detector, not a firehose.
+
+**CB serves tennis under TWO naming schemes** (surveyed across all 546 matches):
+
+| scheme | share | match winner | first set |
+|---|---|---|---|
+| A | **71%** | `Winner` | `1st Period Winner Home/Away` |
+| B | 29% | `Which player will win the match` | `1st Set - Winner` |
+
+Covering only B left match-winner coverage at 43 events against 218 with a
+first-set winner. Covering both took **checkable coverage to 95% (525/548)**.
+Scheme A also carries `To win 1st set & win the match` — that is P(1/1), the
+combo leg, and is the obvious next thing to wire.
+
+**Markets now classified for tennis** (`src/scrapers/sports/tennis.py`):
+`Which player will win the match` → moneyline FT · `1st Set - Winner` → moneyline
+H1 · `2nd Set - Winner` → moneyline H2 · `1st Set / Match*` → **htft** FT (same
+4-cell shape as soccer HT/FT, so **B6 `htft_combo` now applies to tennis too**) ·
+`Total sets` → total FT.
+
+**Still on the table, deliberately not wired** — every one is a linear function
+of the four correct-score probabilities, so each is an exact identity waiting to
+be checked, but `Odds` has no representation for a yes/no or 4-way correct-score
+market: `Correct score` (2:0/2:1/1:2/0:2), `Home|Away Team To Win a Set`,
+`Home|Away to win exactly 1 set`, `Exact Sets` (a duplicate of `Total sets` in
+different words — they must agree), `Match to end 2:0` / `0:2`, `Set Handicap`
+(±1.5 **sets**, which would collide with the list-view **games** spread),
+`Odd/even games`.
 
 ### B6. `htft_combo` — the HT/FT 1/1 (and 2/2) price vs its own legs · **BETTABLE direction exists**
 The Halftime/Fulltime combo checked against the H1 and FT **regulation** 1X2
