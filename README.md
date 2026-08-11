@@ -168,6 +168,15 @@ supersedes them when set.
   transactions so an empty period reads zero everywhere, per-account rows
   included. Both are views: nothing is deleted, and clearing the filter returns
   the full picture.
+- **`/anomalies.html`** — two tables of single-book findings that need no
+  reference price. **Ladder anomalies**: rungs where an alt-line ladder crosses
+  itself (home gets more points but its odds get *longer*) — structurally
+  impossible, so one of the two rungs is mispriced. **Consistency flags**: a
+  book contradicting itself across markets or periods — basketball, soccer and
+  (since 2026-08-12) **tennis**, where a first set priced richer than the whole
+  match is structurally impossible in a best-of-3. See
+  `docs/anomalies-catalog.md` for every detector, its math and its thresholds,
+  and "Anomaly alerts" below for chiming on them.
 - **`/calc.html`** — devig calculator (Shin or proportional toggle) + +EV
   checker with quarter-Kelly stake suggestion. Inputs persist via
   `localStorage`.
@@ -224,6 +233,42 @@ Two things to know:
 - **Persists across restarts.** Pausing then closing the laptop will not
   silently resume — a fresh start stays paused, with the Config section red,
   until you press Resume.
+
+### Anomaly alerts (Anomalies tab → **Alert settings**)
+
+`Chime on refresh` fires every time the scan completes, whatever it found.
+**Alert settings** is the content-based version: chime only on findings that
+clear a bar you set. Both are cross-page — the sounds follow you to any tab.
+
+**Ladder alerts** fire on a new violation, or on an existing one that got
+materially worse. Three criteria, matching the three columns of the table, and
+a row fires if **any** filled one is met:
+
+| Criterion | Column it reads | Unit |
+|---|---|---|
+| `% off ≥` | `% off` — wrong-direction move as a share of the smaller price | % |
+| `Odds change ≥` | the jump in `Odds → odds` | decimal |
+| `Ladder step ≥` | the gap in `Ladder (line → line)` — how far apart the two rungs sit | points |
+
+Leave a box **blank to ignore that criterion**; with all three blank nothing
+fires (an empty box means "off", never "zero").
+
+**Consistency alerts** are per-check, because severity is not one quantity:
+it is percentage points for the moneyline checks, points for `period totals`,
+and % for the HT/FT ones. Set a default, override any check that needs its own
+bar, and untick a check to silence it entirely. Blank inherits the default.
+
+Ladder and consistency findings have **distinct sounds** — a ladder violation
+is bettable (Family A, the detector with the best track record), a consistency
+flag is diagnostic — so you can tell them apart without looking.
+
+Both seed silently the first time, so switching an alert on never chimes once
+per finding already on screen, and both re-alert only when a finding grows by
+≥1.5× (relative, so it means the same thing whatever the severity unit is).
+
+Backed by `GET /api/anomalies/alerts` — a deliberately cheap sibling of
+`/api/anomalies` that skips the Pinnacle re-matching, since the poller runs on
+every page every 30 s.
 
 ## Edge math
 

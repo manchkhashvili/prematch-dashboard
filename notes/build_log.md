@@ -4341,3 +4341,227 @@ Two behaviours worth knowing rather than fixing:
     Config section showing PAUSED in red.
 
 966 tests green under both interpreters.
+
+─────────────────────────────────────────────────────────────────────────────
+2026-08-10 — Anomaly alert config (ladders + consistency)
+─────────────────────────────────────────────────────────────────────────────
+
+Before this the Anomalies tab had exactly one alert: "Chime on refresh", which
+fires every time the scan completes regardless of what it found — a 0.5 %
+blip and a 40 % ladder crossing sounded identical. Owner asked for content
+alerts: ladders keyed on "ladder step change or odds change", consistency
+flags keyed on "severity% for different checks".
+
+## Reading the request off the table, not off intuition
+
+"Ladder step change or odds change" maps 1:1 onto two columns the table already
+renders — `Ladder (line → line)` and `Odds → odds`. So the criteria are the
+magnitudes of those two jumps, plus the existing `% off`, OR'd together. That
+reading is what settled it; no guessing was needed.
+
+`step` (the gap between the two adjacent rungs) is NOT stored on an anomaly row
+— the row keeps line_lo/line_hi — so the feed derives it once server-side
+rather than making every client recompute it.
+
+**Blank means OFF, never zero.** A cleared box read as 0 would fire on
+literally every row, the exact opposite of what emptying a field implies. All
+three blank = nothing fires. `cfgNum()` owns that, and a test pins it.
+
+## Per-check severity is not a nicety — the units genuinely differ
+
+Verified against the code that builds each flag rather than assumed:
+
+    pp   ml_vs_spread, favourite_flip, quarter_ml_extreme, betlive_* (gap_pp),
+         basketball_fav (gap_pp), soccer_identity, soccer_curve
+    pts  total_additivity (points the periods miss their parent by)
+    %    htft_combo, htft_fair, soccer_htft ((ratio−1)×100), soccer_fair (EV)
+
+A single shared threshold is therefore meaningless across checks: 6.0 is a
+routine 6pp moneyline gap but a large 6-point totals miss. Hence a default plus
+a per-check override plus a per-check silence. Demonstrated live end-to-end:
+with default 8, `total_additivity` at 6.2 FIRES on its own bar of 5 while
+`htft_combo` at 7.6 stays silent because that check is unticked.
+
+The per-check grid is generated from `KIND_LABEL` — the same map the table
+renders from — so a detector cannot exist in one and be missing from the other.
+A test asserts both that derivation and that every kind has a unit.
+
+## A separate, cheap endpoint
+
+`/api/anomalies` runs the fuzzy matcher to attach Pinnacle fair prices. The
+alert poller lives in alerts.js, which runs on EVERY page every 30 s from every
+open tab — pointing it at that endpoint would have re-created precisely the CPU
+burn the paused-memo work removed in July. `/api/anomalies/alerts` is a dumb
+read of the same in-memory state: no matching, no enrichment, no I/O. A test
+greps the handler for `_enrich_anomaly_rows` / `match_with_diagnostics` /
+`to_thread` so it cannot quietly grow expensive.
+
+Payload guard: 500 rows per feed, sorted by magnitude DESC before truncation.
+Since alerting is a magnitude threshold, dropping the smallest can never hide a
+row that would have fired — the cap is safe by construction, not by luck.
+
+The feed merges all SEVEN consistency sources (CB scan, betlive watch, soft
+scan, cb-soft, betlive-soft, extra-sport, per-book). Missing one would silently
+mean those checks could never alert — and the soft-scan/betlive ones are
+exactly what per-check thresholds are for. A test enumerates all seven.
+
+## Reuse of what already exists
+
+- Silent seeding on first pass (turning an alert on must not chime once per
+  finding already on screen).
+- The collapse guard from the 2026-08-03 alerts.js fix, applied to both new
+  feeds — a feed that briefly empties must not wipe the seen-set and re-alert
+  on the whole board one poll later.
+- `claimSound()` per-kind channels (`anom-ladder`, `anom-cons`) so N open tabs
+  play one sound, not N.
+- Re-alert on worsening is **relative** (1.5×), not a fixed "+5" like the
+  opportunity path. It has to be: severity is pp/points/% depending on the
+  check, so a fixed step would mean wildly different things per detector.
+
+Two new sounds, both distinct from the existing three (2.5 s square buzzer =
++EV, ascending sine triad = move, descending triangle = scan refresh): a fast
+descending sawtooth run for ladders (bettable, family A — has bite) and a
+single soft low sine with a downward bend for consistency (diagnostic — should
+register without demanding attention).
+
+## Testing the JS for real, not just statically
+
+test_marks_wiring.py's lesson was that a page can look correct and do nothing.
+The static guards here pin the localStorage key names in BOTH directions (a
+typo on either side fails silently in the worst way: the panel looks saved and
+the alert simply never fires), plus scheduling, endpoint choice, sound
+distinctness and seeding.
+
+But static text cannot prove the RULES are right, and the rules are where this
+file has broken before. So alerts.js gained a `typeof module !== "undefined"`
+test seam (inert in a browser) and test_anomaly_alerts_logic.py drives the real
+`ladderPasses` / `consPasses` / `evaluateFeed` under node — OR semantics at the
+boundary, blank-is-off, per-check override in both directions, silencing,
+seeding, the 1.5× re-alert, collapse, and key collisions. Skipped, not failed,
+where node is absent; node is not a dependency of the dashboard.
+
+Every guard was mutation-checked rather than trusted: typoing a key, dropping
+the setInterval, treating blank as 0, adding a kind with no unit, ignoring
+per-check silencing, removing the collapse guard, and removing the re-alert
+factor each produce a failure. All restored clean afterwards.
+
+1039 tests green (was 969).
+
+### Also fixed: three tests that rotted on a calendar date
+
+The suite was RED before this work started, and not because of a regression.
+`test_game_marks.py` and `test_unmatched_audit_fixes.py` froze `NOW` at
+2026-07-28 while the code under test reads the real clock, so once the date
+passed 2026-08-07 a row written at "NOW − 1 day" fell outside the 10-day
+retention window and a mark's start_time fell outside the 2-day prune. The
+production logic was correct throughout.
+
+Frozen NOW is the house convention in ~20 test files and is right wherever NOW
+is used relatively (NOW vs NOW+3h) — only the three assertions compared against
+wall-clock time were changed, to a REAL_NOW anchor.
+`test_prune_drops_games_that_already_kicked_off` had already been doing this
+correctly; the newer tests just did not follow it.
+
+---
+
+## Tennis consistency: a first set priced richer than the whole match (2026-08-12)
+
+Prompted by a live board screenshot — CB, ITF Campos Do Jordao women:
+
+    Winner                       1.40 / 2.35   ->  P(win) 0.63
+    1st Period Winner Home/Away  1.11 / 4.30   ->  P(win) 0.79
+
+The match was priced **below its own first set**. With per-set probability `p`
+the best-of-3 match probability is `p²(3−2p)`, strictly above `p` once `p > 0.5`
+— you can drop the opener and still win — so that ordering is impossible, not
+merely aggressive. The two implied per-set numbers were 0.585 vs 0.795, 21pp
+apart on the same quantity.
+
+Tennis was excluded from the consistency engine entirely (`CONSISTENCY_SPORTS`
+was basketball + soccer) and ran **list-only** — `classify_market_title`
+returned None for every title — so match ML, games spread and games total were
+the only tennis markets that had ever existed. A CB tennis **detail** page
+actually carries **15 markets on every match**, all functions of the same four
+outcomes (2:0, 2:1, 1:2, 0:2), so they must agree arithmetically.
+
+New `tennis_set_match` check with a hard rule (ordering) and a soft one (per-set
+disagreement). Tennis joins `CONSISTENCY_SPORTS`, which also brings the existing
+`htft_combo` bounds to bear on `1st Set / Match` — structurally the same 4-cell
+shape as soccer HT/FT.
+
+### Two things only a full-board survey caught
+
+A 30-match sample was actively misleading on both counts, and both were caught
+because the whole board (546 matches) was walked instead.
+
+**CB serves tennis under two naming schemes.** 71% of matches use plain
+`Winner` + `1st Period Winner Home/Away` (the screenshot's wording); 29% use
+`Which player will win the match` + `1st Set - Winner`. The sample happened to
+contain only the second, so the first classifier shipped covering 29% of the
+board: match-winner coverage was **43 events against 218** with a first-set
+winner. Covering both took checkable coverage to **95% (525/548)**. Matching
+`winner` must be EXACT or it swallows `Winner & total`, `1 set - winner & total`
+and the per-set winners.
+
+**The hard ordering rule needs a real favourite.** At `p ≈ 0.5` the match and
+set probabilities coincide, so one rounding tick flips which player looks
+favoured between the two markets. Ungated this produced **15 bogus
+"impossible" flags**, every one a near-even match — e.g. match `1.70/1.80`
+against set `1.80/1.70`, a 2.4pp "impossibility". Now gated on `p_set ≥ 0.60`
+(where the model gives a 4.8pp cushion) and a ≥3pp violation.
+
+### Calibration, on the whole board rather than a sample
+
+The scheme-B-only sample suggested a much tighter spread (p50 1.09pp, max 5.46)
+and an 8.0pp threshold. All 525 checkable matches give p50 **2.07pp**, p90
+**6.13**, p99 **8.48**, max **9.32**. `SET_MATCH_PP = 10.0` therefore sits above
+every full-board observation while the flagged case measured 21–26pp. A
+full-board scan now yields **0 flags** — a rare-event detector, not a firehose.
+
+28 new tests; 1067 green.
+
+### Side finding: `ml_vs_spread` has never fired, and not for the reason assumed
+
+0 occurrences in 4606 historical consistency flags, alongside
+`total_additivity` and `quarter_ml_extreme` (also 0). The first guess — that the
+pick'em rung rarely exists — is **wrong**: 982 of 1025 soccer events (96%) carry
+a 0.0 handicap rung, 1760 rungs in total.
+
+The real cause is the guard, and it differs per sport:
+
+    if v.ml_phome is not None and v.spread_pwin is not None:
+
+- **Soccer** has the handicap side but never the ML side. `ml_phome` is set only
+  for a **2-way** ML (`"draw" not in s`); soccer's FT moneyline is 1X2, so it
+  stays None. Draw No Bet *is* the 2-way soccer moneyline and is the exact
+  semantic match for a pick'em handicap (the code comment says as much), but the
+  soccer parser marks DNB `(SKIP)` in three places.
+- **Basketball** has the ML side but never the handicap side. `spread_pwin` is
+  read only from a true line-0 rung, and basketball spreads are quoted around
+  the real margin. Interpolating to 0 was deliberately rejected earlier because
+  it fabricated one-sided gaps on heavy favourites.
+
+Classifying DNB would revive the check on ~96% of soccer events. Not done here:
+DNB would land on `moneyline`/`FT`, the same key as the 1X2, so the Pinnacle
+matcher and the EV path would suddenly see two FT moneylines per event. That
+needs checking before shipping, not after.
+
+### Still on the table for tennis
+
+Every one is a linear function of the four correct-score probabilities, so each
+is an **exact identity** — no model, no tolerance beyond rounding, stronger than
+the set-vs-match check itself:
+
+    P(match)            = p20 + p21          correct score <-> ML
+    Set Hcp 1(-1.5)     = p20                handicap <-> correct score
+    Home to win a set   = 1 - p02
+    Home exactly 1 set  = p12
+    Total sets U2.5     = p20 + p02
+    Match to end 2:0    = p20                duplicate market, must agree
+    Exact Sets         == Total sets         two names for one market
+
+Blocked on `MarketType = Literal["moneyline","spread","total","team_total","htft"]`
+— there is no representation for a 4-way (correct score) or yes/no market.
+Scheme A also carries `To win 1st set & win the match`, which is P(1/1) and
+would bring the htft dominance/correlation bounds to the 71% of matches lacking
+`1st Set / Match`.
