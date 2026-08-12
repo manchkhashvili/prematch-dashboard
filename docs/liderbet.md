@@ -257,10 +257,29 @@ impossible for prematch. So: parse as **UTC**, no `−4h` correction (CB needed
 | `mt:16:503` | Double Chance | 1X / 12 / X2 |
 | `mt:16:538` | Both Teams To Score | Yes / No |
 | `mt:16:6572` | Draw No Bet | 1 / 2 |
-| `mt:16:1079` | Handicap | line in `specifier` |
+| **`mt:16:501`** | **Handicap — 2-way Asian** | **1 / 2**, line in `specifier` |
+| **`mt:16:1079`** | **Handicap — 3-way European** | **1 / X / 2** ⚠ |
+| `mt:16:573` | Half Time / Full Time | the 9 cells `1/1` … `2/2` |
+| `mt:16:602` / `619` | 1st / 2nd Half result | 1 / X / 2 |
+| `mt:16:600` / `622` | 1st / 2nd Half Total | Under / Over |
+| `mt:16:598` / `621` | 1st / 2nd Half Handicap | 1 / 2 |
+| `mt:16:504` / `505` | Team 1 / Team 2 total goals | Under / Over |
+| `mt:16:618` | 2nd Half **Double Chance** | 1X / X2 / 12 ⚠ |
 
 The `16` in `mt:16:…` / `ot:16:…` is the sport id, so market/outcome ids are
 namespaced per sport — don't assume `mt:2:500` (basketball) means the same thing.
+
+> ⚠ **Never classify these on the name.** `mt:16:501` and `mt:16:1079` are BOTH
+> called "Handicap" — the strings differ only by a double space, which
+> whitespace-collapsing erases. One is the 2-way Asian line, the other a 3-way
+> European one, and reading the 3-way as a 2-way silently drops the draw and
+> invents a spread that was never priced. Measured 2026-08-12 when the detail
+> payload was first name-classified: **155 bogus rows against 149 real ones**,
+> disagreeing with CrystalBet by up to **17.8pp** where every correct mapping
+> agreed within 1.6pp. `mt:16:618` vs `619` is the same trap on the halves.
+> The scraper therefore reads a details payload through a **typeId allowlist**
+> (`liderbet._DETAIL_TYPES`) and the name classifier is confined to the list
+> tier, where its handful of names has been correct for months.
 
 ---
 
@@ -273,10 +292,60 @@ match: **370 markets across 267 distinct types** (vs 33 in the curated list), in
 
 This is the structural parallel to CB's `ExpandDetail`, but trivial: a plain GET
 keyed by match id, no hidden-field harvesting, no session affinity, idempotent
-and parallelisable. Decision for the scraper mirrors CB's open question — at
-~0.3 s/match you can either (a) pull `details` for every match every cycle, or
-(b) rely on the curated list and only deep-fetch matches whose markets you trade.
-Given the list already carries 1X2 + totals + the main ladders, (b) is cheap.
+and parallelisable.
+
+### What the scraper actually does (settled 2026-08-12)
+
+Two findings changed the earlier "(b) is cheap" reasoning:
+
+**Most of the value was already in the list tier.** `_classify_market` dropped
+any market whose NAME contained "half", so the H1/H2 1X2 and half totals that
+`matchData` was already returning were being thrown away. Reading them cost
+nothing: **11 728 → 23 655 rows on the same call**. Only the 9-cell HT/FT grid
+(`mt:16:573`) genuinely needs `details`.
+
+**The full board is not cheap.** Measured on 1291 soccer matches: one 20-match
+batch is 0.48 s / **3.2 MB**, so
+
+| horizon | matches | calls | time | bytes |
+|---|---|---|---|---|
+| 12 h | 92 | 5 | ~2.4 s | ~16 MB |
+| **24 h** | **162** | **9** | **~4.3 s** | **~28 MB** |
+| whole board | 1086 | 55 | ~26 s | **~172 MB** |
+
+against a whole Lider cycle of ~10 s today. So the detail pass is horizon-gated
+at `LIDERBET_DETAIL_HOURS=24`, mirroring `CROCOBET_DETAIL_HOURS` and
+`SETANTA_DETAIL_HOURS`.
+
+A details payload REPEATS the FT markets, so the scraper parses it whole and
+drops that match's list-tier rows rather than merging — a market the book has
+since pulled must not survive as a stale leftover.
+
+### Mappings shipped, and three deliberately not
+
+Price-verified against **Pinnacle** on 633 matched fixtures:
+
+| market | period | n | median | p90 |
+|---|---|---|---|---|
+| moneyline | H1 | 519 | **0.55pp** | 1.43 |
+| total | H1 | 1504 | 1.18pp | 2.42 |
+| moneyline | FT | 630 | 0.69pp | 1.85 |
+| total | FT | 3003 | 0.84pp | 1.88 |
+
+The H2 totals get an independent second check for free: the consistency
+engine's own `total_additivity` puts H1+H2 within **0.24 points** of FT across
+876 events, which a mislabelled period could not do.
+
+**Not shipped**, per the "only price-verified mappings are emitted" rule:
+`mt:16:598` / `621` (half handicaps — **6.16pp median** vs CB, and a shifted
+median is the signature of a wrong market rather than noise); `mt:16:501`
+(FT 2-way handicap — 1.17pp median but p90 18.98, max 50.38) and `mt:16:504` /
+`505` (team totals, max 51.20pp). For the FT handicap the line convention is
+NOT the cause: pairing as-is gives a 2.59pp median while negating the line
+gives 32.49 and swapping the sides 28.30, so as-is is right and a *subset* of
+rungs is wrong. Until that subset is identified it would be a phantom-arb
+generator on a bettable market. None of the three is needed by the consistency
+checks.
 
 ---
 

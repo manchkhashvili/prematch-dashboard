@@ -153,3 +153,11 @@ class Opportunity:
     # Pinnacle leg is the WRONG game (common in same-named lower divisions).
     match_score: float | None = None         # fuzzy team-name score 0–100
     match_time_delta_sec: float | None = None  # |kickoff_cb − kickoff_pin|; None if unknown
+    # When the SOFT-BOOK leg's price was actually fetched. Not cosmetic: edge.py
+    # compares a soft price to a reference price without ever checking how old
+    # either is, so a stale soft leg reports the drift since it was pulled as
+    # edge. CB is the case that matters — a full soccer sweep is ~191 s (3127 s
+    # at worst) against Pinnacle's 25 s, and cached detail rows keep the
+    # `fetched_at` of the cycle they were EXPANDED in. Carried through so the
+    # UI can show an age and the re-verify loop can be judged.
+    cb_fetched_at: datetime | None = None

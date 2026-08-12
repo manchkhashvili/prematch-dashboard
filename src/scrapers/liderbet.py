@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league, transliterate
 
@@ -42,7 +44,12 @@ MATCHDATA_URL = f"{BASE}/pre/m4/api/sport/matchData"
 IMPERSONATE = "chrome124"
 
 # Lider sport "section" id per dashboard sport name (verified 2026-06-15).
-SECTION = {"soccer": "s:16", "basketball": "s:2", "tennis": "s:13"}
+SECTION = {"soccer": "s:16", "basketball": "s:2", "tennis": "s:13",
+           # American football (2026-08-12): 85 matches over CFL / Regular
+           # Season / Pre-Season. Its three market names — 'Winner (OT)',
+           # 'Handicap (OT)', 'Total (OT)' — are already in _classify_market's
+           # incl-overtime aliases, so no classifier change was needed.
+           "americanfootball": "s:34"}
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -55,7 +62,82 @@ HEADERS = {
 }
 
 _TOURS_PER_CALL = 40          # batch tournaments into one matchData GET
+_MATCHES_PER_DETAIL = 20      # batch matches into one matchData/details GET
 _HTTP_TIMEOUT = 30.0
+
+# ── Detail tier (2026-08-12) ─────────────────────────────────────────────────
+# matchData carries the FT headline markets only. `matchData/details` carries
+# ~270 market names per match, including every input the consistency engine's
+# most productive check needs — and soft_scan has been calling that endpoint
+# for a filtered 14 % of the board all along, so the transport is proven.
+#
+# It is NOT free, which is why it is horizon-gated like Crocobet's and
+# Setanta's DETAIL_HOURS. Measured 2026-08-12 on the soccer board (1291
+# matches): one 20-match batch is 0.48 s / 3.2 MB, so
+#     within 12 h :  92 matches ->  5 calls, ~2.4 s, ~16 MB
+#     within 24 h : 162 matches ->  9 calls, ~4.3 s, ~28 MB
+#     whole board : 1086        -> 55 calls, ~26 s, ~172 MB   <- not worth it
+# 24 h keeps Lider among the cheapest books (its whole cycle is ~10 s today)
+# while covering everything close enough to bet.
+DETAIL_HOURS = float(os.environ.get("LIDERBET_DETAIL_HOURS", "24"))
+
+# typeId -> (market_type, period, n_way, team_side). This is an ALLOWLIST and
+# it is the ONLY thing used to read a details payload.
+#
+# The name-based `_classify_market` below still handles the list tier, where it
+# has been correct for months against a handful of market names. It must not be
+# let anywhere near the detail tier, and the reason is concrete: that payload
+# carries ~270 market names per match, and TWO of them are called "Handicap" —
+#     mt:16:501   'Handicap ①'    outcomes 1 / 2       the 2-way Asian line
+#     mt:16:1079  'Handicap  ①'   outcomes 1 / X / 2   a 3-way European one
+# differing only by a double space, which whitespace-collapsing erases. Reading
+# the 3-way as a 2-way silently drops the draw and invents a spread that was
+# never priced. Measured before this allowlist existed: 155 bogus rows against
+# 149 real ones, and the resulting FT spread disagreed with CrystalBet by up to
+# 17.8pp where every correctly-mapped market agreed within 1.6pp.
+# `mt:16:618` is the same trap on the halves ("2nd Half-3way", but the
+# double-chance variant 1X / X2 / 12).
+#
+# Every entry below is PRICE-VERIFIED against CrystalBet on live matched
+# fixtures (2026-08-12), median absolute devigged gap in brackets. Sport-scoped:
+# the middle number is Lider's section id, so these are soccer (mt:16:*) only;
+# basketball / tennis / am. football need their own census first.
+_DETAIL_TYPES: dict[str, tuple] = {
+    # ── full time (also present in the list tier; repeated here because a
+    #    details payload REPLACES a match's list rows, so the allowlist has to
+    #    cover everything we still want after the swap)
+    "mt:16:500":  ("moneyline", "FT", 3, None),      # [1.22pp]
+    "mt:16:502":  ("total", "FT", 2, None),          # [0.39pp]
+    # ── the 9-way HT/FT grid: the input htft_combo needs, and the only market
+    #    here that no other soft book supplies
+    "mt:16:573":  ("htft", "FT", 9, None),
+    # ── regulation 1X2 legs for the halves (htft_combo settles on regulation)
+    "mt:16:602":  ("moneyline", "H1", 3, None),      # [0.73pp]
+    "mt:16:619":  ("moneyline", "H2", 3, None),      # mirror of 602; no
+                                                     # reference book prices
+                                                     # soccer H2, so unchecked
+    # ── half totals. Verified twice over: 0.36pp against CB at H1, and the
+    #    engine's own total_additivity puts H1+H2 within 0.24 POINTS of FT
+    #    across 876 events — which a mislabelled period could not do.
+    "mt:16:600":  ("total", "H1", 2, None),          # [0.36pp]
+    "mt:16:622":  ("total", "H2", 2, None),
+    # ── DELIBERATELY ABSENT ─────────────────────────────────────────────────
+    # mt:16:598 / mt:16:621  half handicaps — 6.16pp MEDIAN against CrystalBet
+    #   (max 17.2) where every correct mapping landed under 1.6pp. A shifted
+    #   median is the signature of a wrong market, not of noise.
+    # mt:16:501  FT 2-way handicap — 1.17pp median against Pinnacle over 413
+    #   rungs, but p90 18.98 and max 50.38. The line convention is NOT the
+    #   problem: pairing as-is gives a 2.59pp median while negating the line
+    #   gives 32.49 and swapping the sides 28.30, so as-is is right and a
+    #   SUBSET of rungs is wrong. Until that subset is identified this would be
+    #   a phantom-arb generator on a bettable market, which is worse than not
+    #   having it.
+    # mt:16:504 / mt:16:505  team totals — same shape, max 51.20pp.
+    # None of the three is needed for the consistency checks; they are an arbs
+    # -grid enrichment and can wait for a proper census.
+}
+
+_HTFT_CELLS = ("1/1", "1/X", "1/2", "X/1", "X/X", "X/2", "2/1", "2/X", "2/2")
 
 # Strip the circled/superscript variant glyphs Lider appends to market names
 # ("Handicap ①", "1st Half Total ②") before classifying.
@@ -114,9 +196,36 @@ def _odds(value) -> float | None:
     return v if v is not None and v > 1.0 else None
 
 
+def _DETAIL_TYPES_FOR(sport_name: str) -> bool:
+    """Is the detail tier mapped for this sport?
+
+    Only soccer today. The typeIds are section-scoped (mt:16:* is soccer), so
+    the other sports need their own census before their detail payloads can be
+    trusted — and pulling detail we cannot read would be pure cost.
+    """
+    return sport_name == "soccer"
+
+
+def _start_time(m: dict):
+    st = m.get("startTime")
+    if not st:
+        return None
+    try:
+        return datetime.fromisoformat(st).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
 def _parse_match(
     m: dict, ancestors: dict, market_types: dict, sport_name: str, fetched_at: datetime,
+    *, detail: bool = False,
 ) -> list[Odds]:
+    """Parse one match.
+
+    `detail=True` switches to the typeId ALLOWLIST and disables the name-based
+    classifier entirely — see the note on _DETAIL_TYPES for why a details
+    payload must never be name-classified.
+    """
     home = (ancestors.get(m.get("homeId"), {}) or {}).get("name") or ""
     away = (ancestors.get(m.get("awayId"), {}) or {}).get("name") or ""
     # Romanize for display — Lider ships some names in Russian/Georgian even at
@@ -134,6 +243,12 @@ def _parse_match(
             start_time = datetime.fromisoformat(st).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
+    # Global data horizon (src/horizon.py). matchData returns a whole batch of
+    # tournaments in one GET, so there is no request to save — but a far match
+    # can carry hundreds of ladder rungs, and skipping it here keeps them out
+    # of the parse, the matcher and the tick writer.
+    if not horizon.keeps(start_time):
+        return []
 
     sr = (m.get("meta", {}) or {}).get("matchProvider", {}) or {}
     sr_id = sr.get("matchId") or ""
@@ -143,13 +258,28 @@ def _parse_match(
     out: list[Odds] = []
 
     for mk in (m.get("markets") or {}).values():
-        tp = market_types.get(mk.get("typeId"), {})
-        cls = _classify_market(tp.get("name", ""))
-        if cls is None:
-            continue
-        market_type, n_way = cls
+        type_id = mk.get("typeId")
+        tp = market_types.get(type_id, {})
+        # Detail-tier markets are identified by their STABLE typeId; the FT
+        # headline set still goes through the name classifier. typeId wins when
+        # both would match, because two markets can share a name ("Handicap" is
+        # both the 2-way Asian line and a 3-way European one) and only the id
+        # tells them apart.
+        hit = _DETAIL_TYPES.get(type_id)
+        if hit is not None:
+            market_type, period, n_way, team_side = hit
+        elif detail:
+            continue            # allowlist-only on the detail payload
+        else:
+            cls = _classify_market(tp.get("name", ""))
+            if cls is None:
+                continue
+            market_type, n_way = cls
+            period, team_side = "FT", None
 
-        # outcomeType id → label ("1"/"X"/"2"/"Over"/"Under")
+        # outcomeType id → label ("1"/"X"/"2"/"Over"/"Under"/"1/1"…). The feed
+        # ships its own dictionary per market type, so the labels are
+        # authoritative even where the market NAME is ambiguous.
         label = {ot["id"]: (ot.get("name") or "").strip()
                  for ot in tp.get("outcomeTypes", [])}
         priced = {label.get(otid, ""): o for otid, o in (mk.get("outcomes") or {}).items()}
@@ -159,17 +289,18 @@ def _parse_match(
                    "away": _odds((priced.get("2") or {}).get("value"))}
             if n_way == 3:
                 sel["draw"] = _odds((priced.get("X") or {}).get("value"))
-            row = _build(sport_name, home, away, "moneyline", "FT", sel,
+            row = _build(sport_name, home, away, "moneyline", period, sel,
                          None, league, start_time, event_id, sr_match_id, fetched_at)
             if row:
                 out.append(row)
 
-        elif market_type == "total":
+        elif market_type in ("total", "team_total"):
             line = _spec_line(mk.get("specifier"))
             sel = {"over": _odds((priced.get("Over") or {}).get("value")),
                    "under": _odds((priced.get("Under") or {}).get("value"))}
-            row = _build(sport_name, home, away, "total", "FT", sel,
-                         line, league, start_time, event_id, sr_match_id, fetched_at)
+            row = _build(sport_name, home, away, market_type, period, sel,
+                         line, league, start_time, event_id, sr_match_id, fetched_at,
+                         team_side=team_side)
             if row:
                 out.append(row)
 
@@ -178,8 +309,20 @@ def _parse_match(
             line = _spec_line(home_oc.get("specifier")) or _spec_line(mk.get("specifier"))
             sel = {"home": _odds(home_oc.get("value")),
                    "away": _odds((priced.get("2") or {}).get("value"))}
-            row = _build(sport_name, home, away, "spread", "FT", sel,
+            row = _build(sport_name, home, away, "spread", period, sel,
                          line, league, start_time, event_id, sr_match_id, fetched_at)
+            if row:
+                out.append(row)
+
+        elif market_type == "htft":
+            # All NINE cells or nothing: the consistency check reasons about the
+            # grid as a distribution, and a partial grid would look like a book
+            # that had priced only some outcomes rather than one we half-read.
+            sel = {c: _odds((priced.get(c) or {}).get("value")) for c in _HTFT_CELLS}
+            if any(v is None for v in sel.values()):
+                continue
+            row = _build(sport_name, home, away, "htft", "FT", sel,
+                         None, league, start_time, event_id, sr_match_id, fetched_at)
             if row:
                 out.append(row)
 
@@ -187,10 +330,11 @@ def _parse_match(
 
 
 def _build(sport_name, home, away, market_type, period, selections, line,
-           league, start_time, event_id, sr_match_id, fetched_at) -> Odds | None:
+           league, start_time, event_id, sr_match_id, fetched_at,
+           team_side=None) -> Odds | None:
     if any(v is None for v in selections.values()):
         return None
-    if market_type in ("total", "spread") and line is None:
+    if market_type in ("total", "spread", "team_total") and line is None:
         return None
     try:
         return Odds(
@@ -198,7 +342,7 @@ def _build(sport_name, home, away, market_type, period, selections, line,
             market_type=market_type, period=period, selections=selections,
             fetched_at=fetched_at, line=line, start_time=start_time,
             league=league, raw_event_id=str(event_id) if event_id else None,
-            sr_match_id=sr_match_id,
+            sr_match_id=sr_match_id, team_side=team_side,
         )
     except ValueError as exc:               # odds <= 1.0 slipped through
         log.debug("liderbet Odds rejected: %s", exc)
@@ -247,6 +391,9 @@ def _fetch_sport_sync(sport_name: str) -> list[Odds]:
         return []
 
     rows: list[Odds] = []
+    ancestors: dict = {}
+    near: list[str] = []            # matches inside the detail horizon
+    detail_cut = fetched_at + timedelta(hours=DETAIL_HOURS) if DETAIL_HOURS > 0 else None
     for i in range(0, len(tour_ids), _TOURS_PER_CALL):
         chunk = ",".join(tour_ids[i:i + _TOURS_PER_CALL])
         try:
@@ -256,11 +403,50 @@ def _fetch_sport_sync(sport_name: str) -> list[Odds]:
             log.warning("liderbet %s: matchData chunk failed: %s", sport_name, exc)
             continue
         anc, mts = data.get("ancestors", {}), data.get("marketTypes", {})
+        ancestors.update(anc)
         for m in (data.get("matches") or {}).values():
             rows.extend(_parse_match(m, anc, mts, sport_name, fetched_at))
+            if detail_cut is not None and _DETAIL_TYPES_FOR(sport_name):
+                st = _start_time(m)
+                if st is not None and st <= detail_cut and m.get("id"):
+                    near.append(m["id"])
 
-    log.info("liderbet %s: %d Odds rows from %d tournaments",
-             sport_name, len(rows), len(tour_ids))
+    # ── detail tier ──────────────────────────────────────────────────────────
+    # matchData gives the FT headline markets. `matchData/details` gives the
+    # half markets and the 9-way HT/FT grid — the inputs the consistency engine
+    # needs, and which no other soft book supplies. Horizon-gated: see
+    # DETAIL_HOURS for the measured cost.
+    n_detail = 0
+    for i in range(0, len(near), _MATCHES_PER_DETAIL):
+        batch = near[i:i + _MATCHES_PER_DETAIL]
+        ids = ",".join(b if str(b).startswith("pr:m:") else f"pr:m:{b}" for b in batch)
+        try:
+            data = s.get(f"{MATCHDATA_URL}/details?matchIds={ids}&lang=en",
+                         headers=HEADERS, timeout=_HTTP_TIMEOUT * 2).json()["data"]
+        except Exception as exc:
+            log.warning("liderbet %s: details batch failed: %s", sport_name, exc)
+            continue
+        anc = {**ancestors, **(data.get("ancestors") or {})}
+        mts = data.get("marketTypes", {})
+        matches = data.get("matches") or {}
+        for mid in batch:
+            m = matches.get(mid) or matches.get(str(mid))
+            if not m:
+                continue
+            # The details payload REPEATS the FT markets, so parse it whole and
+            # drop this match's list-tier rows rather than merging: a market the
+            # book has since pulled must not survive as a leftover, and the two
+            # tiers were fetched seconds apart so the detail one is the truth.
+            fresh = _parse_match(m, anc, mts, sport_name, fetched_at, detail=True)
+            if not fresh:
+                continue
+            rows = [o for o in rows if o.raw_event_id != str(mid)]
+            rows.extend(fresh)
+            n_detail += 1
+
+    log.info("liderbet %s: %d Odds rows from %d tournaments "
+             "(%d matches with full detail, %.0fh horizon)",
+             sport_name, len(rows), len(tour_ids), n_detail, DETAIL_HOURS)
     return rows
 
 
@@ -279,6 +465,10 @@ async def fetch_liderbet_basketball() -> list[Odds]:
 
 async def fetch_liderbet_tennis() -> list[Odds]:
     return await fetch_liderbet("tennis")
+
+
+async def fetch_liderbet_americanfootball() -> list[Odds]:
+    return await fetch_liderbet("americanfootball")
 
 
 if __name__ == "__main__":   # smoke: python -m src.scrapers.liderbet [sport]

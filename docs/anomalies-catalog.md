@@ -39,11 +39,22 @@ The oldest detector. Structural, no model, no reference book.
 
 ---
 
-## Family B — CB internal consistency (`src/consistency.py`) · DIAGNOSTIC (one sub-check bettable)
+## Family B — book-internal consistency (`src/consistency.py`) · DIAGNOSTIC (one sub-check bettable)
+
+> **Not CB-only any more (2026-08-13).** The engine always ran on Lider-Bet,
+> Crocobet and Setanta (`_LADDER_BOOKS`), but those books were emitting FT
+> headline markets only — so nothing could fire. Their half markets and 9-cell
+> HT/FT grids were already in payloads we were fetching and parsing, and were
+> being dropped at the classifier. Now mapped and price-verified. `htft_combo`
+> evaluates on all four books and **Setanta fires at threshold**; measured
+> looseness of each book's HT/FT grid against its own 1X2 legs runs
+> CrystalBet (median 2.29 %, max 15.4 %) > Setanta (1.55 / 4.8) >
+> Crocobet (0.76 / 1.6) > Lider-Bet (0.00 / 0.00).
 
 Contradictions between CB's **own** markets for the same game — across market
 types (ML vs handicap) and across periods (halves/quarters vs full time).
-Everything derivable from CB alone. `CONSISTENCY_SPORTS = (basketball, soccer)`.
+Everything derivable from CB alone. `CONSISTENCY_SPORTS = (basketball, soccer,
+tennis, americanfootball)`.
 Thresholds deliberately sit **well above** normal period-to-period variation
 (calibrated on a clean NBA game 2026-05-31: ML-vs-spread agreed <0.5pp, period
 totals summed within 0.5pt).
@@ -53,6 +64,15 @@ totals summed within 0.5pt).
   (`ML_SPREAD_GAP_PP`). P(win) read **only** from a true pick'em (line 0.0)
   rung — no extrapolation (extrapolating to 0 outside a favourite's ladder
   fabricated fake gaps; interpolating across ±0.5 mixes tie conventions).
+- **Dead for four months, revived by American football (2026-08-12).** This
+  check had never fired once in 4606 historical flags, and the reason was
+  structural, not threshold-related: it needs a 2-way ML *and* a line-0 rung in
+  the same period, and neither sport had both. Soccer has the handicap side but
+  no 2-way ML (its 1X2 is 3-way and Draw No Bet is parsed then `(SKIP)`ped);
+  basketball has the ML but CB never posts a pick'em rung on it. AF has both —
+  measured on the whole live board, **169 of 177 events carry a 2-way ML and 71
+  carry a 0.0 spread rung** — so the check runs on 71 events and produced its
+  first real flag.
 
 ### B2. `favourite_flip` — periods disagree on who's favoured
 - FT favours one side but a sub-period favours the other, **both decisively**
@@ -157,6 +177,78 @@ market: `Correct score` (2:0/2:1/1:2/0:2), `Home|Away Team To Win a Set`,
 different words — they must agree), `Match to end 2:0` / `0:2`, `Set Handicap`
 (±1.5 **sets**, which would collide with the list-view **games** spread),
 `Odd/even games`.
+
+### B9. `ot_vs_regulation` — the incl-OT winner vs the regulation 1X2 · **AMERICAN FOOTBALL** · BETTABLE direction exists
+Added 2026-08-12 with the sport. CB posts the **same period twice**: a 3-way
+**regulation** result (`Main result` at FT, `1st Half Result` at H1 — American
+football can be tied at the end of regulation and CB prices that leg) and a
+2-way **including-overtime** winner (`Winner (incl. overtime)`). They are tied
+by an identity with no model in it:
+
+```
+P(win incl OT) = P(win in regulation) + P(tie) · P(win the overtime | tie)
+```
+
+The conditional lives in [0, 1], so the incl-OT probability is **boxed**:
+
+```
+P(win reg)  ≤  P(win incl OT)  ≤  P(win reg) + P(tie)
+```
+
+Stepping outside that box is not an aggressive price, it is an impossible one.
+Below the floor says overtime *removes* a regulation win; above the ceiling says
+a team wins more often than "win in regulation, or tie and then win" allows.
+
+- **HARD (the box).** Flag when a price sits ≥ **3.0pp** (`OT_BOX_PP`) outside
+  either bound.
+- **SOFT (the point estimate).** Inside the box, overtime is close to a coin
+  flip, so `P(incl OT) ≈ P(reg) + P(tie)/2`. Flag a gap ≥ **8.0pp**
+  (`OT_COINFLIP_PP`).
+
+Applied **per period**, not just FT.
+
+The case that prompted it (CB, USA NFL, Jacksonville–Cleveland):
+
+| market | odds | devigged |
+|---|---|---|
+| Main result (regulation 1X2) | 1.35 / 12.8 / 3.15 | home **0.683**, tie **0.046** |
+| Winner (incl. overtime) | 1.19 / 3.55 | home **0.779** |
+
+The ceiling is 0.683 + 0.046 = **0.729**. The incl-OT price says 0.779 — **5pp
+above** what winning-or-tying-then-winning-every-overtime can produce.
+
+**Calibration — the whole board.** All 177 CB games; 50 (event, period) pairs
+post both markets. Residuals, positive = outside the box:
+
+| | p50 | p90 | max |
+|---|---|---|---|
+| floor `P(reg) − P(incl OT)` | −2.39 | +0.24 | **+4.26** |
+| ceiling `P(incl OT) − P(reg) − P(tie)` | −1.23 | +0.95 | **+5.08** |
+| \|coin-flip gap\| | 0.57 | 3.29 | 7.36 |
+
+The ordinary case sits comfortably inside a box only ~3.6pp wide, so 3.0pp puts
+the trigger past p90 in both directions: **3 of 50 pairs flagged**, all three
+inspected by hand and real.
+
+Sanity check on the tie leg: it devigs to ≈5% on NFL, which matches the ~6–7% of
+NFL games that actually reach overtime — confirming `Main result` really is the
+regulation market and not a mislabelled final result.
+
+**Caveat before retuning:** residual size depends on the devig model. `src.vig`
+uses a **power** devig, which pushes more vig onto the longshot tie leg than a
+proportional one would; proportional devigging shrinks the same three cases by
+1–2pp. 3.0 is calibrated against the power devig the rest of the system uses —
+it is not a model-free constant.
+
+**A shared bug this check exposed.** `cb_detail` keyed variant dedup on
+`(period, market_type, line, submarket, team_side)`, so a 2-way and a 3-way
+moneyline on the same period collided and whichever the page rendered first
+silently deleted the other. That starved this check of one of its two inputs by
+construction — and it was **already** doing the same to **basketball**, where CB
+posts `Full Time Result(1X2)*` alongside `Winner (incl. overtime)` and B6
+`htft_combo` is written to consume the regulation legs. Selection count is now
+part of the key; the strict (+EV) classifiers never emit both shapes for one
+period, so only the permissive/anomaly path changes.
 
 ### B6. `htft_combo` — the HT/FT 1/1 (and 2/2) price vs its own legs · **BETTABLE direction exists**
 The Halftime/Fulltime combo checked against the H1 and FT **regulation** 1X2

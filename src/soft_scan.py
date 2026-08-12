@@ -19,6 +19,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from src import horizon
 from src import htft_favourite as hf
 from src import basketball_fav
 from src.basketball_fav import fav_disagreement
@@ -203,6 +204,11 @@ def scan_cb(sport_name: str, min_gap_pp: float = hf.RATIO) -> list[dict]:
     async def run():
         html = await cb_http.fetch_list_html(sport.SPORT_ID)
         games = cb._extract_games_from_list_html(html, fetched, sport=sport)
+        # Global data horizon (src/horizon.py). This sweep opens an
+        # ExpandDetail per surviving game, so filtering here is requests saved,
+        # not just rows dropped.
+        games = horizon.filter_items(games, lambda g: g.start_time,
+                                     label=f"soft_scan CB {sport_name}")
         flags = []
         for g in games:
             ml = _list_ml(g.list_odds)
@@ -413,6 +419,10 @@ def scan_betlive(sport_name: str) -> list[dict]:
         for w in (s.get(f"{bw.LEAGUE_EVENTS_URL}?leagueIds={','.join(ids[i:i+25])}"
                         f"&page=0&take=80", headers=bw.HEADERS, timeout=30).json() or []):
             events += w.get("events") or []
+    # Global data horizon — one getPrematchEvent call per surviving event below.
+    from src.scrapers.betlive import ticks_to_utc
+    events = horizon.filter_items(events, lambda e: ticks_to_utc(e.get("startDate")),
+                                  label=f"soft_scan betlive {sport_name}")
     flags = []
     for ev in events:
         h, a = _bl_list_ml(ev)
@@ -466,6 +476,19 @@ def _lb_extract(m, mts, L):
     return ft3, ft2, h1, htft
 
 
+def _lb_start(m: dict):
+    """Lider match startTime -> aware UTC datetime, or None. Same parse as
+    src/scrapers/liderbet._parse_match; kept local so the scan does not have to
+    import a private helper."""
+    st = m.get("startTime")
+    if not st:
+        return None
+    try:
+        return datetime.fromisoformat(st).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
 def scan_liderbet(sport_name: str) -> list[dict]:
     from curl_cffi.requests import Session
     from src.scrapers import liderbet as L
@@ -483,6 +506,10 @@ def scan_liderbet(sport_name: str) -> list[dict]:
                      headers=L.HEADERS, timeout=30).json()["data"]
         anc, mts = data.get("ancestors", {}), data.get("marketTypes", {})
         for m in (data.get("matches") or {}).values():
+            # Global data horizon — the details call below is per 20-match batch,
+            # so dropping far matches here shrinks the batch count directly.
+            if not horizon.keeps(_lb_start(m)):
+                continue
             h, a = _lb_ft_ml(m, mts, L)
             lg = transliterate((anc.get(m.get("tourId"), {}) or {}).get("name") or "") or None
             if _open(sport_name, h, a, lg):

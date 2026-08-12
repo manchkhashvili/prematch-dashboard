@@ -49,6 +49,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from src import horizon as _horizon
 from src.models import Odds
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ TIMEOUT = 15
 MAX_WORKERS = 8
 ENUM_TTL = 1800.0            # champ/board enumeration cache (fixtures churn slowly)
 
-SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4}
+SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4, "americanfootball": 13}
 
 # Energy budget (2026-07-11, the "PC runs hot" fix): pricing the WHOLE board
 # every cycle was ~4,400 GetGameZip calls + ~60 MB JSON parse per 2 min across
@@ -73,11 +74,40 @@ SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4}
 HORIZON_HOURS = float(os.environ.get("XBET_HORIZON_HOURS", "36"))
 SUBGAME_HOURS = float(os.environ.get("XBET_SUBGAME_HOURS", "18"))
 
+# Per-sport horizon override. The 36 h default assumes a board that always has
+# games today; American football does not — NFL/NCAA/CFL play on fixed weekly
+# slots, so on a Tuesday the nearest fixture can be 3-5 days out and a 36 h
+# horizon prices NOTHING. Measured 2026-08-12: 130 AF events enumerated, 0
+# inside 36 h, 0 Odds rows emitted. The board is small enough that a wide
+# horizon is cheap — a full sweep is ~130 GetGameZip calls, versus the
+# thousands soccer would cost.
+#
+# These are the book's OWN budget and are deliberately left wider than the
+# global data horizon (src/horizon.py, 7 days by default), which bounds them at
+# fetch time via horizon.capped_hours(). Written this way so the number keeps
+# saying what it means — "this sport needs a wide window" — and comes back into
+# play if the global cap is ever raised, instead of being silently pinned to
+# whatever the cap happened to be on the day it was written.
+HORIZON_HOURS_BY_SPORT = {
+    "americanfootball": float(os.environ.get("XBET_AF_HORIZON_HOURS", "240")),
+}
+SUBGAME_HOURS_BY_SPORT = {
+    "americanfootball": float(os.environ.get("XBET_AF_SUBGAME_HOURS", "72")),
+}
+
 # sub-game panel name → v1 period, per sport (verified live)
 SUBGAME_PERIODS = {
     "basketball": {"1 Half": "H1", "1st quarter": "Q1", "2nd quarter": "Q2",
                    "3rd quarter": "Q3", "4th quarter": "Q4"},
     "soccer": {"1st half": "H1"},
+    # American football ships basketball's exact sub-game panel names —
+    # verified 2026-08-12 over the 20 nearest AF fixtures: PN values were
+    # '1 Half', '1st quarter', '2nd quarter', '3rd quarter', '4th quarter'
+    # (all with empty TG) plus a "Players' stats" sibling that the empty-TG
+    # guard in _fetch_event already drops.
+    "americanfootball": {"1 Half": "H1", "1st quarter": "Q1",
+                         "2nd quarter": "Q2", "3rd quarter": "Q3",
+                         "4th quarter": "Q4"},
 }
 
 # ── DNS pin (ported from live probe; see module docstring) ───────────────────
@@ -306,7 +336,10 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
                 rows.append(_mk(game, sport, "moneyline", "FT",
                                 {"home": ml[1], "draw": ml[2], "away": ml[3]},
                                 fetched_at=fetched_at))
-        elif sport == "basketball":                # G=101 T401/402
+        elif sport in ("basketball", "americanfootball"):   # G=101 T401/402
+            # American football uses basketball's incl-OT 2-way ML code, not
+            # soccer's G=1 1X2 — verified 2026-08-12 across 30 AF fixtures
+            # (G=101 present on every priced game; G=1 absent).
             ml = {o.get("T"): _price(o) for o in ge.get(101, []) if o.get("P") is None}
             if ml.get(401) and ml.get(402):
                 rows.append(_mk(game, sport, "moneyline", "FT",
@@ -319,7 +352,7 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
                                 {"home": ml[1], "away": ml[3]},
                                 fetched_at=fetched_at))
 
-    if sport in ("basketball", "soccer", "tennis"):
+    if sport in ("basketball", "soccer", "tennis", "americanfootball"):
         # tennis: G=17 = GAMES total (1.45pp median vs Lider 'Total', n=41),
         # G=2 = GAMES handicap side-signed (0.99pp, n=64) — verified 2026-07-11
         # by name+time pairing vs Lider (1xbet has no SR ids).
@@ -330,7 +363,10 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
             rows.append(_mk(game, sport, "total", period,
                             {"over": o_, "under": u}, line=line, fetched_at=fetched_at))
 
-    if sport == "basketball":                      # team totals: T11-14 (not 9/10!)
+    # team totals: T11-14 (not 9/10!). American football ships the same codes
+    # (G=15 T11/12 home, G=62 T13/14 away) and Pinnacle prices the counterpart,
+    # so unlike basketball these rows have a match partner.
+    if sport in ("basketball", "americanfootball"):
         for line, (o_, u) in _ou_map(ge.get(15, []), 11, 12).items():
             rows.append(_mk(game, sport, "team_total", period,
                             {"over": o_, "under": u}, line=line,
@@ -362,7 +398,9 @@ def _is_placeholder_fixture(game: dict) -> bool:
 def _fetch_event(game: dict, sport: str, periods: bool,
                  fetched_at: datetime) -> list[Odds]:
     rows = _parse_zip(_game_zip(int(game["I"])), game, sport, "FT", fetched_at)
-    if periods and (game.get("S") or 0) <= time.time() + SUBGAME_HOURS * 3600:
+    subgame_hours = _horizon.capped_hours(
+        SUBGAME_HOURS_BY_SPORT.get(sport, SUBGAME_HOURS))
+    if periods and (game.get("S") or 0) <= time.time() + subgame_hours * 3600:
         pmap = SUBGAME_PERIODS.get(sport) or {}
         # `PN` is NOT unique across sub-games: a match ships both a goals
         # "1st half" (TG empty) and a corners "1st half" (TG='Corners'), plus
@@ -397,12 +435,18 @@ def _fetch_event(game: dict, sport: str, periods: bool,
 def _fetch_sport_sync(sport: str, periods: bool) -> list[Odds]:
     games = _enumerate(sport)
     fetched_at = datetime.now(tz=timezone.utc)
-    horizon = time.time() + HORIZON_HOURS * 3600
-    skipped = sum(1 for g in games if (g.get("S") or 0) > horizon)
-    games = [g for g in games if (g.get("S") or 0) <= horizon]
+    # The book's own energy budget, bounded by the global data horizon — the
+    # tighter of the two wins (src/horizon.py). Keeping them separate means the
+    # AF override below still says what it means ("this sport needs a wide
+    # window") and comes back into play if the global cap is ever raised.
+    horizon_hours = _horizon.capped_hours(
+        HORIZON_HOURS_BY_SPORT.get(sport, HORIZON_HOURS))
+    cutoff = time.time() + horizon_hours * 3600
+    skipped = sum(1 for g in games if (g.get("S") or 0) > cutoff)
+    games = [g for g in games if (g.get("S") or 0) <= cutoff]
     if skipped:
         log.debug("xbet %s: %d events beyond %.0fh horizon skipped",
-                  sport, skipped, HORIZON_HOURS)
+                  sport, skipped, horizon_hours)
     rows: list[Odds] = []
     errors = 0
 
@@ -437,12 +481,17 @@ async def fetch_xbet_tennis(*, concurrency: int = 10) -> list[Odds]:
     return await asyncio.to_thread(_fetch_sport_sync, "tennis", False)
 
 
+async def fetch_xbet_americanfootball(*, concurrency: int = 10) -> list[Odds]:
+    return await asyncio.to_thread(_fetch_sport_sync, "americanfootball", True)
+
+
 if __name__ == "__main__":   # smoke: python -m src.scrapers.xbet [sport]
     import sys
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     sport = sys.argv[1] if len(sys.argv) > 1 else "basketball"
     fn = {"basketball": fetch_xbet_basketball, "soccer": fetch_xbet_soccer,
-          "tennis": fetch_xbet_tennis}[sport]
+          "tennis": fetch_xbet_tennis,
+          "americanfootball": fetch_xbet_americanfootball}[sport]
     odds = asyncio.run(fn())
     print(f"\n{sport}: {len(odds)} Odds rows")
     by = {}

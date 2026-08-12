@@ -40,6 +40,13 @@ Checks (all per game, CB-only):
                           * SHAPE — the devigged CB probability disagrees
                             with the model by >= 1.5x on a meaningful
                             outcome: the market's internal shape is off.
+  4d. ot_vs_regulation  — American football only. CB posts BOTH a regulation
+                          3-way ("Main result", with a real tie leg) and an
+                          incl-overtime 2-way ("Winner (incl. overtime)") on the
+                          same period. P(win incl OT) must lie between P(win in
+                          regulation) and P(win) + P(tie); outside that box the
+                          pair is arithmetically impossible, inside it the
+                          coin-flip point estimate still has to roughly hold.
   5. htft_combo         — the Halftime/Fulltime 1/1 (and 2/2) price violates a
                           bound implied by its own legs (the H1 and FT 1x2
                           moneylines, regulation time):
@@ -89,7 +96,50 @@ HTFT_ODDS_MAX = 4.5
 # soccer (1X2 + HT/FT), and tennis (set winners vs match winner — see
 # set_vs_match below; tennis detail pages carry 15 markets that are all
 # functions of the same four best-of-3 outcomes).
-CONSISTENCY_SPORTS = ("basketball", "soccer", "tennis")
+CONSISTENCY_SPORTS = ("basketball", "soccer", "tennis", "americanfootball")
+
+# ot_vs_regulation (American football): CB prices the SAME game twice at full
+# time — a 3-way REGULATION result ("Main result": 1 / X / 2, the tie leg
+# around 13.2) and a 2-way INCLUDING-OVERTIME winner ("Winner (incl.
+# overtime)"). The two are linked by an identity with no model in it:
+#
+#     P(home incl OT) = P(home reg) + P(tie reg) * P(home wins OT | tie)
+#
+# Since the conditional lives in [0, 1], the incl-OT probability is BOXED:
+#     P(home reg)  <=  P(home incl OT)  <=  P(home reg) + P(tie reg)
+# Stepping outside that box is not an aggressive price, it is an impossible
+# one: below the floor says overtime makes a team LESS likely to win; above
+# the ceiling says it wins more often than "win in regulation or tie" allows.
+#
+# OT_BOX_PP is how far outside the box a price must sit before flagging —
+# pure devig slack, since the two markets carry independent vig (the 3-way's
+# longshot tie leg is the noisier of the pair).
+#
+# Calibrated on the WHOLE live CB board, 2026-08-12: 177 games, of which 50
+# (event, period) pairs post both markets. Residual distributions, where a
+# POSITIVE value means "outside the box":
+#     floor (p_reg − q_ot)        p50 −2.39   p90 +0.24   max +4.26
+#     ceiling (q_ot − p_reg−p_tie) p50 −1.23  p90 +0.95   max +5.08
+# So the ordinary case sits comfortably INSIDE a box only ~3.6pp wide, and
+# 3.0pp puts the trigger past the 90th percentile in both directions. That
+# flagged 3 of the 50 pairs; all three were inspected by hand and are real
+# (e.g. Jacksonville-Cleveland: regulation 1.35/12.8/3.15 → 68 % + 5 % tie,
+# but incl-OT 1.19/3.55 → 78 %, which no overtime record can produce).
+#
+# CAVEAT worth knowing before retuning: the size of these residuals depends on
+# the devig model. src.vig uses a power devig, which pushes more vig onto the
+# longshot tie leg than a proportional one would, so proportional devigging
+# shrinks the same three cases by ~1-2pp. 3.0 is calibrated against the power
+# devig the rest of the system uses; it is not a model-free constant.
+OT_BOX_PP = 3.0
+# Soft check: the point estimate. Treating overtime as a coin flip gives
+# P(home incl OT) ~ P(home reg) + P(tie reg)/2. Real NFL overtime is close to
+# even (possession rules cut the coin-toss edge), and the tie leg is small
+# (~5 % of the book on NFL, matching the ~6-7 % of games that actually reach
+# overtime), so the whole correction is a couple of pp. Measured |gap| on the
+# same board: p90 3.29, max 7.36 — so 8.0 fires on nothing ordinary and exists
+# to catch a pair that stays inside the box while still disagreeing wildly.
+OT_COINFLIP_PP = 8.0
 
 # set_vs_match: how far the per-set win probability implied by the MATCH price
 # may sit from the one the book posts on the FIRST SET, in percentage points.
@@ -203,6 +253,7 @@ class _PeriodView:
     """Derived per-(event,period) summary used by the checks."""
     ml_phome: Optional[float] = None          # P(home win) from the 2-way moneyline
     ml_phome3: Optional[float] = None          # P(home win) from a 3-way 1X2 (soccer)
+    ml_pdraw3: Optional[float] = None          # P(draw/tie) from that same 3-way
     spread_pwin: Optional[float] = None        # P(home win) from spread @ line 0
     spread_center: Optional[float] = None      # home_line where P(cover)=0.5
     total_center: Optional[float] = None       # total where P(over)=0.5
@@ -244,9 +295,10 @@ def _build_period_view(period_odds: dict[str, list[Odds]]) -> _PeriodView:
             s = o.selections
             if {"home", "draw", "away"} <= set(s):
                 try:
-                    p = devig_3way(s["home"], s["draw"], s["away"])[0]
-                    if 0.0 < p < 1.0:
-                        v.ml_phome3 = p
+                    ph, pd, _ = devig_3way(s["home"], s["draw"], s["away"])
+                    if 0.0 < ph < 1.0:
+                        v.ml_phome3 = ph
+                        v.ml_pdraw3 = pd if 0.0 <= pd < 1.0 else None
                         break
                 except (ValueError, ZeroDivisionError):
                     pass
@@ -296,6 +348,8 @@ def find_consistency_flags(
     extreme_pp: float = EXTREME_PP,
     htft_gap_pct: float = HTFT_GAP_PCT,
     ht_set_match_pp: float = SET_MATCH_PP,
+    ot_box_pp: float = OT_BOX_PP,
+    ot_coinflip_pp: float = OT_COINFLIP_PP,
 ) -> list[ConsistencyFlag]:
     """Find CB-internal contradictions across markets/periods. See module docs."""
     # Group: event_id -> period -> market_type -> [Odds]
@@ -432,6 +486,49 @@ def find_consistency_flags(
                                    f"favourite but the first set is priced at "
                                    f"{ps*100:.0f}% — {gap:.0f}pp apart on the same "
                                    f"quantity", gap)
+
+        # 4d. AMERICAN FOOTBALL: the incl-OT winner vs the regulation 1X2.
+        #
+        # Both markets are posted on the same CB detail page for the same
+        # period, and they are tied by an identity rather than a model:
+        # winning "including overtime" means winning in regulation OR tying
+        # and then winning the extra period. So the incl-OT probability can
+        # never fall below the regulation win probability, and can never
+        # exceed regulation-win-plus-tie. See OT_BOX_PP above.
+        #
+        # Applied per period, not just FT — CB ships "Main result" at FT and
+        # "1st Half Result" at H1, each alongside its own 2-way price.
+        if m.sport == "americanfootball":
+            for per, v in views.items():
+                q = v.ml_phome            # 2-way, includes overtime
+                p = v.ml_phome3           # 3-way, regulation only
+                d = v.ml_pdraw3
+                if q is None or p is None or d is None:
+                    continue
+                floor_pp = (p - q) * 100.0          # >0 → below the floor
+                ceil_pp = (q - (p + d)) * 100.0     # >0 → above the ceiling
+                if floor_pp >= ot_box_pp:
+                    mk("ot_vs_regulation", per,
+                       f"{per}: home wins {p*100:.0f}% in regulation but only "
+                       f"{q*100:.0f}% including overtime — overtime cannot take "
+                       f"away a regulation win ({floor_pp:.0f}pp below the floor)",
+                       floor_pp)
+                elif ceil_pp >= ot_box_pp:
+                    mk("ot_vs_regulation", per,
+                       f"{per}: home wins {q*100:.0f}% including overtime, more "
+                       f"than winning ({p*100:.0f}%) or tying ({d*100:.0f}%) in "
+                       f"regulation combined — impossible even if it won every "
+                       f"overtime ({ceil_pp:.0f}pp above the ceiling)", ceil_pp)
+                else:
+                    # inside the box — check the point estimate (OT ~ coin flip)
+                    gap = abs(q - (p + d / 2.0)) * 100.0
+                    if gap >= ot_coinflip_pp:
+                        mk("ot_vs_regulation", per,
+                           f"{per}: regulation 1X2 ({p*100:.0f}/{d*100:.0f}/"
+                           f"{(1-p-d)*100:.0f}) implies {(p+d/2)*100:.0f}% "
+                           f"including overtime if the extra period were even, "
+                           f"but the incl-OT winner is priced at {q*100:.0f}% "
+                           f"({gap:.0f}pp apart)", gap)
 
         # 5. HT/FT combo vs its own legs (1/1 and 2/2; raw odds, see module doc)
         combo = _first_htft(periods)

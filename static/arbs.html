@@ -49,11 +49,9 @@
       Min edge %
       <input type="number" id="min-edge" value="1" step="0.5" />
     </label>
-    <label class="alert-controls" title="Plays a soft 'ping' when a NEW opportunity at or above this threshold appears. Dedupes per (game, market, side) — same opportunity won't beep twice in a session.">
+    <label class="alert-controls" title="Master switch for the opportunity chime. What it fires on is configured in the Alert settings panel below.">
       <input type="checkbox" id="alert-enabled" />
-      Alert ≥
-      <input type="number" id="alert-threshold" value="15" step="1" min="1" />
-      %
+      Alert
     </label>
     <label title="Rows whose soft-book↔Pinnacle pairing looks unreliable (kickoff far apart, weak name score, or an implausibly large edge). Hidden by default: in a live audit every kickoff-misaligned row and almost every >20% edge was weak. Untick to inspect them — they are also the input for curating team_aliases.yaml.">
       <input type="checkbox" id="show-weak" />
@@ -65,6 +63,94 @@
     </label>
     <span class="row-count" id="row-count">…</span>
   </div>
+
+  <!-- Advanced alert config (2026-08-12). Replaces the single "Alert >= N%"
+       box: an edge percentage alone says nothing about whether a row is
+       BETTABLE. Everything here is a GATE — a row must clear every criterion
+       you fill in, and a blank box is ignored. That is the opposite of the
+       Anomalies panel (which fires if ANY criterion is met), because there you
+       are casting a net and here you are narrowing one.
+       Settings persist in localStorage and are read by the shared alerts.js,
+       so the chime follows you across pages. -->
+  <details class="alert-config" id="alert-config">
+    <summary>Alert settings <span class="hint" id="alert-cfg-summary"></span></summary>
+    <div class="cfg-body">
+
+      <fieldset id="arb-alert-thresholds">
+        <legend>Size of the edge</legend>
+        <p class="cfg-note">
+          A row must clear <b>every</b> filled box. Blank = ignore that one.
+        </p>
+        <div class="cfg-row">
+          <label for="alert-threshold" title="The Edge% column: book price vs Pinnacle's no-vig fair price.">Edge ≥</label>
+          <input type="number" id="alert-threshold" step="0.5" min="0" placeholder="off" />
+          <span class="kind-unit">%</span>
+        </div>
+        <div class="cfg-row">
+          <label for="alert-pp" title="Edge measured in PROBABILITY POINTS: (1/fair − 1/book) × 100. Edge% flatters longshots — 10.0 against a 8.0 fair is '+25%' but only 2.5pp, while 2.0 against 1.9 is '+5.3%' and worth MORE at 2.6pp. Use this to stop the alert being loudest where it is least reliable.">Prob. edge ≥</label>
+          <input type="number" id="alert-pp" step="0.25" min="0" placeholder="off" />
+          <span class="kind-unit">pp</span>
+        </div>
+        <div class="cfg-row">
+          <label for="alert-step" title="An opportunity already alerted stays silent until its edge improves by at least this much. Was hardcoded at 5pp before this panel existed.">Re-alert after +</label>
+          <input type="number" id="alert-step" step="0.5" min="0" placeholder="5" />
+          <span class="kind-unit">pp</span>
+        </div>
+      </fieldset>
+
+      <fieldset id="arb-alert-ranges">
+        <legend>Price &amp; stake</legend>
+        <p class="cfg-note">
+          Ranges are inclusive. Leave either end blank for "no bound".
+        </p>
+        <div class="cfg-row">
+          <label for="alert-odds-min" title="The book's decimal price. Short prices carry small edges but land often; long prices are where fair-price error is largest.">Odds</label>
+          <input type="number" id="alert-odds-min" step="0.05" min="1" placeholder="min" />
+          <span class="sep">→</span>
+          <input type="number" id="alert-odds-max" step="0.05" min="1" placeholder="max" />
+        </div>
+        <div class="cfg-row">
+          <label for="alert-kelly-min" title="Quarter-Kelly stake in currency units. A large edge on a long price still produces a tiny Kelly — this is the filter that says 'only tell me if it is worth real money'.">Kelly</label>
+          <input type="number" id="alert-kelly-min" step="1" min="0" placeholder="min" />
+          <span class="sep">→</span>
+          <input type="number" id="alert-kelly-max" step="1" min="0" placeholder="max" />
+        </div>
+        <div class="cfg-row">
+          <label for="alert-pinmax" title="Pinnacle's maxRiskStake on the matched market. A high limit means Pinnacle is confident in the price it is lending you as 'fair' — the single best quality signal in the row. It also caps how much an ARB partner leg can take.">Pin limit ≥</label>
+          <input type="number" id="alert-pinmax" step="50" min="0" placeholder="off" />
+        </div>
+        <div class="cfg-row">
+          <label for="alert-lead-min" title="Time until kickoff. A game six days out will move many times before you can act; a game two minutes out may be unplaceable.">Kickoff in</label>
+          <input type="number" id="alert-lead-min" step="5" min="0" placeholder="min" />
+          <span class="kind-unit">min</span>
+          <span class="sep">→</span>
+          <input type="number" id="alert-lead-max" step="1" min="0" placeholder="max" />
+          <span class="kind-unit">h</span>
+        </div>
+      </fieldset>
+
+      <fieldset id="arb-alert-scope">
+        <legend>What counts</legend>
+        <p class="cfg-note">
+          Nothing selected in a group means <b>all of it</b> — so a sport or
+          book added later still alerts instead of going quiet.
+        </p>
+        <p class="cfg-sub">Kind</p>
+        <div class="cfg-chips" id="alert-kinds"></div>
+        <p class="cfg-sub">Match confidence</p>
+        <div class="cfg-chips" id="alert-conf"></div>
+        <p class="cfg-sub">Sport</p>
+        <div class="cfg-chips" id="alert-sports"></div>
+        <p class="cfg-sub">Book</p>
+        <div class="cfg-chips" id="alert-books"></div>
+        <p class="cfg-sub">Market</p>
+        <div class="cfg-chips" id="alert-markets"></div>
+        <p class="cfg-sub">Period</p>
+        <div class="cfg-chips" id="alert-periods"></div>
+      </fieldset>
+
+    </div>
+  </details>
 
   <div class="table-wrap">
     <table id="opps">
@@ -80,6 +166,7 @@
           <th class="num">Book odds</th>
           <th class="num" title="Pinnacle no-vig fair price for the same side as the CB bet. Differs from the matches-page 'Pin H/Pin A' columns, which show Pinnacle's vigged posted prices.">Pin fair</th>
           <th class="num">Edge%</th>
+          <th class="num" title="How old the BOOK's price is — the age of the soft-book leg, not the reference. edge.py compares the two prices without checking either one's age, so a stale book price reports the drift since it was pulled as edge. Measured on CB soccer: a 50-minute-old price has moved more than 6% in 5.5% of cases, against 0.1% at 3 minutes. CB is the slow book (191s average sweep, 3127s at worst); the others refresh in 10-20s.">Age</th>
           <th title="How much to trust the soft-book↔Pinnacle match. Pinnacle matches are name+time fuzzy, so a strong-looking name can still be the wrong game (common in same-named lower divisions). An implausibly large edge is the tell — it's weighted down to 'weak'.">Match</th>
           <th>Kind</th>
           <th class="num">Kelly</th>
@@ -88,7 +175,7 @@
         </tr>
       </thead>
       <tbody id="opps-body">
-        <tr><td colspan="15" class="empty">loading…</td></tr>
+        <tr><td colspan="16" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -108,7 +195,6 @@ let kindFilter = "all";
 let bookFilter = "all";
 const minEdgeInput = document.getElementById("min-edge");
 const alertEnabled = document.getElementById("alert-enabled");
-const alertThreshold = document.getElementById("alert-threshold");
 
 document.querySelectorAll("#kind-filter .chip").forEach(chip => {
   chip.addEventListener("click", () => {
@@ -128,21 +214,177 @@ document.querySelectorAll("#book-filter .chip").forEach(chip => {
 });
 minEdgeInput.addEventListener("change", fetchAndRender);
 
-// ── Sound alert for new ≥ N% edges ─────────────────────────────────────────
-// Persist alert config across reloads (localStorage isn't supported in
-// claude.ai artifacts but works fine in a regular browser; if it fails
-// silently it's no worse than the defaults).
-try {
-  if (localStorage.getItem("alert_enabled") === "1") alertEnabled.checked = true;
-  const stored = localStorage.getItem("alert_threshold");
-  if (stored) alertThreshold.value = stored;
-} catch (e) { /* private mode / disabled — ignore */ }
-alertEnabled.addEventListener("change", () => {
-  try { localStorage.setItem("alert_enabled", alertEnabled.checked ? "1" : "0"); } catch (e) {}
-});
-alertThreshold.addEventListener("change", () => {
-  try { localStorage.setItem("alert_threshold", alertThreshold.value); } catch (e) {}
-});
+// ── Advanced alert config (2026-08-12) ─────────────────────────────────────
+// Was a single "Alert ≥ N%" box. An edge percentage on its own says nothing
+// about whether a row is worth acting on: the biggest percentages sit on the
+// longest prices, which is exactly where Pinnacle's fair number is least
+// certain and where the Kelly stake is smallest. So every criterion here is a
+// GATE the row must clear, blank means "ignore this one", and the chip groups
+// default to "everything" so a newly added sport or book never goes quiet.
+//
+// These key names are the entire contract with alerts.js — a typo on either
+// side fails silently (panel looks saved, chime never fires), so
+// tests/test_arb_alerts_wiring.py pins them in both directions.
+const A_ON        = "alert_enabled";        // pre-existing keys kept, so an
+const A_EDGE      = "alert_threshold";      // existing setting survives
+const A_PP        = "arb_alert_pp";
+const A_STEP      = "arb_alert_step";
+const A_ODDS_MIN  = "arb_alert_odds_min";
+const A_ODDS_MAX  = "arb_alert_odds_max";
+const A_KELLY_MIN = "arb_alert_kelly_min";
+const A_KELLY_MAX = "arb_alert_kelly_max";
+const A_PINMAX    = "arb_alert_pin_max_stake";
+const A_LEAD_MIN  = "arb_alert_lead_min";
+const A_LEAD_MAX  = "arb_alert_lead_max_h";
+const A_KINDS     = "arb_alert_kinds";
+const A_CONF      = "arb_alert_conf";
+const A_SPORTS    = "arb_alert_sports";
+const A_BOOKS     = "arb_alert_books";
+const A_MARKETS   = "arb_alert_markets";
+const A_PERIODS   = "arb_alert_periods";
+
+function lsGet(k, dflt) {
+  try { const v = localStorage.getItem(k); return v === null ? dflt : v; }
+  catch (e) { return dflt; }
+}
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+const numEls = {
+  [A_EDGE]:      document.getElementById("alert-threshold"),
+  [A_PP]:        document.getElementById("alert-pp"),
+  [A_STEP]:      document.getElementById("alert-step"),
+  [A_ODDS_MIN]:  document.getElementById("alert-odds-min"),
+  [A_ODDS_MAX]:  document.getElementById("alert-odds-max"),
+  [A_KELLY_MIN]: document.getElementById("alert-kelly-min"),
+  [A_KELLY_MAX]: document.getElementById("alert-kelly-max"),
+  [A_PINMAX]:    document.getElementById("alert-pinmax"),
+  [A_LEAD_MIN]:  document.getElementById("alert-lead-min"),
+  [A_LEAD_MAX]:  document.getElementById("alert-lead-max"),
+};
+
+// Chip groups: {storageKey: [gridId, options]}. `null` stored (or absent) means
+// "all" — deliberately NOT an empty list, so we can tell "never configured"
+// from "user unselected everything" and treat the latter as all too. Options
+// are a seed list; anything the live feed shows gets merged in (see
+// mergeSeenOptions) so a sport added to the backend appears here without an
+// edit to this file.
+const CHIP_GROUPS = {
+  [A_KINDS]:   ["alert-kinds",   ["+EV", "ARB"]],
+  [A_CONF]:    ["alert-conf",    ["strong", "medium", "weak"]],
+  [A_SPORTS]:  ["alert-sports",  ["basketball", "soccer", "tennis", "americanfootball"]],
+  [A_BOOKS]:   ["alert-books",   ["cb", "liderbet", "betlive", "crocobet", "setanta"]],
+  [A_MARKETS]: ["alert-markets", ["moneyline", "spread", "total", "team_total"]],
+  [A_PERIODS]: ["alert-periods", ["FT", "H1", "Q1", "Q2", "Q3", "Q4"]],
+};
+// Options discovered from the feed, merged into the seed lists above.
+const chipOptions = {};
+for (const [key, [, seed]] of Object.entries(CHIP_GROUPS)) chipOptions[key] = [...seed];
+
+function loadChipSel(key) {
+  const raw = lsGet(key, null);
+  if (raw === null || raw === "") return null;          // null = all
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) && arr.length ? new Set(arr) : null;
+  } catch (e) { return null; }
+}
+function saveChipSel(key, set) {
+  // An empty selection is stored as "" (= all), so unticking the last chip
+  // widens the alert rather than silencing it entirely — silencing is what the
+  // master switch is for.
+  lsSet(key, (!set || set.size === 0) ? "" : JSON.stringify([...set]));
+}
+
+function renderChipGroup(key) {
+  const [gridId] = CHIP_GROUPS[key];
+  const grid = document.getElementById(gridId);
+  const sel = loadChipSel(key);
+  grid.innerHTML = "";
+  for (const opt of chipOptions[key]) {
+    const el = document.createElement("span");
+    el.className = "chip" + (sel === null || sel.has(opt) ? " on" : "");
+    el.textContent = opt;
+    el.dataset.value = opt;
+    el.addEventListener("click", () => {
+      const cur = loadChipSel(key);
+      // Turning one chip off while "all" is implied means "all except this".
+      const next = cur === null ? new Set(chipOptions[key]) : new Set(cur);
+      if (next.has(opt)) next.delete(opt); else next.add(opt);
+      // Everything selected is the same as "all" — store it as such so a later
+      // addition to the option list is included automatically.
+      saveChipSel(key, next.size === chipOptions[key].length ? null : next);
+      renderChipGroup(key);
+      paintAlertCfg();
+    });
+    grid.appendChild(el);
+  }
+}
+
+// Merge values actually present in the feed into the chip options, so the panel
+// can never offer a narrower world than the table shows.
+function mergeSeenOptions(rows) {
+  const seen = {
+    [A_KINDS]:   new Set(rows.map(o => o.kind).filter(Boolean)),
+    [A_SPORTS]:  new Set(rows.map(o => o.sport).filter(Boolean)),
+    [A_BOOKS]:   new Set(rows.map(o => o.book).filter(Boolean)),
+    [A_MARKETS]: new Set(rows.map(o => o.market_type).filter(Boolean)),
+    [A_PERIODS]: new Set(rows.map(o => o.period).filter(Boolean)),
+  };
+  let changed = false;
+  for (const [key, vals] of Object.entries(seen)) {
+    for (const v of vals) {
+      if (!chipOptions[key].includes(v)) { chipOptions[key].push(v); changed = true; }
+    }
+  }
+  if (changed) for (const key of Object.keys(CHIP_GROUPS)) renderChipGroup(key);
+}
+
+function restoreAlertCfg() {
+  alertEnabled.checked = lsGet(A_ON, "0") === "1";
+  for (const [key, el] of Object.entries(numEls)) {
+    if (el) el.value = lsGet(key, "");
+  }
+  for (const key of Object.keys(CHIP_GROUPS)) renderChipGroup(key);
+  paintAlertCfg();
+}
+
+function syncAlertCfg() {
+  lsSet(A_ON, alertEnabled.checked ? "1" : "0");
+  for (const [key, el] of Object.entries(numEls)) {
+    if (el) lsSet(key, el.value.trim());
+  }
+  paintAlertCfg();
+}
+
+// Summarise in the closed state so the settings are legible without opening —
+// the panel is long, and "is my alert actually going to fire?" should be
+// answerable at a glance.
+function paintAlertCfg() {
+  document.getElementById("arb-alert-thresholds").classList.toggle("off", !alertEnabled.checked);
+  document.getElementById("arb-alert-ranges").classList.toggle("off", !alertEnabled.checked);
+  document.getElementById("arb-alert-scope").classList.toggle("off", !alertEnabled.checked);
+  const el = document.getElementById("alert-cfg-summary");
+  if (!alertEnabled.checked) { el.textContent = "— off"; return; }
+  const v = k => (numEls[k] && numEls[k].value.trim()) || "";
+  const bits = [];
+  if (v(A_EDGE)) bits.push(`edge ≥ ${v(A_EDGE)}%`);
+  if (v(A_PP)) bits.push(`≥ ${v(A_PP)}pp`);
+  if (v(A_ODDS_MIN) || v(A_ODDS_MAX)) bits.push(`odds ${v(A_ODDS_MIN) || "…"}–${v(A_ODDS_MAX) || "…"}`);
+  if (v(A_KELLY_MIN) || v(A_KELLY_MAX)) bits.push(`kelly ${v(A_KELLY_MIN) || "…"}–${v(A_KELLY_MAX) || "…"}`);
+  if (v(A_PINMAX)) bits.push(`pin limit ≥ ${v(A_PINMAX)}`);
+  if (v(A_LEAD_MIN) || v(A_LEAD_MAX)) bits.push(`kickoff ${v(A_LEAD_MIN) || "0"}min–${v(A_LEAD_MAX) || "…"}h`);
+  const narrowed = Object.keys(CHIP_GROUPS)
+    .filter(k => loadChipSel(k) !== null)
+    .map(k => CHIP_GROUPS[k][0].replace("alert-", ""));
+  if (narrowed.length) bits.push(`filtered: ${narrowed.join(", ")}`);
+  el.textContent = bits.length ? "— " + bits.join(" · ") : "— on, no criteria (fires on everything)";
+}
+
+alertEnabled.addEventListener("change", syncAlertCfg);
+for (const el of Object.values(numEls)) {
+  if (el) el.addEventListener("change", syncAlertCfg);
+}
+restoreAlertCfg();
 
 // Phase 3.12: sound + poll logic moved to shared static/alerts.js, which
 // runs on every dashboard page (matches, arbs, bets, calc, unmatched) so
@@ -183,6 +425,32 @@ function fmtAge(sec) {
   if (sec < 60)   return sec + "s";
   if (sec < 3600) return Math.floor(sec / 60) + "m" + String(sec % 60).padStart(2, "0") + "s";
   return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
+}
+
+// Age of the BOOK's price on an opportunity row. Thresholds come from the
+// measured drift of CB soccer prices (8 460 tick series): the share that have
+// moved >6% is 0.1% at 3 min, 0.7% at 10 min, 3.5% at 30 min and 5.5% at 50.
+// So under ~5 min is effectively fresh, over ~15 min deserves a second look.
+// Deliberately colouring rather than hiding — a stale row can still be a real
+// edge, it just has not been confirmed on a current price.
+const AGE_WARN_SEC = 15 * 60;
+const AGE_OK_SEC   = 5 * 60;
+function ageClass(sec) {
+  if (sec === null || sec === undefined) return "dim";
+  if (sec >= AGE_WARN_SEC) return "edge-neg";
+  if (sec >= AGE_OK_SEC)   return "";
+  return "dim";
+}
+function ageTitle(sec) {
+  if (sec === null || sec === undefined) return "price age unknown";
+  const m = Math.round(sec / 60);
+  if (sec >= AGE_WARN_SEC) {
+    return `the book's price is ${m} min old — at this age ~4% of CB soccer `
+         + `prices have already moved more than 6%, so a large edge here may be `
+         + `drift rather than value. The re-verify loop re-pulls the top rows; `
+         + `wait for it, or check the price at the book.`;
+  }
+  return `the book's price is ${m < 1 ? sec + "s" : m + " min"} old`;
 }
 
 // 2-letter sport prefix for the compact status bar.
@@ -320,13 +588,14 @@ async function fetchAndRender() {
       Marks.load(),
     ]);
     cache = await oppsRes.json();
+    mergeSeenOptions(cache);
     render();
     Marks.bind(document.getElementById("opps-body"), render);
     // Alert ping handled by shared /alerts.js (Phase 3.12) — runs on every
     // page, polls independently, persists seen-set in localStorage.
   } catch (e) {
     document.getElementById("opps-body").innerHTML =
-      `<tr><td colspan="15" class="empty">error loading opportunities</td></tr>`;
+      `<tr><td colspan="16" class="empty">error loading opportunities</td></tr>`;
   }
 }
 
@@ -357,7 +626,7 @@ function render() {
     `${rows.length} row${rows.length === 1 ? "" : "s"}` +
     (hidden > 0 ? ` (${hidden} weak hidden)` : "");
   if (rows.length === 0) {
-    body.innerHTML = `<tr><td colspan="15" class="empty">` +
+    body.innerHTML = `<tr><td colspan="16" class="empty">` +
       (cache.length ? `all ${cache.length} row(s) are weak — tick "show weak" to see them`
                     : `no opportunities at current threshold`) + `</td></tr>`;
     return;
@@ -417,6 +686,7 @@ function render() {
         <td class="num">${fmtNum(o.cb_odds)}</td>
         <td class="num">${fmtNum(o.pin_no_vig)}</td>
         <td class="num ${pctClass(o.edge_pct)}">${fmtPct(o.edge_pct)}</td>
+        <td class="num ${ageClass(o.age_sec)}" title="${ageTitle(o.age_sec)}">${fmtAge(o.age_sec)}</td>
         <td>${confChip(o)}</td>
         <td><span class="kind ${o.kind === '+EV' ? 'kind-ev' : 'kind-arb'}">${o.kind}</span></td>
         <td class="num">${o.kelly_stake ? o.kelly_stake.toFixed(0) : "—"}</td>

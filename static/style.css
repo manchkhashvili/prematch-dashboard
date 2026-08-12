@@ -272,6 +272,40 @@ header nav a.active {
 }
 .alert-config .kind-unit { color: var(--text-faint); font-family: var(--mono); }
 
+/* Chip multi-selects inside the alert panel (Arbs tab). Same look as the
+   toolbar chips, but these are MULTI-select: none selected means "all", so a
+   sport or book added later is never silently excluded from alerting. */
+.alert-config .cfg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+.alert-config .cfg-chips .chip {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.alert-config .cfg-chips .chip.on {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.alert-config .cfg-row .sep { color: var(--text-faint); }
+.alert-config .cfg-sub {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin: 9px 0 0;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
 /* ── tables ────────────────────────────────────────────────────────────── */
 .table-wrap {
   padding: 0 18px 30px;

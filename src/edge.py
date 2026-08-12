@@ -164,6 +164,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                     pin_event_id=pin.raw_event_id,
                     sr_match_id=cb.sr_match_id,
                     match_score=match_score, match_time_delta_sec=match_dt,
+                    cb_fetched_at=cb.fetched_at,
                 ))
 
         # ── ARB pass ────────────────────────────────────────────────────────
@@ -207,6 +208,7 @@ def _process_event(event: MatchedEvent, min_edge_pct: float) -> list[Opportunity
                 pin_event_id=pin.raw_event_id,
                 sr_match_id=cb.sr_match_id,
                 match_score=match_score, match_time_delta_sec=match_dt,
+                cb_fetched_at=cb.fetched_at,
             ))
 
     return opps

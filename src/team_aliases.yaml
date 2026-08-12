@@ -44,6 +44,43 @@ aliases:
   "CR Brasil AL": "CRB"
   "CR Brasil": "CRB"
 
+  # ── American football (2026-08-12 board audit) ──────────────────────
+  # CB appends the MASCOT to the school ("Rutgers Scarlet Knights") where
+  # Pinnacle uses the bare school ("Rutgers"). That alone needs no alias —
+  # token_set_ratio scores the pair 100 because the Pinnacle side is a
+  # subset. Only two things actually break the join, and each entry below
+  # was confirmed by its OPPONENT matching in the same fixture:
+  #   (a) the school itself is an initialism or a different word entirely
+  #       ("Umass Minutemen" vs "Massachusetts" scores 28.6);
+  #   (b) CB has a typo in the school name.
+  # NCAA teams Pinnacle does not currently carry are deliberately NOT
+  # listed — that is a coverage gap, not a naming one, and inventing an
+  # alias for an absent counterpart can only create a wrong match later.
+  # "Knights" (CB ships the bare mascot on one NCAA fixture) is likewise
+  # left alone: it is ambiguous between UCF and Rutgers.
+  "Umass Minutemen": "Massachusetts"          # UMass; Pin 'Massachusetts'
+  "Fiu Panthers": "Florida International"     # FIU; opponent 'South Florida' matched
+  "St. Wolfpack": "NC State"                  # CB truncated 'N.C. State Wolfpack'
+  "Louisiana-Monroe Warhawks": "UL Monroe"
+  # CB typos — verified against the fixture's other side
+  "Tusla Golden Hurricane": "Tulsa"           # 'Tusla' -> Tulsa
+  "Lousville Cardinals": "Louisville"
+  "Stenford Cardinal": "Stanford"
+  "Norh Dakota State Bison": "North Dakota State"
+  # Betlive still carries the CFL team's pre-2021 name
+  "Edmonton Eskimos": "Edmonton Elks"
+
+  # ── Chile, Liga Nacional (2026-08-12) ───────────────────────────────────
+  # CB abbreviates the club to its mascot + city and misspells the city
+  # ("Kilpue" for Quilpué). Against Pinnacle's "CD Colegio Los Leones" that
+  # leaves 'kilpue' as a distinctive leftover token agreeing with nothing, so
+  # the same-city-different-club guard in matcher.py demands a mean of 88 and
+  # the pair (81.6) is rejected — CB never reaches Pinnacle for this fixture
+  # while Lider-Bet, which spells the club out, matches at 100. Confirmed the
+  # same fixture three ways: identical kickoff, an exact home-side match, and
+  # Lider's own name for the club.
+  "Leones Kilpue": "CD Colegio Los Leones de Quilpue"
+
   # ── Examples — uncomment + edit when you observe these mismatches ───
   # Italian Serie A — CB carries full club name with founding year
   # "Pallacanestro Trieste 2004": "Trieste"

@@ -38,6 +38,10 @@ Verified 2026-07-26 against the live board + the book's own market dictionary
                    mt 5 total, mt 4 spread, mt 7 team total (as soccer)
   tennis (T)     : mt 1  moneyline 2-way (0=1, 3=2)   ← NOT mt 2
                    mt 5  total (games), mt 4 spread (games)
+  am. football   : mt 1  moneyline 2-way (0=1, 3=2)   ← tennis's code, not
+    (AF)                 basketball's 145. mt 2 exists on AF but only on
+                         sub-periods, where it is the 3-way REGULATION result.
+                   mt 5 total, mt 4 spread, mt 7 team total
 
 PERIOD CODES ARE SPORT-SPECIFIC — the trap in this feed. `0` is FT everywhere,
 but for basketball `1..4` are QUARTERS and the halves live at 4010/4011:
@@ -45,6 +49,7 @@ but for basketball `1..4` are QUARTERS and the halves live at 4010/4011:
   basketball : 0=FT, 4010=H1, 1=Q1, 2=Q2, 3=Q3, 4=Q4
                (4011=H2, 4012=H2 incl OT → dropped, no H2 in the model)
   tennis     : 0=FT, 1..5=sets → only FT is emitted (no Set period in the model)
+  am.football: 0=FT, 4010=H1, 1=Q1..4=Q4  (basketball's convention, not soccer's)
 Mapping basketball period 1 to "H1" would pair a quarter against a half.
 
 `resultKind` is the STATISTIC (1=Goals/Points, 4=Corners, 8=Yellow cards,
@@ -79,6 +84,7 @@ import struct
 import time
 from datetime import datetime, timezone
 
+from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league
 
@@ -97,25 +103,52 @@ BATCH = 200                      # event ids per subscription (measured optimum)
 DETAIL_HOURS = float(os.environ.get("SETANTA_DETAIL_HOURS", "24"))
 MAIN_PROFILE = "pro_main_period"
 
-SPORT_CODE = {"soccer": "F", "basketball": "B", "tennis": "T"}
+SPORT_CODE = {"soccer": "F", "basketball": "B", "tennis": "T",
+              "americanfootball": "AF"}
 
 # (marketType, sport) → (market_type, n_way). period comes from _PERIOD.
 _MARKET = {
-    "F": {2: ("moneyline", 3), 5: ("total", 2), 4: ("spread", 2), 7: ("team_total", 2)},
+    # mt 10 added 2026-08-13: the 9-cell HT/FT grid, on the SAME
+    # GetMarketsByEventIds call the scraper already makes for near events.
+    # Identified from the book's own condition-guarded dictionary (name "HT/FT")
+    # and confirmed by shape — nine outcomes whose reversal cells price like
+    # reversal cells (2/1 at 49.88 against 2/2 at 2.03), which nothing else does.
+    "F": {2: ("moneyline", 3), 5: ("total", 2), 4: ("spread", 2),
+          7: ("team_total", 2), 10: ("htft", 9)},
     "B": {145: ("moneyline", 2), 5: ("total", 2), 4: ("spread", 2), 7: ("team_total", 2)},
     "T": {1: ("moneyline", 2), 5: ("total", 2), 4: ("spread", 2)},
+    # American football (2026-08-12, 176 events / 22 distinct market keys).
+    # The 2-way winner is mt 1 — tennis's code, NOT basketball's 145 and not
+    # soccer's 2. mt 2 DOES exist on AF but only at period 1..4/4010, where it
+    # is the 3-way REGULATION result for that period; taking it as the
+    # moneyline would pair a regulation 3-way against Pinnacle's incl-OT
+    # 2-way, so it is deliberately absent from this table.
+    "AF": {1: ("moneyline", 2), 5: ("total", 2), 4: ("spread", 2),
+           7: ("team_total", 2)},
 }
 # feed period code → v1 Period, per sport (see module docstring)
 _PERIOD = {
     "F": {0: "FT", 1: "H1"},
     "B": {0: "FT", 4010: "H1", 1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"},
     "T": {0: "FT"},
+    # AF follows BASKETBALL's period convention, not soccer's: 4010 is the
+    # first half and 1..4 are quarters. Confirmed by the lines themselves —
+    # period 4010 totals sit at 28.5 (a half) while period 1 totals sit at
+    # 10.5 (a quarter). Mapping 1→H1 here would price a quarter as a half.
+    "AF": {0: "FT", 4010: "H1", 1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"},
 }
 # outcomeType → canonical selection key
 _OUT_ML = {0: "home", 1: "draw", 3: "away"}
 _OUT_TOTAL = {4: "over", 5: "under"}
 _OUT_TEAM_TOTAL = {37: "over", 38: "under"}
 _OUT_SPREAD = {86: "home", 87: "away"}
+# HT/FT outcomeType -> cell. Read off the feed's own outcome dictionary, whose
+# shortTranslations render as "Х / 1", "Х / Х", "Х / 2" for 19-21; the 16-18 and
+# 22-24 rows use a template that renders awkwardly ("{Team1} to score and …")
+# but sit in the same fixed order.
+_OUT_HTFT = {16: "1/1", 17: "1/X", 18: "1/2",
+             19: "X/1", 20: "X/X", 21: "X/2",
+             22: "2/1", 23: "2/X", 24: "2/2"}
 _TEAM_PARAM = {"1": "home", "2": "away"}
 
 
@@ -358,6 +391,7 @@ def _line_of(params, market_type):
 
 def _selections(market_type, n_way, outcomes):
     want = (_OUT_ML if market_type == "moneyline"
+            else _OUT_HTFT if market_type == "htft"
             else _OUT_TEAM_TOTAL if market_type == "team_total"
             else _OUT_TOTAL if market_type == "total" else _OUT_SPREAD)
     sel = {}
@@ -372,6 +406,10 @@ def _selections(market_type, n_way, outcomes):
         need = {"home", "draw", "away"} if n_way == 3 else {"home", "away"}
     elif market_type in ("total", "team_total"):
         need = {"over", "under"}
+    elif market_type == "htft":
+        # All nine or nothing: a partial grid would read as a book that priced
+        # only some outcomes rather than one we half-parsed.
+        need = set(_OUT_HTFT.values())
     else:
         need = {"home", "away"}
     return sel if need <= set(sel) else None
@@ -411,7 +449,7 @@ def _parse_markets(markets, events, sport, sport_code, fetched_at) -> list[Odds]
                 continue
             line, team_side = _line_of((item.get("key") or {}).get("marketParameters") or [],
                                        market_type)
-            if market_type != "moneyline" and line is None:
+            if market_type not in ("moneyline", "htft") and line is None:
                 continue
             if market_type == "team_total" and team_side is None:
                 continue
@@ -504,6 +542,12 @@ async def _fetch_sport(sport: str) -> list[Odds]:
             # prematch only — drop anything already started (120 s clock grace)
             if meta["start_time"] and meta["start_time"].timestamp() < now - 120:
                 continue
+            # Global data horizon (src/horizon.py). Applied to the EVENT MAP,
+            # before the market sweep — the only place it saves bandwidth here,
+            # because GetMarketsByEventIds batches by event id and a dropped
+            # event simply never enters a batch.
+            if not horizon.keeps(meta["start_time"]):
+                continue
             events[key] = meta
         if not events:
             return []
@@ -550,6 +594,10 @@ async def fetch_setanta_basketball() -> list[Odds]:
 
 async def fetch_setanta_tennis() -> list[Odds]:
     return await fetch_setanta("tennis")
+
+
+async def fetch_setanta_americanfootball() -> list[Odds]:
+    return await fetch_setanta("americanfootball")
 
 
 if __name__ == "__main__":   # smoke: python -m src.scrapers.setanta [sport]

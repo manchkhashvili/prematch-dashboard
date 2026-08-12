@@ -28,6 +28,21 @@ code below cross-priced vs Lider via SR-id join at 0.00pp median (2026-07-11):
   basketball Qn : 33/-421/-422/-423 totals Q1..Q4
                   -430/-2502/-5004/-5006 spreads Q1..Q4
   soccer FT     : 1 moneyline(1/X/2)     8 total       -458 spread
+  soccer (2026-08-13, from a SHAPE census of the board response we already
+    fetch — 197 gameTypes per event, of which we had mapped three):
+                  5 htft (the 9 cells '1/1'..'2/2', name 'taimboli ①')
+                  3 moneyline H1(1/X/2)   111 moneyline H2(1/X/2)
+                  -284 total H1           -30335 total H2
+    Verified vs Pinnacle: H1 moneyline 0.56pp median (n=372), H1 total 1.20pp
+    (n=1033). The grid has no Pinnacle counterpart, so it was verified by its
+    own identity instead — rows sum to the H1 1X2 and columns to the FT 1X2 to
+    0.69pp / 0.79pp median over 110 grids.
+    TRAP: the ①/②/③ suffix on a gameName is the STATISTIC, not decoration
+    (① goals, ② corners, ③ cards). '8 golebis r-ba ①' and
+    '23 kutkhurebis r-ba ②' have an IDENTICAL outcome shape, so shape alone
+    cannot map them; every code above was confirmed ① and then price-checked.
+    Also excluded on purpose: 4 (double chance, 1X/12/X2 — three outcomes like
+    a 1X2) and -6048 (3-way European handicap).
 Known-but-not-shipped: -2542/-6009 = 2nd-half total/handicap REGULAR TIME
 (verified 0.00pp, but the v1 Period model has no H2 — add if H2 lands).
 Tennis has NO verified codes (its events carry no remoteId → SR join
@@ -49,6 +64,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league, transliterate
 
@@ -66,11 +82,16 @@ WORKERS = 8
 # this many hours; farther games use the board's inline main markets.
 DETAIL_HOURS = float(os.environ.get("CROCOBET_DETAIL_HOURS", "24"))
 
-SPORT_ID = {"soccer": 1, "basketball": 2, "tennis": 3}
+SPORT_ID = {"soccer": 1, "basketball": 2, "tennis": 3, "americanfootball": 16}
 
 # outcome-name (Georgian, stable) → canonical selection key
 _OUT = {"1": "home", "2": "away", "X": "draw",
         "მეტი": "over", "ნაკლები": "under"}
+
+# HT/FT cells arrive already labelled "1/1" … "2/2", so no translation table is
+# needed — but the set is fixed and a partial grid must be rejected rather than
+# half-read (the consistency check reasons about the grid as a distribution).
+_HTFT_CELLS = ("1/1", "1/X", "1/2", "X/1", "X/X", "X/2", "2/1", "2/X", "2/2")
 
 # gameType → (market_type, period, n_way, team_side). VERIFIED subset only
 # (docstring). team_side is None except for team totals.
@@ -96,8 +117,37 @@ _GAMETYPE = {
         1:    ("moneyline", "FT", 3, None),
         8:    ("total", "FT", 2, None),
         -458: ("spread", "FT", 2, None),
+        # 2026-08-13. The board response we ALREADY fetch carries 197 gameTypes
+        # per soccer event and we were reading three of them. These five are the
+        # inputs the consistency engine needs, identified by market SHAPE
+        # (outcome count + labels) rather than by the Georgian name, and then
+        # price-verified against Pinnacle — see notes/build_log.md.
+        #
+        # The ①/②/③ suffix on a gameName is the STATISTIC, not decoration:
+        # ① goals, ② corners, ③ cards. `23 kutkhurebis r-ba ②` is a corners
+        # total with exactly the same outcome shape as a goals total, so shape
+        # alone is not enough to map on — every code below was confirmed ① and
+        # then checked on price.
+        5:      ("htft", "FT", 9, None),        # 'taimboli ①' — the 9-cell grid
+        3:      ("moneyline", "H1", 3, None),   # 'I taimis shedegi ①'
+        111:    ("moneyline", "H2", 3, None),   # 'II taimis shedegi ①'
+        -284:   ("total", "H1", 2, None),       # 'I taimis totali ①'
+        -30335: ("total", "H2", 2, None),       # 'II taimis totali ①'
     },
     "tennis": {},   # no remoteId on tennis events → unverifiable via SR join yet
+    # American football (2026-08-12). Three of the five codes are basketball's,
+    # but the TOTAL is not: AF uses -30172, not basketball's -2966. Copying the
+    # basketball table wholesale would therefore have emitted zero totals and
+    # silently mis-typed nothing else — the kind of miss that only a live
+    # gameType census catches. All five carry the "(OT)" suffix in their
+    # Georgian names, matching CB/Pinnacle's incl-overtime convention.
+    "americanfootball": {
+        -2527:  ("moneyline", "FT", 2, None),      # '1 2 ∪ ① (OT)'
+        -2950:  ("spread", "FT", 2, None),         # 'ფორა -7.5 / +7.5 (OT)'
+        -30172: ("total", "FT", 2, None),          # 'ქულების რაოდენობა 37.5 (OT)'
+        182:    ("team_total", "FT", 2, "home"),   # 'I გუნდის ქულების რ-ბა (OT)'
+        183:    ("team_total", "FT", 2, "away"),   # 'II გუნდის ქულების რ-ბა (OT)'
+    },
 }
 
 
@@ -150,6 +200,25 @@ def _parse_event(ev: dict, games: list[dict], sport: str,
         if hit is None:
             continue
         market_type, period, n_way, team_side = hit
+        if market_type == "htft":
+            grid = {}
+            for o in g.get("outcomes") or []:
+                nm = (o.get("outcomeName") or "").strip()
+                od = o.get("outcomeOdds")
+                if nm in _HTFT_CELLS and isinstance(od, (int, float)) and od > 1.0:
+                    grid[nm] = float(od)
+            if len(grid) != len(_HTFT_CELLS):
+                continue                      # all nine cells or nothing
+            try:
+                rows.append(Odds(
+                    source="crocobet", sport=sport, home=home, away=away,
+                    market_type="htft", period="FT", selections=grid,
+                    fetched_at=fetched_at, line=None, start_time=start_time,
+                    league=league, raw_event_id=str(ev.get("eventId")),
+                    sr_match_id=sr_match_id))
+            except ValueError as e:
+                log.debug("crocobet htft rejected: %s", e)
+            continue
         p = _prices(g)
         if market_type == "moneyline":
             need = {"home", "draw", "away"} if n_way == 3 else {"home", "away"}
@@ -206,6 +275,17 @@ def _fetch_sport_sync(sport: str) -> list[Odds]:
     # prematch only — drop anything already started (grace 120s for clock skew)
     board = [e for e in board
              if not e.get("eventStart") or e["eventStart"] > now_ms - 120_000]
+    # Global data horizon (src/horizon.py), applied to the BOARD so a far event
+    # is dropped before the near/far split below — which means it costs neither
+    # a per-event ladder call nor a parse of its inline mains.
+    horizon_ms = horizon.cutoff_ts()
+    if horizon_ms is not None:
+        n_all = len(board)
+        board = [e for e in board
+                 if not e.get("eventStart") or e["eventStart"] <= horizon_ms * 1000]
+        if len(board) != n_all:
+            log.debug("crocobet %s: %d events beyond the %.1f-day horizon skipped",
+                      sport, n_all - len(board), horizon.max_start_days())
 
     # Energy budget (2026-07-11, the "PC runs hot" fix): the board response
     # already carries the 3 MAIN markets inline for EVERY event (one call for
@@ -252,6 +332,10 @@ async def fetch_crocobet_basketball() -> list[Odds]:
 
 async def fetch_crocobet_tennis() -> list[Odds]:
     return await fetch_crocobet("tennis")
+
+
+async def fetch_crocobet_americanfootball() -> list[Odds]:
+    return await fetch_crocobet("americanfootball")
 
 
 if __name__ == "__main__":   # smoke: python -m src.scrapers.crocobet [sport]

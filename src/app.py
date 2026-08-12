@@ -53,7 +53,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src import bets, capital, ticks
+from src import bets, capital, horizon, ticks
 from src.anomalies import find_ladder_anomalies
 from src.consistency import find_consistency_flags
 from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities, match_confidence
@@ -68,7 +68,9 @@ from src.scrapers.crystalbet import (
     SAMPLE_OUT as CB_SAMPLE_PATH,
     SAMPLE_OUT_SOCCER as CB_SAMPLE_PATH_SOCCER,
     SAMPLE_OUT_TENNIS as CB_SAMPLE_PATH_TENNIS,
+    SAMPLE_OUT_AMERICANFOOTBALL as CB_SAMPLE_PATH_AMFOOTBALL,
     close_crystalbet,
+    fetch_crystalbet_americanfootball_prematch,
     fetch_crystalbet_basketball_anomaly_ladders,
     fetch_crystalbet_basketball_games,
     fetch_crystalbet_basketball_prematch,
@@ -77,10 +79,12 @@ from src.scrapers.crystalbet import (
     get_detail_status_map,
     get_last_expanded_map,
     parse_html as parse_cb_html,
+    parse_html_americanfootball as parse_cb_html_amfootball,
     parse_html_soccer as parse_cb_html_soccer,
     parse_html_tennis as parse_cb_html_tennis,
 )
 from src.scrapers.pinnacle import (
+    fetch_pinnacle_americanfootball,
     fetch_pinnacle_basketball,
     fetch_pinnacle_soccer,
     fetch_pinnacle_tennis,
@@ -146,6 +150,14 @@ _ALL_SPORTS: list[SportConfig] = [
         cb_sample_path=CB_SAMPLE_PATH_TENNIS,
         cb_parse_html=parse_cb_html_tennis,
         xbet_fetcher=_xbet.fetch_xbet_tennis,
+    ),
+    SportConfig(
+        sport_name="americanfootball",
+        cb_fetcher=fetch_crystalbet_americanfootball_prematch,
+        pin_fetcher=fetch_pinnacle_americanfootball,
+        cb_sample_path=CB_SAMPLE_PATH_AMFOOTBALL,
+        cb_parse_html=parse_cb_html_amfootball,
+        xbet_fetcher=_xbet.fetch_xbet_americanfootball,
     ),
 ]
 
@@ -271,21 +283,25 @@ _BOOK_FETCHERS: dict[str, dict[str, Any]] = {
         "soccer":     _liderbet.fetch_liderbet_soccer,
         "basketball": _liderbet.fetch_liderbet_basketball,
         "tennis":     _liderbet.fetch_liderbet_tennis,
+        "americanfootball": _liderbet.fetch_liderbet_americanfootball,
     },
     "betlive": {
         "soccer":     _betlive.fetch_betlive_soccer,
         "basketball": _betlive.fetch_betlive_basketball,
         "tennis":     _betlive.fetch_betlive_tennis,
+        "americanfootball": _betlive.fetch_betlive_americanfootball,
     },
     "crocobet": {
         "soccer":     _crocobet.fetch_crocobet_soccer,
         "basketball": _crocobet.fetch_crocobet_basketball,
         "tennis":     _crocobet.fetch_crocobet_tennis,
+        "americanfootball": _crocobet.fetch_crocobet_americanfootball,
     },
     "setanta": {
         "soccer":     _setanta.fetch_setanta_soccer,
         "basketball": _setanta.fetch_setanta_basketball,
         "tennis":     _setanta.fetch_setanta_tennis,
+        "americanfootball": _setanta.fetch_setanta_americanfootball,
     },
 }
 
@@ -445,7 +461,16 @@ ANOMALY_EXTRA_SEC = int(os.environ.get("ANOMALY_EXTRA_SEC", "900"))
 # ~14 min and never completed a pass; near-kickoff ladders are the ones that
 # matter). Basketball keeps its whole-board scan.
 ANOMALY_EXTRA_HORIZON_H = float(os.environ.get("ANOMALY_EXTRA_HORIZON_H", "12"))
-_ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS", "soccer,tennis")
+# Per-sport horizon override for the extra scan. The 12 h default exists because
+# a full soccer sweep is ~14 min and never completed a pass. American football
+# is the opposite shape: ~180 games, a whole-board detail sweep measured 79 s,
+# and the fixtures sit on weekly slots — a 12 h window would scan an empty board
+# most days and never see the "Main result" 3-way that ot_vs_regulation needs.
+ANOMALY_EXTRA_HORIZON_H_BY_SPORT = {
+    "americanfootball": float(os.environ.get("ANOMALY_AF_HORIZON_H", "240")),
+}
+_ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS",
+                                    "soccer,tennis,americanfootball")
 # CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
 # (it's the heaviest book — ~65s+CPU for a full board), other books every 2.5
 # min (see BETLIVE_DISCOVER_SEC / EXTRA_BOOK_POLL_SEC). List-mode polls unchanged.
@@ -1500,7 +1525,11 @@ async def _anomaly_extra_loop():
             try:
                 odds = await fetch_crystalbet_anomaly_ladders(
                     sport, headed=not CB_HEADLESS,
-                    start_within_hours=ANOMALY_EXTRA_HORIZON_H,
+                    start_within_hours=horizon.capped_hours(
+                        ANOMALY_EXTRA_HORIZON_H_BY_SPORT.get(
+                            sport,
+                            runtime_config.num("limits", "anomaly_extra_horizon_h",
+                                               ANOMALY_EXTRA_HORIZON_H))),
                     should_continue=lambda: runtime_config.active(
                         "scans", "anomaly_extra"))
                 anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
@@ -1567,6 +1596,127 @@ async def _anomaly_watch_loop():
                      "%d total anomalies now", len(watch), len(new_watch), len(new_anoms))
         except Exception:
             log.exception("anomaly watch re-scan failed")
+
+
+# ── Opportunity re-verify loop (2026-08-12) ───────────────────────────────────
+# WHY this exists, measured rather than assumed. A CB soccer sweep is 1103
+# events and takes 191 s on average, 3127 s at worst; consecutive cycles are
+# 171 s apart at the median but 724 s at p90 and 3300 s at worst. Pinnacle
+# re-prices the same board 2.3x more often. Nothing in edge.py looks at
+# `fetched_at`, so a 50-minute-old CB price gets scored against a 90-second-old
+# Pinnacle fair and the drift between them is reported as edge.
+#
+# Measured on 8 460 CB soccer tick series: at a 3-minute lag 0.1 % of prices
+# have moved more than 6 %; at 50 minutes, 5.5 % have. With ~1100 events and
+# many markets each, that tail is more than enough to fill the Arbs tab.
+#
+# The fix is not to re-scrape everything faster (that is the same sweep) but to
+# re-scrape the SHORTLIST: only the games that currently show an opportunity,
+# which is a handful of ExpandDetail postbacks rather than a board sweep. An
+# edge that survives on a freshly-pulled price is real; one that evaporates was
+# drift. Same shape as _anomaly_watch_loop, which does this for anomalies.
+#
+# CB only, deliberately: it is the sole slow book. Measured cycle averages —
+# lider 9.9 s, betlive 11.9 s, crocobet 16.1 s, xbet 20.8 s, all against CB's
+# 191 s. Re-verifying a book that is already fresh would spend requests for
+# nothing.
+OPP_REVERIFY_SEC = int(os.environ.get("OPP_REVERIFY_SEC", "120"))
+# Cap the shortlist. This is a courtesy limit on CB, not a correctness one: the
+# rows are already sorted by edge, so the cap keeps the biggest claims.
+OPP_REVERIFY_MAX_GAMES = int(os.environ.get("OPP_REVERIFY_MAX_GAMES", "25"))
+# Only bother with rows big enough to act on — re-pulling a game for a 1.2 %
+# edge spends a request to confirm something you would not bet.
+OPP_REVERIFY_MIN_EDGE = float(os.environ.get("OPP_REVERIFY_MIN_EDGE", "3.0"))
+
+# Survival stats, surfaced on /api/status so the loop can be judged rather than
+# trusted: how many re-checked rows still showed an edge on the fresh price.
+_opp_reverify_stats: dict[str, Any] = {
+    "at": None, "games": 0, "rows_before": 0, "rows_after": 0, "sports": {},
+}
+
+
+def _merge_reverified(existing: list[Odds], fresh: list[Odds],
+                      event_ids: set[str]) -> list[Odds]:
+    """Replace every row for the re-verified events with the fresh pull.
+
+    Whole-event replacement, not row-by-row merge: a market that DISAPPEARED
+    from the fresh pull (line pulled, market suspended) must not survive as a
+    stale leftover — that is the same failure the loop exists to remove. Events
+    that returned nothing at all keep their old rows rather than being wiped,
+    since an expansion failure is not evidence the markets are gone.
+    """
+    got = {o.raw_event_id for o in fresh}
+    kept = [o for o in existing
+            if o.raw_event_id not in event_ids or o.raw_event_id not in got]
+    return kept + list(fresh)
+
+
+async def _opportunity_reverify_loop():
+    """Re-pull CB detail for the games currently showing an opportunity, so an
+    edge is confirmed against a fresh price before it is acted on."""
+    from src.scrapers.crystalbet import fetch_crystalbet_games
+
+    log.info("opportunity re-verify loop ENABLED — every %ds, up to %d games, "
+             "edges >= %.1f%%", OPP_REVERIFY_SEC, OPP_REVERIFY_MAX_GAMES,
+             OPP_REVERIFY_MIN_EDGE)
+    await asyncio.sleep(90)          # let the first real CB cycle land
+    while True:
+        await _sleep_gated(OPP_REVERIFY_SEC, "books", "crystalbet")
+        if not await _gated("books", "crystalbet", "opportunity re-verify"):
+            continue
+        if CB_USE_SAVED:
+            continue                 # no per-game re-scrape in saved-HTML mode
+        try:
+            # Shortlist: CB events with an opportunity worth confirming.
+            opps = _compute_opportunities_now(OPP_REVERIFY_MIN_EDGE, None, "cb", "pin")
+            by_sport: dict[str, list[str]] = {}
+            for o in opps:
+                eid, sp = o.get("cb_event_id"), o.get("sport")
+                if eid and sp:
+                    ids = by_sport.setdefault(sp, [])
+                    if eid not in ids:
+                        ids.append(eid)          # opps are edge-sorted already
+            if not by_sport:
+                continue
+
+            stats = {"at": datetime.now(tz=timezone.utc).isoformat(),
+                     "games": 0, "rows_before": 0, "rows_after": 0, "sports": {}}
+            for sport, ids in by_sport.items():
+                if sport not in SPORT_NAMES:
+                    continue
+                ids = ids[:OPP_REVERIFY_MAX_GAMES]
+                before = sum(1 for o in opps
+                             if o.get("sport") == sport and o.get("cb_event_id") in ids)
+                fresh = await fetch_crystalbet_games(
+                    sport, ids, headed=not CB_HEADLESS,
+                    permissive=False, label="opportunity re-verify")
+                if not fresh:
+                    log.info("opportunity re-verify %s: %d games returned nothing "
+                             "— keeping existing odds", sport, len(ids))
+                    continue
+                async with _state_lock:
+                    slot = _state[sport]["cb"]
+                    slot["odds"] = _merge_reverified(slot["odds"], fresh, set(ids))
+                    slot["count"] = len(slot["odds"])
+                    # No memo to invalidate: _paused_memo only caches WHILE
+                    # paused, and this loop is gated off when paused.
+                after_rows = _compute_opportunities_now(
+                    OPP_REVERIFY_MIN_EDGE, None, "cb", "pin")
+                after = sum(1 for o in after_rows
+                            if o.get("sport") == sport and o.get("cb_event_id") in ids)
+                stats["games"] += len(ids)
+                stats["rows_before"] += before
+                stats["rows_after"] += after
+                stats["sports"][sport] = {"games": len(ids), "before": before,
+                                          "after": after}
+                log.info("opportunity re-verify %s: %d games re-pulled, "
+                         "%d/%d edges survived on fresh odds",
+                         sport, len(ids), after, before)
+            async with _state_lock:
+                _opp_reverify_stats.clear()
+                _opp_reverify_stats.update(stats)
+        except Exception:
+            log.exception("opportunity re-verify failed")
 
 
 # ── Betlive favourite-flip loops ──────────────────────────────────────────────
@@ -1871,6 +2021,9 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(_anomaly_loop(), name="anomaly_loop"))
     tasks.append(asyncio.create_task(_anomaly_extra_loop(), name="anomaly_extra_loop"))
     tasks.append(asyncio.create_task(_anomaly_watch_loop(), name="anomaly_watch_loop"))
+    if OPP_REVERIFY_SEC > 0:
+        tasks.append(asyncio.create_task(_opportunity_reverify_loop(),
+                                         name="opportunity_reverify_loop"))
     tasks.append(asyncio.create_task(_betlive_discover_loop(), name="betlive_discover_loop"))
     tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
     tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
@@ -1951,6 +2104,99 @@ async def api_config_set(payload: dict) -> dict:
     return {"ok": True, "config": cfg}
 
 
+# ── Half-time-from-full-time calculator (Calc tab) ────────────────────────────
+# The model is a ~1.4 s (fast) / ~5 s (full) assumption sweep, so it is
+# button-triggered on the client and memoised here: the same inputs re-asked
+# within the TTL cost nothing. Keyed on the rounded inputs because the UI sends
+# whatever the user typed and 1.55 vs 1.5500001 is the same fixture.
+_HTFT_CACHE: dict[tuple, tuple[float, dict]] = {}
+_HTFT_CACHE_TTL = 300.0
+_HTFT_CACHE_MAX = 64
+
+
+@app.post("/api/ht_from_ft")
+async def api_ht_from_ft(payload: dict) -> dict:
+    """Derive half-time + HT/FT fair values from a full-time 1X2 and one total.
+
+    Body: {"ft": [home, draw, away], "total": [line, over, under],
+           "book": {"ht_1": 2.10, "htft_1/1": 4.30, ...} | null,
+           "min_edge": 0.05, "fast": true}
+
+    `book` is optional and every key in it is optional — the half-time price is
+    frequently not posted at all, which is the normal case this is built for.
+    Returns fair price AND the min/max band across the assumption corners; the
+    decision line is `min_bet_odds` (the worst corner), not the central fair.
+    """
+    from fastapi import HTTPException
+    from src import ht_from_ft as _htf
+
+    def _odds(v, what):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{what}: not a number")
+        if not (1.0 < f < 1000.0):
+            raise HTTPException(status_code=400,
+                                detail=f"{what}: decimal odds must be > 1")
+        return f
+
+    ft = payload.get("ft") or []
+    total = payload.get("total") or []
+    if len(ft) != 3:
+        raise HTTPException(status_code=400, detail="ft must be [home, draw, away]")
+    if len(total) != 3:
+        raise HTTPException(status_code=400, detail="total must be [line, over, under]")
+    ft = [_odds(x, f"ft[{i}]") for i, x in enumerate(ft)]
+    try:
+        line = float(total[0])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="total line: not a number")
+    over = _odds(total[1], "total over")
+    under = _odds(total[2], "total under")
+
+    book_in = payload.get("book") or {}
+    book: dict[str, float] = {}
+    if isinstance(book_in, dict):
+        for k, v in book_in.items():
+            if v in (None, "", 0):
+                continue                     # unknown price — the common case
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if f > 1.0:
+                book[str(k)] = f
+
+    try:
+        min_edge = float(payload.get("min_edge", 0.05))
+    except (TypeError, ValueError):
+        min_edge = 0.05
+    fast = bool(payload.get("fast", True))
+
+    key = (tuple(round(x, 4) for x in ft), round(line, 2), round(over, 4),
+           round(under, 4), fast,
+           tuple(sorted((k, round(v, 4)) for k, v in book.items())),
+           round(min_edge, 4))
+    now = time.time()
+    hit = _HTFT_CACHE.get(key)
+    if hit and now - hit[0] < _HTFT_CACHE_TTL:
+        return hit[1]
+
+    try:
+        result = await asyncio.to_thread(
+            _htf.analyze, ft, line, over, under,
+            book=book, min_edge=min_edge, fast=fast)
+    except Exception as e:                    # a bad fixture must not 500 the tab
+        log.warning("ht_from_ft failed for ft=%s total=%s: %s", ft, total, e)
+        raise HTTPException(status_code=400, detail=f"model failed: {e}")
+
+    if len(_HTFT_CACHE) >= _HTFT_CACHE_MAX:
+        oldest = min(_HTFT_CACHE, key=lambda k: _HTFT_CACHE[k][0])
+        _HTFT_CACHE.pop(oldest, None)
+    _HTFT_CACHE[key] = (now, result)
+    return result
+
+
 @app.post("/api/config/reset")
 async def api_config_reset() -> dict:
     """Back to the env-seeded defaults."""
@@ -1992,6 +2238,9 @@ async def api_status() -> dict:
                 }
     return {
         "sports": sports_status,
+        # How the targeted re-pull is doing: rows_after / rows_before is the
+        # share of re-checked edges that survived on a fresh price.
+        "opp_reverify": opportunity_reverify_stats(),
         # Top-level so any page can show a paused banner without parsing config.
         "paused": runtime_config.is_paused(),
         "config": {
@@ -3391,8 +3640,30 @@ def _unmatched_to_dict(u: UnmatchedEvent) -> dict:
     }
 
 
-def _opp_to_dict(o) -> dict:
+def _opp_to_dict(o, *, now: datetime | None = None) -> dict:
+    """Serialise an Opportunity for the API.
+
+    `age_sec` is how old the SOFT-BOOK price is, and it is the one field here
+    that is not just a restatement of the row. Nothing in edge.py looks at
+    `fetched_at`, so a stale soft price scored against a fresh reference reports
+    the drift between them as edge — measured on CB soccer, a 50-minute-old
+    price has moved >6 % in 5.5 % of cases against 0.1 % at 3 minutes. Showing
+    the age makes that visible instead of leaving it to be inferred from a
+    surprising number.
+
+    Cached CB detail rows carry the `fetched_at` of the cycle they were
+    EXPANDED in, not the cycle that re-emitted them, so this is a faithful
+    staleness signal rather than a cycle counter.
+    """
+    now = now or datetime.now(tz=timezone.utc)
+    age_sec = None
+    fa = getattr(o, "cb_fetched_at", None)
+    if isinstance(fa, datetime):
+        if fa.tzinfo is None:
+            fa = fa.replace(tzinfo=timezone.utc)
+        age_sec = max(0, int((now - fa).total_seconds()))
     return {
+        "age_sec": age_sec,
         "start_time": o.start_time.isoformat() if o.start_time else None,
         "match_label": o.match_label,
         "market": o.market,
@@ -3420,6 +3691,17 @@ def _opp_to_dict(o) -> dict:
         "match_time_delta_min": (round(o.match_time_delta_sec / 60.0, 1)
                                  if o.match_time_delta_sec is not None else None),
     }
+
+
+def opportunity_reverify_stats() -> dict:
+    """Survival stats for the re-verify loop, surfaced on /api/status.
+
+    `rows_before` / `rows_after` is the whole point: how many of the edges we
+    re-checked still showed on a freshly-pulled price. A low survival rate is
+    not a bug in the loop, it is the loop doing its job — it means those edges
+    were drift against a stale price.
+    """
+    return dict(_opp_reverify_stats)
 
 
 def _age_sec(ts: datetime | None) -> int | None:

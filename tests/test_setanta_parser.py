@@ -134,10 +134,15 @@ def test_rows_are_well_formed(sport):
         assert all(v > 1.0 for v in o.selections.values())
         # the feed exposes no SportRadar id — name+time matching only
         assert o.sr_match_id is None
-        if o.market_type == "moneyline":
+        # Unlined market types carry no line; every other one MUST, or the
+        # matcher cannot pair it with a reference rung. htft joined this set
+        # 2026-08-13 when the 9-cell grid (marketType 10) was mapped.
+        if o.market_type in ("moneyline", "htft"):
             assert o.line is None
         else:
             assert o.line is not None
+        if o.market_type == "htft":
+            assert len(o.selections) == 9, "a partial grid must never be emitted"
         if o.market_type == "team_total":
             assert o.team_side in ("home", "away")
 

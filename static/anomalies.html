@@ -195,7 +195,7 @@ function fmtAge(sec) {
   return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
 }
 function sportPrefix(s) {
-  return ({basketball:"bb", soccer:"sc", tennis:"tn"})[s] || s.slice(0,2);
+  return ({basketball:"bb", soccer:"sc", tennis:"tn", americanfootball:"af"})[s] || s.slice(0,2);
 }
 function buildSourceStatus(label, sports, source, staleThresholdSec) {
   const parts = []; let anyErr = false, worstAge = 0;
@@ -291,6 +291,7 @@ const KIND_LABEL = {
   htft_combo: "HT/FT combo",
   htft_fair: "HT/FT fair (model)",
   tennis_set_match: "tennis: set vs match",
+  ot_vs_regulation: "am. football: OT vs regulation",
   betlive_flip: "betlive: favourite flip",
   betlive_ot_fold: "betlive: OT-fold",
   soccer_htft: "soccer HT/FT (soft)",
@@ -331,6 +332,9 @@ const KIND_UNIT = {
   // either P(set1) − P(match) on the hard order violation, or the per-set
   // disagreement on the soft one. Both are pp.
   tennis_set_match: "pp",
+  // ot_vs_regulation severity is how far P(win incl OT) sits outside the
+  // [P(win reg), P(win reg)+P(tie)] box, or the coin-flip gap inside it — pp.
+  ot_vs_regulation: "pp",
 };
 
 function lsGet(k, dflt) {
@@ -445,7 +449,7 @@ document.getElementById("cons-kind-grid").addEventListener("change", syncAlertCf
 // market_type here would silently put a wrong leg on a real bet.
 const BET_SIDES   = new Set(["home", "away", "draw", "over", "under"]);
 const BET_PERIODS = new Set(["FT", "H1", "Q1", "Q2", "Q3", "Q4"]);
-const BET_SPORTS  = new Set(["basketball", "soccer", "tennis"]);
+const BET_SPORTS  = new Set(["basketball", "soccer", "tennis", "americanfootball"]);
 // Only kinds where every leg of the check lives in ONE market type.
 const KIND_MARKET = {
   favourite_flip: "moneyline",

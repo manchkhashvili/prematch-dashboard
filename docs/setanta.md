@@ -202,10 +202,31 @@ Verified codes (see the scraper docstring for how):
 | soccer | total | 5 | 4=over, 5=under |
 | soccer | spread (Asian) | 4 | 86=home, 87=away |
 | soccer | team total | 7 | 37=over, 38=under; params `[team, line]` |
+| soccer | **HT/FT (9 cells)** | **10** | 16..24 → `1/1 1/X 1/2 X/1 X/X X/2 2/1 2/X 2/2` |
 | basketball `B` | **moneyline incl OT** | **145** | 0=home, 3=away |
 | basketball | total / spread / team total | 5 / 4 / 7 | as soccer |
 | tennis `T` | moneyline | **1** | 0=home, 3=away |
 | tennis | total / spread (games) | 5 / 4 | as soccer |
+| am. football `AF` | moneyline | **1** | tennis's code, not basketball's 145 |
+| am. football | total / spread / team total | 5 / 4 / 7 | as soccer |
+
+**marketType 10 — HT/FT** (added 2026-08-13). It rides the
+`GetMarketsByEventIds` call the scraper already makes for near events, so it
+costs nothing extra. The dictionary names it "HT/FT" and renders outcome types
+19-21 as `Х / 1`, `Х / Х`, `Х / 2`, which anchors the middle row; 16-18 and
+22-24 use a template that renders awkwardly (`{Team1} to score and …`) but sit
+in the same fixed order. The odds corroborate it — the reversal cells price
+like reversal cells (2/1 at 49.88 against 2/2 at 2.03), which no other 9-outcome
+market does.
+
+Verified without a reference book (Pinnacle does not price HT/FT) by the grid's
+own identity: **rows must sum to the H1 1X2 and columns to the FT 1X2**. Live
+2026-08-13 over 153 grids: rows **0.32pp** median, columns **0.99pp**. A
+mis-ordered cell map breaks both sums at once, so this pins the ordering.
+
+One implementation trap: `_parse_markets` dropped every non-moneyline market
+with no line. HT/FT has none by nature, so the grid parsed correctly and was
+then silently discarded until the guard learned about it.
 
 `marketParameters[0]` is the **signed HOME line** (verified against the
 dictionary's sign-conditioned templates: `p1<0` renders `1 (-p1)`).

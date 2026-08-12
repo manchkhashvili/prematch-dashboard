@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 
 from src.betlive_anomalies import anomalies_for_event, pick_ml_markets
 from src.normalize import is_simulated_league
+from src import horizon
 from src.scrapers.betlive import _is_live, ticks_to_utc
 
 log = logging.getLogger(__name__)
@@ -131,7 +132,14 @@ def discover(sport_ids=DEFAULT_SPORT_IDS, *, max_events: int | None = None):
                     # incl-OT vs regulation moneyline has already diverged from
                     # the pre-game number, firing FALSE anomaly flags. Same
                     # filter the main scraper uses (src/scrapers/betlive.py).
-                    if _is_live(ev, ticks_to_utc(ev.get("startDate")), now):
+                    start_time = ticks_to_utc(ev.get("startDate"))
+                    if _is_live(ev, start_time, now):
+                        continue
+                    # Global data horizon (src/horizon.py). This loop opens a
+                    # per-event refreshOdds call for every candidate, so a far
+                    # fixture filtered here is a request not made — the same
+                    # reason the near end is filtered above.
+                    if not horizon.keeps(start_time):
                         continue
                     if ev.get("id") and _has_2way(ev):
                         candidates.append(ev["id"])

@@ -81,6 +81,11 @@ CADENCES: dict[str, tuple] = {
 # Cost/horizon knobs — the levers that cut per-cycle work without turning a
 # whole book off (see docs/performance.md and notes/build_log.md 2026-07-26).
 LIMITS: dict[str, tuple] = {
+    # Global data horizon (owner 2026-08-12): nothing starting more than this
+    # many days out is fetched, parsed or emitted, by ANY book. Sits on top of
+    # every per-book budget below — the tighter of the two wins. 0 = no cap
+    # (the pre-2026-08-12 behaviour). See src/horizon.py.
+    "max_start_days": (lambda: _env_float("MAX_START_DAYS", 7.0), 0.0, 365.0),
     "anomaly_extra_horizon_h": (lambda: _env_float("ANOMALY_EXTRA_HORIZON_H", 12.0), 1.0, 240.0),
     # CB expansion horizon: only ExpandDetail games starting within this many
     # hours; farther games keep their list-view odds, so coverage is unchanged

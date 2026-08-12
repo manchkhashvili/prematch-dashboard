@@ -3,7 +3,7 @@
 A local web dashboard that scrapes [CrystalBet](https://crystalbet.com) prematch
 odds and compares them against [Pinnacle](https://www.pinnacle.com) as a sharp
 reference, surfacing **+EV** and **arbitrage** opportunities across basketball,
-soccer, and tennis.
+soccer, tennis, and American football.
 
 Status: **research preview, single-user.** Tested daily against live books;
 not production-hardened.
@@ -13,9 +13,10 @@ not production-hardened.
 ## What it does
 
 - Scrapes CrystalBet's `Sports.aspx` prematch pages via headless Playwright
-  (basketball / soccer / tennis), parsing moneylines, spreads, totals,
-  team-totals, and corners markets.
-- Fetches Pinnacle's guest API for the same sports (sport ids 4 / 29 / 33).
+  (basketball / soccer / tennis / American football), parsing moneylines,
+  spreads, totals, team-totals, and corners markets.
+- Fetches Pinnacle's guest API for the same sports (sport ids 4 / 29 / 33 / 15
+  — Pinnacle calls American football "Football" and soccer "Soccer").
 - Matches CB events to Pin events by fuzzy team name similarity + start-time
   proximity (Phase 3 fuzzy normalization handles tennis player-name format,
   Georgian-to-Latin transliteration, GitHub Primer light/dark theming).
@@ -28,8 +29,10 @@ not production-hardened.
   Matches / Arbs / Bets / Calc / Unmatched.
 - Tracks placed bets in SQLite, snapshotting CB and Pinnacle fair odds every
   poll so you can see CLV (Closing Line Value) per-bet via inline sparklines.
-- Cross-page sound alert when a new opportunity above your threshold appears,
-  with the seen-set persisted in `localStorage` so navigation never replays.
+- Cross-page sound alert when a new opportunity clears the gates you set —
+  edge, probability-point edge, odds range, Kelly range, Pinnacle limit,
+  kickoff window, plus sport/book/market/period/confidence filters — with the
+  seen-set persisted in `localStorage` so navigation never replays.
 
 ---
 
@@ -78,11 +81,13 @@ python main.py --once --min-edge 5
 ### Common runtime flavors
 
 ```bash
-# All three sports in list-only mode — lightest config, ~30 s/cycle
-SPORTS=basketball:list,soccer:list,tennis:list python main.py
+# All sports in list-only mode — lightest config, ~30 s/cycle
+SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list python main.py
 
-# Basketball with full detail expansion, soccer + tennis list-only
-SPORTS=basketball:full,soccer:list,tennis:list python main.py
+# Basketball + American football with full detail expansion, the rest list-only.
+# AF is affordable in full mode: ~180 games, ~80 s for a whole-board detail sweep
+# (tennis is 500+ games, hence list).
+SPORTS=basketball:full,soccer:list,tennis:list,americanfootball:full python main.py
 
 # Basketball only, full
 SPORTS=basketball python main.py
@@ -124,6 +129,10 @@ back to the env-seeded defaults.
 | Var                        | Default       | What it does |
 |----------------------------|---------------|--------------|
 | `SPORTS`                   | all-full      | Per-sport mode: `sport:mode` comma-separated. Modes: `full` (CB+Pin+detail), `list` (CB list-view only, no alt-lines), `off`. Example: `SPORTS=basketball:full,soccer:list`. |
+| `MAX_START_DAYS`           | 7             | **Global data horizon.** No book fetches, parses or emits an event starting more than this many days out — applied in all seven scrapers and bounding every per-book horizon (the tighter wins). `0` disables the cap. Live-adjustable on the Config tab as `limits.max_start_days`; see `src/horizon.py`. |
+| `OPP_REVERIFY_SEC`         | 120           | Re-pull CB detail for the games currently showing an opportunity, so an edge is confirmed on a fresh price. `0` disables. See "Stale prices" below. |
+| `OPP_REVERIFY_MAX_GAMES`   | 25            | Cap on the re-verify shortlist (edge-sorted, so the biggest claims are kept). |
+| `OPP_REVERIFY_MIN_EDGE`    | 3.0           | Only re-pull games whose edge is worth acting on. |
 | `PINNACLE_POLL_SEC`        | 60            | Pinnacle poll cadence per sport. |
 | `CRYSTALBET_POLL_SEC`      | 60            | CrystalBet poll cadence per sport (was 180 in the Playwright era; a browser-free list cycle is ~1-2s). |
 | `CB_TRANSPORT`             | http          | CB byte-mover: `http` (browser-free ASP.NET postbacks via curl_cffi — ~10× faster detail, no Chromium) or `playwright` (browser, escape hatch if CB changes the postback protocol). Same data either way — parity-verified 2026-06-12 and re-verified 2026-07-28 (soccer 1017/1017 games + 311/311 markets, basketball 515/515, zero structural diffs): `scripts/cb_parity_check.py`. Note the browser path resolves DNS itself and so bypasses the `dns_pin` fix in `cb_http.py`. |
@@ -172,14 +181,21 @@ supersedes them when set.
   reference price. **Ladder anomalies**: rungs where an alt-line ladder crosses
   itself (home gets more points but its odds get *longer*) — structurally
   impossible, so one of the two rungs is mispriced. **Consistency flags**: a
-  book contradicting itself across markets or periods — basketball, soccer and
-  (since 2026-08-12) **tennis**, where a first set priced richer than the whole
-  match is structurally impossible in a best-of-3. See
+  book contradicting itself across markets or periods — basketball, soccer,
+  **tennis** (a first set priced richer than the whole match is structurally
+  impossible in a best-of-3) and, since 2026-08-12, **American football**, where
+  the incl-overtime winner must sit between the regulation win probability and
+  regulation-win-plus-tie. See
   `docs/anomalies-catalog.md` for every detector, its math and its thresholds,
   and "Anomaly alerts" below for chiming on them.
-- **`/calc.html`** — devig calculator (Shin or proportional toggle) + +EV
-  checker with quarter-Kelly stake suggestion. Inputs persist via
-  `localStorage`.
+- **`/calc.html`** — two calculators. **Devig + +EV**: Shin or proportional
+  toggle, edge% and quarter-Kelly stake. **Half-time & HT/FT from the full-time
+  market**: enter only the FT 1X2 and one total line and it derives fair prices
+  for the half-time result, half-time totals and the whole 3×3 HT/FT grid —
+  the half-time price is deliberately *not* an input, because it is usually the
+  market the book does not post or posts lazily. Book prices are optional per
+  market; supply the ones you have and it shows the edge. Inputs persist via
+  `localStorage`. See "Half-time from full-time" below.
 - **`/unmatched.html`** — CB events that didn't match any Pin event +
   their best below-threshold candidate. Useful for curating `team_aliases.yaml`.
 - **`/config.html`** — **live** on/off switches for every soft book and every
@@ -234,6 +250,48 @@ Two things to know:
   silently resume — a fresh start stays paused, with the Config section red,
   until you press Resume.
 
+### Opportunity alerts (Arbs tab → **Alert settings**)
+
+This used to be one box: `Alert ≥ N%`. The problem with an edge **percentage**
+on its own is that the biggest percentages sit on the longest prices, which is
+exactly where Pinnacle's fair number is least certain and where the Kelly stake
+is smallest — so the alert was loudest where it was least useful. A real
+example from the live board: a Lider-Bet row at **+3.79 % on odds 4.80** is
+worth **0.79** probability points and a Kelly stake of **2.5**, while a
+**+5.30 % on odds 2.00** is worth **2.63pp** and a Kelly of **40**.
+
+Every criterion is a **gate**: a row must clear *all* the ones you fill in, and
+a blank box is ignored. (Deliberately the opposite of the anomaly alerts below,
+which fire if *any* criterion is met — there you are casting a net, here you
+are narrowing one.)
+
+| Criterion | What it reads | Why you'd use it |
+|---|---|---|
+| `Edge ≥` | the `Edge%` column | the original threshold |
+| `Prob. edge ≥` | `(1/fair − 1/book) × 100` | longshot-proof: ranks a 2.00 over a 10.00 correctly |
+| `Re-alert after +` | growth since the last chime | was hardcoded at 5pp |
+| `Odds` min→max | the book's decimal price | skip prices you would never take |
+| `Kelly` min→max | quarter-Kelly stake | "only if it is worth real money" |
+| `Pin limit ≥` | Pinnacle's `maxRiskStake` | how much the sharp book stands behind its own price — the best single quality signal in the row |
+| `Kickoff in` min→max | minutes / hours to start | a game six days out will move many times; two minutes out may be unplaceable |
+| Kind / Confidence / Sport / Book / Market / Period | chip groups | scope |
+
+Two behaviours worth knowing:
+
+- **Nothing selected in a chip group means all of it.** Unticking the last chip
+  widens the alert rather than silencing it (silencing is what the master
+  switch is for), and a sport or book added to the backend later keeps alerting
+  instead of quietly dropping out.
+- **ARB rows ignore the Kelly gate.** `edge.py` leaves arb staking to the
+  bettor, so `kelly_stake` is 0 on every ARB row — a Kelly floor that applied
+  to them would silence arbs entirely.
+- A **missing** Pinnacle limit passes the limit gate: absent means unknown, not
+  zero, and some books/markets ship no limits at all.
+
+`weak` pairings stay excluded by default (the 2026-07-26 audit found big edges
+are overwhelmingly weak), but that is now the default of the Confidence chips
+rather than a hard-coded law, so you can inspect and override it.
+
 ### Anomaly alerts (Anomalies tab → **Alert settings**)
 
 `Chime on refresh` fires every time the scan completes, whatever it found.
@@ -269,6 +327,98 @@ per finding already on screen, and both re-alert only when a finding grows by
 Backed by `GET /api/anomalies/alerts` — a deliberately cheap sibling of
 `/api/anomalies` that skips the Pinnacle re-matching, since the poller runs on
 every page every 30 s.
+
+### Half-time from full-time (Calc tab)
+
+`src/ht_from_ft.py`, served by `POST /api/ht_from_ft`. Fits Poisson goal rates
+**through** a two-half construction, so whatever the nuisance parameters are set
+to the model still reproduces the full-time prices you fed it — the FT anchor is
+the one thing actually known and it must not drift when a knob is nudged.
+
+It is a **screening tool, not a pricing engine**. The dominant error is not
+Poisson misspecification, it is (a) the devig assumption and (b) the fact that
+FT 1X2 plus one total is 3 constraints against 2 goal-rate parameters. So rather
+than emit a point estimate that hides both, it sweeps the assumption space —
+devig × fit mode × H1 goal share × H2 score-dependence, 16 corners fast or 108
+full — and reports a **band**.
+
+**The decision rule is the worst corner.** The `min bet odds` column is the
+longest fair price across every corner; below it you are betting model noise,
+not edge. The `<< BET` marker uses the worst-corner edge, never the central one.
+
+Two safeguards worth knowing:
+
+- If the refit cannot reproduce the FT prices to within 3pp, the page says so in
+  a banner: those prices do not sit on a clean Poisson surface and everything
+  derived off them is shaky.
+- A sweep is ~1.5 s (fast) or ~5 s (full), so it is button-triggered and the
+  endpoint memoises identical inputs for 5 minutes. It is never called per
+  keystroke.
+
+The module keeps the project's **numpy-only** dependency set: the original used
+`scipy.optimize.brentq`, `scipy.optimize.least_squares` and `scipy.stats.poisson`,
+all three replaced by equivalents already living in `src/soccer_model.py` (plus
+a local damped Gauss-Newton). `tests/test_ht_from_ft.py` pins the *original
+scipy outputs* across six fixtures — worst drift measured 2.9e-7.
+
+CLI, same model:
+
+```bash
+python3 -m src.ht_from_ft --ft 1.55 3.60 5.25 --total 2.5 2.15 1.55 \
+                          --book ht_1=3.05 htft_1/1=4.30 --min-edge 0.05
+```
+
+### Stale prices, and the re-verify loop
+
+`edge.py` compares a soft-book price to a reference price without checking how
+old either is. That is fine for the fast books and not fine for CrystalBet.
+Measured from `ticks.db`:
+
+| | cycles | avg sweep | worst | events |
+|---|---|---|---|---|
+| **cb / soccer** | 233 | **191 s** | **3127 s** | 1103 |
+| pin / soccer | 537 | 25 s | 1141 s | 647 |
+
+CrystalBet is **cycle-bound, not interval-bound** — `crystalbet_poll_sec` is
+irrelevant when one sweep of 1103 games takes longer than the interval. Gap
+between consecutive CB soccer cycles: median 171 s, p90 724 s, **max 3300 s**.
+Pinnacle re-prices the same board 2.3× more often. The persisted change cache
+shows the same thing from the other side: a single `cb_change_cache_soccer.json`
+holds a **52-minute spread** of `last_expanded_at`.
+
+What that costs, over 8 460 CB soccer tick series:
+
+| lag | p90 drift | moved >3% | moved >6% |
+|---|---|---|---|
+| 3 min | 0.00% | 0.5% | 0.1% |
+| 10 min | 0.84% | 2.8% | 0.7% |
+| 30 min | 2.94% | 9.8% | 3.5% |
+| **50 min** | 3.88% | **14.5%** | **5.5%** |
+
+So a large edge on an old CB price is substantially a measurement of drift.
+
+Two things address it, and neither hides a row:
+
+- **An `Age` column** on the Arbs tab — the age of the *soft-book* leg, dimmed
+  under 5 min and red over 15. Cached CB detail rows carry the `fetched_at` of
+  the cycle they were **expanded** in, not the one that re-emitted them, so this
+  is a real staleness signal rather than a cycle counter.
+- **The re-verify loop** (`OPP_REVERIFY_SEC`): every 2 min it re-pulls CB detail
+  for *only* the games currently showing an edge ≥ `OPP_REVERIFY_MIN_EDGE` — a
+  handful of `ExpandDetail` postbacks rather than a board sweep. An edge that
+  survives on a freshly-pulled price is real; one that evaporates was drift.
+  CB only: lider 9.9 s, betlive 11.9 s, crocobet 16.1 s and xbet 20.8 s per
+  cycle are already fresh, so re-verifying them would spend requests for
+  nothing.
+
+`GET /api/status` carries an `opp_reverify` block with `rows_before` /
+`rows_after` — the share of re-checked edges that survived. A low survival rate
+is the loop working, not failing.
+
+The re-verify merge replaces a re-pulled event **wholesale** rather than merging
+row by row, so a line the book has since pulled disappears instead of surviving
+as the stalest row on the page. An event whose re-pull returns nothing keeps its
+old rows — an expansion failure is not evidence the markets are gone.
 
 ## Edge math
 
@@ -310,7 +460,7 @@ prematch/
 │       ├── change_cache.py      # Per-game hash-based expansion cache
 │       ├── cache_persistence.py # Disk save/load of change cache
 │       ├── pinnacle.py          # Pinnacle guest API
-│       └── sports/              # Per-sport parsers (basketball/soccer/tennis)
+│       └── sports/              # Per-sport parsers (basketball/soccer/tennis/americanfootball)
 ├── static/                      # Vanilla HTML dashboard
 │   ├── matches.html
 │   ├── arbs.html

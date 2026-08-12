@@ -75,10 +75,11 @@ TBILISI_UTC_OFFSET = timedelta(hours=4)  # CB shows Tbilisi local; subtract for 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league
 from src.scrapers import cb_detail, cb_http, change_cache
-from src.scrapers.sports import basketball, soccer, tennis
+from src.scrapers.sports import americanfootball, basketball, soccer, tennis
 
 # Re-export basketball list-view parsers so existing imports still resolve.
 # Tests import these names from crystalbet directly (test_crystalbet_parser.py).
@@ -93,6 +94,7 @@ SPORTS_URL = "https://www.crystalbet.com/Pages/Sports.aspx"
 BASKETBALL_SPORT_ID = basketball.SPORT_ID  # 17
 SOCCER_SPORT_ID = soccer.SPORT_ID          # 16
 TENNIS_SPORT_ID = tennis.SPORT_ID          # 22
+AMERICANFOOTBALL_SPORT_ID = americanfootball.SPORT_ID  # 27
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -182,17 +184,22 @@ SAMPLE_OUT_SOCCER = (
 SAMPLE_OUT_TENNIS = (
     Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_tennis.html"
 )
+SAMPLE_OUT_AMERICANFOOTBALL = (
+    Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_amfootball.html"
+)
 
 # Map sport_name → module + saved-HTML path for ergonomic lookup.
 _SPORT_MODULES: dict[str, Any] = {
     basketball.SPORT_NAME: basketball,
     soccer.SPORT_NAME: soccer,
     tennis.SPORT_NAME: tennis,
+    americanfootball.SPORT_NAME: americanfootball,
 }
 _SPORT_SAMPLE_PATHS: dict[str, Path] = {
     basketball.SPORT_NAME: SAMPLE_OUT,
     soccer.SPORT_NAME: SAMPLE_OUT_SOCCER,
     tennis.SPORT_NAME: SAMPLE_OUT_TENNIS,
+    americanfootball.SPORT_NAME: SAMPLE_OUT_AMERICANFOOTBALL,
 }
 
 
@@ -462,6 +469,11 @@ def parse_html_soccer(html: str, fetched_at: datetime) -> list[Odds]:
 def parse_html_tennis(html: str, fetched_at: datetime) -> list[Odds]:
     """Parse a tennis Sports.aspx HTML page."""
     return _parse_html_for_sport(html, fetched_at, tennis)
+
+
+def parse_html_americanfootball(html: str, fetched_at: datetime) -> list[Odds]:
+    """Parse an American-football Sports.aspx HTML page."""
+    return _parse_html_for_sport(html, fetched_at, americanfootball)
 
 
 # ── Singletons: one browser, one page per sport ───────────────────────────────
@@ -1051,7 +1063,20 @@ async def _fetch_for_sport(
 
         # ── 2. Per-game extraction from list HTML ──
         games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
-        log.info("CB %s list view: %d games", sport_name, len(games))
+        # Global data horizon (src/horizon.py). Applied HERE — after the one
+        # list postback that has to happen anyway, before anything per-game —
+        # so a far fixture costs neither an ExpandDetail round trip (the
+        # expensive part) nor a list-view Odds row. On the American football
+        # board that is 165 of 177 games.
+        n_all = len(games)
+        games = horizon.filter_items(games, lambda g: g.start_time,
+                                     label=f"CB {sport_name}")
+        if len(games) != n_all:
+            log.info("CB %s list view: %d games (%d beyond the %.1f-day horizon)",
+                     sport_name, len(games), n_all - len(games),
+                     horizon.max_start_days())
+        else:
+            log.info("CB %s list view: %d games", sport_name, len(games))
 
         # Phase 2.5 fix: if the list view rendered something but our parser
         # extracted 0 game containers, treat as transient (avoids the
@@ -1267,6 +1292,8 @@ _ANOMALY_SPORT_TABLE = {
     "basketball": (basketball, basketball.classify_market_title_permissive),
     "soccer": (soccer, soccer.classify_market_title_permissive),
     "tennis": (tennis, None),
+    "americanfootball": (americanfootball,
+                         americanfootball.classify_market_title_permissive),
 }
 
 
@@ -1308,20 +1335,34 @@ async def fetch_crystalbet_basketball_anomaly_ladders(
     )
 
 
-async def fetch_crystalbet_basketball_games(
-    event_ids, *, headed: bool = False,
+async def fetch_crystalbet_games(
+    sport_name: str, event_ids, *, headed: bool = False,
+    permissive: bool = True, label: str = "watch",
 ) -> list[Odds]:
-    """Re-scrape ONLY the given basketball games' detail ladders (permissive,
-    ladder_mode) — for the fast 'watch' loop that re-checks already-flagged
-    games every few minutes without re-expanding the whole board.
+    """Re-scrape ONLY the given games' detail ladders, for any sport.
 
-    Loads the list view to locate the games (needed to drive ExpandDetail), then
-    expands only the targets. Falls back to a game's list-view Odds if its
-    expansion fails. Shares the basketball sport-lock with the other CB tasks."""
+    Loads the list view to locate them (needed to drive ExpandDetail), then
+    expands just the targets — a handful of postbacks instead of a whole-board
+    sweep. Falls back to a game's list-view Odds if its expansion fails, and
+    shares the sport-lock with every other CB task so it can never interleave
+    with a running full cycle.
+
+    `permissive` picks the classifier, and it matters:
+      True  (ladder_mode) — the anomaly watch loop, which wants every 2-way
+            ladder rung regardless of title phrasing.
+      False (strict)      — the OPPORTUNITY re-verify loop, which needs rows
+            that map onto Pinnacle markets. Feeding permissive rows into the
+            +EV path would emit markets the matcher cannot pair.
+    """
     wanted = {str(e) for e in event_ids}
     if not wanted:
         return []
-    sport = basketball
+    sport = _SPORT_MODULES.get(sport_name)
+    if sport is None:
+        log.warning("CB %s: unknown sport for targeted re-scrape", sport_name)
+        return []
+    classify = (sport.classify_market_title_permissive if permissive
+                else sport.classify_market_title)
     sport_id = sport.SPORT_ID
     fetched_at = datetime.now(tz=timezone.utc)
     sport_lock = _get_sport_lock(sport_id)
@@ -1331,22 +1372,29 @@ async def fetch_crystalbet_basketball_games(
         )
         games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
         targets = [g for g in games if g.event_id in wanted]
-        log.info("CB basketball watch re-scan: %d/%d target games present",
-                 len(targets), len(wanted))
+        log.info("CB %s %s re-scan: %d/%d target games present",
+                 sport_name, label, len(targets), len(wanted))
         out: list[Odds] = []
         for g in targets:
             try:
                 detail = await _expand_game(
-                    g, fetched_at, sport, page,
-                    classify=sport.classify_market_title_permissive,
-                    ladder_mode=True, use_http=_ANOMALY_USE_HTTP,
+                    g, fetched_at, sport, page, classify=classify,
+                    ladder_mode=permissive, use_http=_ANOMALY_USE_HTTP,
                 )
                 out.extend(detail if detail else g.list_odds)
             except Exception as e:
-                log.warning("watch re-scan expand failed for %s (%s vs %s): %s",
-                            g.event_id, g.home, g.away, e)
+                log.warning("%s re-scan expand failed for %s (%s vs %s): %s",
+                            label, g.event_id, g.home, g.away, e)
                 out.extend(g.list_odds)
         return out
+
+
+async def fetch_crystalbet_basketball_games(
+    event_ids, *, headed: bool = False,
+) -> list[Odds]:
+    """Back-compat wrapper — the basketball anomaly watch loop's entry point."""
+    return await fetch_crystalbet_games(
+        "basketball", event_ids, headed=headed, permissive=True, label="watch")
 
 
 async def fetch_crystalbet_soccer_prematch(
@@ -1369,6 +1417,21 @@ async def fetch_crystalbet_tennis_prematch(
     return await _fetch_for_sport(tennis, headed=headed,
                                  should_continue=should_continue,
                                  expand_within_hours=expand_within_hours)
+
+
+async def fetch_crystalbet_americanfootball_prematch(
+    *, headed: bool = False, should_continue: Any = None,
+    expand_within_hours: float | None = None,
+) -> list[Odds]:
+    """Scrape CB prematch American football with full detail-page expansion.
+
+    Cheap in full mode: the board is ~180 games (vs tennis's 500+), and CB
+    only ships the deep half/quarter menu for games close to kickoff — a
+    whole-board detail sweep measured 79 s / 177 games on 2026-08-12.
+    """
+    return await _fetch_for_sport(americanfootball, headed=headed,
+                                  should_continue=should_continue,
+                                  expand_within_hours=expand_within_hours)
 
 
 # ── Per-sport accessors (with sport_name params for app.py / cache_persistence) ──

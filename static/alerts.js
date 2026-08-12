@@ -36,6 +36,33 @@
   const MIN_KEYS_FOR_PRUNE = 4;
   const ENABLED_KEY   = "alert_enabled";
   const THRESHOLD_KEY = "alert_threshold";
+  // 2026-08-12: the opportunity alert grew from "enabled + edge%" to a full
+  // gate set, configured by the panel on /arbs.html. Every key below is written
+  // there and read here, and nothing at runtime complains if the two drift —
+  // tests/test_arb_alerts_wiring.py pins them in both directions.
+  //
+  // Semantics, deliberately different from the anomaly alerts above: those fire
+  // when ANY filled criterion is met (casting a net), these require ALL of them
+  // (narrowing one). A blank box is ignored; an empty chip selection means
+  // "all", so a sport or book added to the backend later keeps alerting instead
+  // of silently dropping out.
+  const A_PP        = "arb_alert_pp";              // min edge in probability points
+  const A_STEP      = "arb_alert_step";            // re-alert only after +N pp
+  const A_ODDS_MIN  = "arb_alert_odds_min";
+  const A_ODDS_MAX  = "arb_alert_odds_max";
+  const A_KELLY_MIN = "arb_alert_kelly_min";
+  const A_KELLY_MAX = "arb_alert_kelly_max";
+  const A_PINMAX    = "arb_alert_pin_max_stake";
+  const A_LEAD_MIN  = "arb_alert_lead_min";        // minutes to kickoff, min
+  const A_LEAD_MAX  = "arb_alert_lead_max_h";      // hours to kickoff, max
+  const A_KINDS     = "arb_alert_kinds";
+  const A_CONF      = "arb_alert_conf";
+  const A_SPORTS    = "arb_alert_sports";
+  const A_BOOKS     = "arb_alert_books";
+  const A_MARKETS   = "arb_alert_markets";
+  const A_PERIODS   = "arb_alert_periods";
+  // Was hardcoded; now the default when the box is blank.
+  const DEFAULT_RE_ALERT_PP = 5;
   const SEEN_KEY      = "arbs_seen_alerts_v1";
   const SEEDED_KEY    = "arbs_alerts_seeded";
   // Phase 3.13: user-muted bet-keys live in localStorage under this name.
@@ -335,6 +362,93 @@
     ].join("|");
   }
 
+  // ── Opportunity gates ───────────────────────────────────────────────────
+  // Read fresh every poll so a change in the panel takes effect next cycle.
+  function cfgSet(key) {
+    // null (absent / "" / empty array) means "all" — see the note on the key
+    // constants. Anything else is the allowed set.
+    let raw;
+    try { raw = localStorage.getItem(key); } catch (e) { return null; }
+    if (raw === null || String(raw).trim() === "") return null;
+    try {
+      const arr = JSON.parse(raw);
+      return (Array.isArray(arr) && arr.length) ? new Set(arr) : null;
+    } catch (e) { return null; }
+  }
+
+  function readOppGates() {
+    return {
+      edge:     cfgNum(THRESHOLD_KEY),
+      pp:       cfgNum(A_PP),
+      step:     cfgNum(A_STEP),
+      oddsMin:  cfgNum(A_ODDS_MIN),
+      oddsMax:  cfgNum(A_ODDS_MAX),
+      kellyMin: cfgNum(A_KELLY_MIN),
+      kellyMax: cfgNum(A_KELLY_MAX),
+      pinMax:   cfgNum(A_PINMAX),
+      leadMin:  cfgNum(A_LEAD_MIN),
+      leadMaxH: cfgNum(A_LEAD_MAX),
+      kinds:    cfgSet(A_KINDS),
+      conf:     cfgSet(A_CONF),
+      sports:   cfgSet(A_SPORTS),
+      books:    cfgSet(A_BOOKS),
+      markets:  cfgSet(A_MARKETS),
+      periods:  cfgSet(A_PERIODS),
+    };
+  }
+
+  // Edge in PROBABILITY POINTS rather than percent. edge_pct flatters long
+  // prices — a 10.0 against an 8.0 fair reads "+25%" but is only 2.5pp, while a
+  // 2.0 against a 1.9 fair reads "+5.3%" and is worth MORE at 2.6pp. Without
+  // this the alert is loudest exactly where the fair price is least certain.
+  function ppEdge(o) {
+    const book = Number(o.cb_odds), fair = Number(o.pin_no_vig);
+    if (!isFinite(book) || !isFinite(fair) || book <= 1 || fair <= 1) return null;
+    return (1 / fair - 1 / book) * 100;
+  }
+
+  function minutesToKickoff(o) {
+    if (!o.start_time) return null;
+    const t = Date.parse(o.start_time);
+    if (isNaN(t)) return null;
+    return (t - Date.now()) / 60000;
+  }
+
+  // Does this row clear every configured gate? Blank/absent gates pass.
+  function passesGates(o, g) {
+    if (g.edge !== null && !(o.edge_pct >= g.edge)) return false;
+    if (g.pp !== null) {
+      const pp = ppEdge(o);
+      if (pp === null || pp < g.pp) return false;
+    }
+    const odds = Number(o.cb_odds);
+    if (g.oddsMin !== null && !(odds >= g.oddsMin)) return false;
+    if (g.oddsMax !== null && !(odds <= g.oddsMax)) return false;
+    // Kelly is 0 on ARB rows by design (edge.py leaves the split to the
+    // bettor), so a Kelly floor would silence every arb. Only gate +EV.
+    if (o.kind !== "ARB") {
+      const kelly = Number(o.kelly_stake);
+      if (g.kellyMin !== null && !(kelly >= g.kellyMin)) return false;
+      if (g.kellyMax !== null && !(kelly <= g.kellyMax)) return false;
+    }
+    // A missing Pinnacle limit is unknown, not zero — do not fail the row on it.
+    if (g.pinMax !== null && o.pin_max_stake != null
+        && !(Number(o.pin_max_stake) >= g.pinMax)) return false;
+    const mins = minutesToKickoff(o);
+    if (mins !== null) {
+      if (g.leadMin !== null && mins < g.leadMin) return false;
+      if (g.leadMaxH !== null && mins > g.leadMaxH * 60) return false;
+    }
+    if (g.kinds && !g.kinds.has(o.kind)) return false;
+    // Confidence is handled by the caller (it also owns the "unset means
+    // exclude weak" default) — encoding it twice would let the two drift.
+    if (g.sports && o.sport && !g.sports.has(o.sport)) return false;
+    if (g.books && !g.books.has(o.book || "cb")) return false;
+    if (g.markets && o.market_type && !g.markets.has(o.market_type)) return false;
+    if (g.periods && o.period && !g.periods.has(o.period)) return false;
+    return true;
+  }
+
   function loadMutedSet() {
     try {
       const raw = localStorage.getItem(MUTED_KEY);
@@ -349,18 +463,24 @@
     // seen-set silently the first time so toggling alerts on later doesn't
     // bip on opps that were already on screen.)
     const enabled = (localStorage.getItem(ENABLED_KEY) === "1");
-    let threshold;
-    try {
-      threshold = parseFloat(localStorage.getItem(THRESHOLD_KEY) || "15");
-      if (isNaN(threshold)) threshold = 15;
-    } catch (e) { threshold = 15; }
+    const gates = readOppGates();
+    // Re-alert step: how much better an already-seen edge must get before it
+    // speaks again. Blank → the 5pp this was hardcoded at before the panel.
+    const reAlertPp = gates.step === null ? DEFAULT_RE_ALERT_PP : gates.step;
 
     let opps;
     try {
-      // Always query at min_edge=1 (catch-all) so the seen-set tracks every
-      // opp regardless of current threshold setting. Filter to threshold
-      // client-side just before deciding whether to play.
-      const r = await fetch("/api/opportunities?min_edge=1");
+      // Query at min_edge=1 (catch-all) so the seen-set tracks every opp
+      // regardless of the current settings, and gate client-side just before
+      // deciding whether to play.
+      //
+      // The one exception: an edge gate BELOW 1 % has to widen the query too,
+      // or the row it is asking about never reaches us. That is easy to miss —
+      // the panel would look configured and simply never fire, which is the
+      // failure mode this whole file is careful about.
+      const floor = (gates.edge !== null && gates.edge < 1)
+        ? Math.max(0, gates.edge) : 1;
+      const r = await fetch("/api/opportunities?min_edge=" + floor);
       if (!r.ok) return;
       opps = await r.json();
     } catch (e) { return; }
@@ -375,24 +495,25 @@
       const k = alertKey(o);
       currentKeys.add(k);
       const prevEdge = seenKeys.get(k);
-      const isNew = (prevEdge === undefined) || (o.edge_pct - prevEdge >= 5);
+      const isNew = (prevEdge === undefined) || (o.edge_pct - prevEdge >= reAlertPp);
       if (isNew) seenKeys.set(k, o.edge_pct);
       // Phase 3.13: skip sound for opps the user muted on /arbs.html.
       // Still track them in seenKeys (so they don't fire when un-muted on
       // the same edge) but never count them toward newAtThreshold.
       const isMuted = mutedKeys.has(betKey(o));
-      // Never ping on a `weak` pairing (2026-07-26 audit). The threshold is a
-      // big edge, and big edges are overwhelmingly weak: in a live snapshot
-      // every kickoff-misaligned row and 7 of the 8 edges above 20 % were weak.
-      // Without this the alert is loudest exactly where it is least reliable.
-      // They still enter seenKeys, so a row that later turns strong at the same
-      // edge doesn't fire retroactively.
-      const isWeak = (o.confidence || "medium") === "weak";
-      // Only count for sound-play if at-or-above threshold AND this isn't
-      // the first-ever seed pass AND alerts are enabled AND not muted AND the
-      // pairing is trustworthy.
-      if (isNew && o.edge_pct >= threshold && !isFirstEverPoll && enabled
-          && !isMuted && !isWeak) {
+      // `weak` pairings used to be excluded unconditionally (2026-07-26 audit:
+      // big edges are overwhelmingly weak — every kickoff-misaligned row and 7
+      // of the 8 edges above 20 % were weak, so the alert was loudest where it
+      // was least reliable). That rule is now the DEFAULT of the confidence
+      // chip group rather than a hard-coded law, so it can be inspected and
+      // overridden; with no confidence selection saved we keep the old
+      // behaviour exactly.
+      const conf = o.confidence || "medium";
+      const confOk = gates.conf ? gates.conf.has(conf) : conf !== "weak";
+      // Rows still enter seenKeys even when gated out, so one that later starts
+      // passing at the same edge doesn't fire retroactively.
+      if (isNew && !isFirstEverPoll && enabled && !isMuted && confOk
+          && passesGates(o, gates)) {
         newAtThreshold++;
       }
     }
@@ -433,7 +554,8 @@
       if (claimSound("opps")) playPing();
       // Console hint for the dev console-watcher case.
       try {
-        console.log(`[alert] ${newAtThreshold} new opportunity(ies) at ≥ ${threshold}%`);
+        console.log(`[alert] ${newAtThreshold} new opportunity(ies) passing the `
+                    + `configured gates`);
       } catch (e) {}
     }
   }

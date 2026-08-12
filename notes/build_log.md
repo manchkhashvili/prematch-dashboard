@@ -44,6 +44,723 @@ Now keep scrolling for the dated history.
 
 ---
 
+## 2026-08-13 — Crocobet + Setanta: the HT/FT grid, for zero extra requests
+
+Follow-on from the Lider-Bet work. Both books' per-event ladders were ALREADY
+being fetched and parsed by the main scraper — Crocobet's `events/{id}` and
+Setanta's `GetMarketsByEventIds`, both inside their existing 24 h DETAIL_HOURS.
+We were mapping **3 of 99** Crocobet soccer gameTypes and **4 of 34** Setanta
+soccer marketTypes and discarding the rest at the lookup table. No new calls,
+no new bandwidth. 1275 → **1289 tests**.
+
+### Mapped by SHAPE, never by name
+
+Crocobet's market names are Georgian, and the census is only readable through
+`transliterate()`. Identification was by outcome count + labels:
+
+    9 outcomes labelled 1/1 … 2/2   -> the HT/FT grid
+    3 outcomes 1 / X / 2            -> a 3-way result
+    2 outcomes over / under + arg   -> a total
+
+That found `gameType 5 'taimboli ①'` — nine cells, exactly the grid.
+
+**But shape is necessary and not sufficient**, and the reason is a trap worth
+recording: the ①/②/③ suffix is the STATISTIC, not decoration. ① goals,
+② corners, ③ cards. `8 golebis r-ba ①` and `23 kutkhurebis r-ba ②` have an
+IDENTICAL outcome shape; mapping on shape alone prices corners as goals. Same
+for `4 ormagi shedegi` (double chance, 1X/12/X2 — three outcomes like a 1X2)
+and `-6048` (3-way European handicap). All are explicitly excluded, with a test.
+
+Setanta's codes are numeric with a condition-guarded dictionary; `marketType 10`
+is named "HT/FT" and its outcomeTypes 16..24 map to the nine cells in feed
+order — the dictionary renders 19-21 as "Х / 1", "Х / Х", "Х / 2", which anchors
+the middle row, and the odds anchor the rest (2/1 at 49.88 against 2/2 at 2.03:
+reversal cells price like reversal cells).
+
+### Added
+
+    crocobet soccer  5      htft FT (9-cell grid)
+                     3      moneyline H1 (3-way)   'I taimis shedegi ①'
+                     111    moneyline H2 (3-way)   'II taimis shedegi ①'
+                     -284   total H1
+                     -30335 total H2
+    setanta  soccer  10     htft FT (9-cell grid)
+
+One small trap on the Setanta side: `_parse_markets` dropped every non-moneyline
+market with no line. htft has none by nature, so the grid parsed correctly and
+was then silently discarded until the guard learned about it.
+
+### Verified two ways
+
+Against **Pinnacle**, live:
+
+| book | market | n | median | p90 |
+|---|---|---|---|---|
+| crocobet | moneyline H1 | 372 | **0.56pp** | 1.39 |
+| crocobet | total H1 | 1033 | 1.20pp | 2.41 |
+| setanta | moneyline H1 | 39 | **0.32pp** | 1.01 |
+| setanta | total H1 | 142 | 0.59pp | 1.53 |
+
+Pinnacle does not price HT/FT, so the grids were verified by **internal
+identity** instead, which needs no reference book: rows must sum to the H1 1X2
+and columns to the FT 1X2. A mis-ordered cell map breaks both sums at once.
+
+| book | grids | row sums vs H1 | col sums vs FT |
+|---|---|---|---|
+| Lider-Bet | 109 | 0.60pp median | 0.65pp |
+| Crocobet | 110 | 0.69pp | 0.79pp |
+| Setanta | 153 | 0.32pp | 0.99pp |
+
+### The payoff, and what it says about the books
+
+`htft_combo` now evaluates on all four books, and **Setanta fires 5 flags at
+threshold** — the first non-CrystalBet consistency findings the dashboard has
+produced.
+
+| book | flags at threshold | evaluating | severity median / max |
+|---|---|---|---|
+| CrystalBet | **8** | 15 | 2.29 % / **15.43 %** |
+| Setanta | **5** | 12 | 1.55 % / 4.76 % |
+| Crocobet | — | 5 | 0.76 % / 1.56 % |
+| Lider-Bet | — | 1 | 0.00 % / 0.00 % |
+
+That is a clean ordering of how loosely each book prices its HT/FT grid against
+its own 1X2 legs: CrystalBet loosest by a distance, then Setanta, then Crocobet,
+with Lider-Bet effectively exact. Which also answers the original question —
+the table looked CB-only because CB genuinely is the sloppy one, not because
+the other books were unwired. Now the comparison is measured rather than
+assumed.
+
+Lider-Bet and Crocobet also gained `total_additivity` coverage (876 and 932
+events evaluating, nothing at threshold): their half totals sum to the full-time
+total within 0.24 points, which doubles as verification of the H2 mappings that
+no reference book prices.
+
+### Still open
+
+Betlive — 1075 markets on `getPrematchEvent` against the 1 the main scraper
+reads. Unlike these two it needs the detail endpoint wired in, like Lider's.
+
+---
+
+## 2026-08-12 — Why every consistency flag said "cb", and Lider-Bet's detail tier
+
+Owner: *"are we sure that all sportsbooks mimic anomaly/consistency flags from
+cb? go deep… most of them never appear there."* Then, on being told it was a
+market-coverage limit: *"adding all books to anomalies would be easy, as we
+already pull full odds, wouldn't it?"* — which was the correct instinct, and my
+first answer was wrong. 1258 → **1275 tests**.
+
+### The audit
+
+`_LADDER_BOOKS = (liderbet, crocobet, setanta)` DO already go through
+`find_consistency_flags`, and their flags do reach /api/anomalies. Running the
+engine with thresholds at ~0 on live data:
+
+| book / sport | at threshold | wide open |
+|---|---|---|
+| liderbet / am.football | ml_vs_spread: 1 | n=4, max 5.10 |
+| liderbet / tennis | none | n=60, max 1.67 |
+| setanta / tennis | none | n=53, max 1.01 |
+| everything else | none | **nothing at any threshold** |
+
+So they were never excluded — they were clean and, mostly, had nothing to check.
+
+### But the reason they had nothing was us, not the books
+
+| book | detail call already made? | markets returned | markets we mapped |
+|---|---|---|---|
+| Crocobet | **yes, by the main scraper** | 99 gameTypes/event (soccer) | 3 |
+| Setanta | **yes, by the main scraper** | 34 marketTypes | 4 |
+| Lider-Bet | by soft_scan only | 270 market names | ~4 (FT only) |
+| Betlive | by soft_scan only | **1075** markets | **1** |
+
+I had framed this as market coverage. It is not: for Crocobet and Setanta the
+bytes are already fetched, parsed and discarded at the lookup table.
+
+### Lider-Bet, done
+
+The headline: **the H1/H2 1X2 and half totals were in the LIST tier all along.**
+`_classify_market` dropped anything whose name contained "half" (`_SUBPERIOD`),
+so a call we already make was returning them and we binned them.
+
+    list tier only, zero extra requests : 11 728 -> 23 655 rows, 5.9 s
+    + 24 h detail horizon               : 25 825 rows, 17-23 s, ~28 MB
+
+Only the 9-way HT/FT grid needed `matchData/details`. Horizon-gated at 24 h
+because the whole board would be 55 calls / ~26 s / **~172 MB per cycle**
+against Lider's ~10 s today. (The owner's "it won't hurt bandwidth because we
+already open matches there" was 14 % true — soft_scan opens 184 of 1291.)
+
+### The trap, and why the detail path is an allowlist
+
+A details payload has ~270 market names and TWO are called "Handicap":
+
+    mt:16:501   'Handicap ①'    1 / 2       2-way Asian
+    mt:16:1079  'Handicap  ①'   1 / X / 2   3-way European
+
+One space apart, which whitespace-collapsing erases. Name-classifying that
+payload emitted **155 bogus 2-way spreads against 149 real ones**, and the
+result disagreed with CrystalBet by up to 17.8pp where every correct mapping
+agreed within 1.6pp. The detail path is now a typeId allowlist and the name
+classifier is not allowed near it. Same trap on `mt:16:618` vs `619`.
+
+### Price-verified, and three mappings deliberately dropped
+
+Against **Pinnacle**, 633 matched fixtures:
+
+| market | period | n | median | p90 | max |
+|---|---|---|---|---|---|
+| moneyline | H1 | 519 | **0.55pp** | 1.43 | 4.36 |
+| total | H1 | 1504 | **1.18pp** | 2.42 | 5.60 |
+| moneyline | FT | 630 | 0.69pp | 1.85 | 4.21 |
+| total | FT | 3003 | 0.84pp | 1.88 | 7.52 |
+| ~~spread~~ | FT | 413 | 1.17pp | **18.98** | **50.38** |
+| ~~team_total~~ | FT | 245 | 1.06pp | 2.94 | **51.20** |
+
+Dropped: the half handicaps (6.16pp MEDIAN vs CB — a shifted distribution is
+the signature of a wrong market), the FT handicap and the team totals (fat
+tails). The line convention is not the cause — as-is pairs at 2.59pp median
+while negating gives 32.49 and swapping sides 28.30, so as-is is right and a
+SUBSET of rungs is wrong. Until that subset is identified it would be a
+phantom-arb generator on a bettable market. None is needed for the consistency
+checks.
+
+H2 totals get a second, independent verification for free: the engine's own
+`total_additivity` puts H1+H2 within **0.24 points** of FT across 876 events,
+which a mislabelled period could not do.
+
+### The payoff, and a result worth keeping
+
+`htft_combo` now evaluates on Lider-Bet: 109 full grids, all 109 with both
+regulation 1X2 legs. And on a near-identical sample it says something useful:
+
+| | events | dominance max | over-generous max | cells >2% |
+|---|---|---|---|---|
+| CrystalBet | 111 | +2.4 | +15.4 | **8** |
+| Lider-Bet | 109 | 0.0 | −0.3 | **0** |
+
+Lider's worst HT/FT cell is still 0.3 % on the safe side of fair. So the flags
+piling up on CB are real CB behaviour, not an artifact of the check — which is
+the strongest validation the detector has had.
+
+### Still open
+
+Crocobet (96 unmapped gameTypes) and Setanta (30 unmapped marketTypes) are the
+same job with no extra requests at all, since their per-event ladders are
+already fetched. Betlive needs its detail endpoint wired in like Lider's.
+
+---
+
+## 2026-08-12 — Stale CB prices: the Age column + the opportunity re-verify loop
+
+Owner: *"it fires lots of cb arbs, cause it refreshes cb odds very slow I guess
+and its kind of stale for long time."* Correct, and measurable from our own
+`ticks.db`. 1243 → **1258 tests**.
+
+### The measurement
+
+| | cycles | avg | worst | events |
+|---|---|---|---|---|
+| cb / soccer | 233 | **191 s** | **3127 s** | 1103 |
+| pin / soccer | 537 | 25 s | 1141 s | 647 |
+
+CrystalBet is **cycle-bound, not interval-bound**: `crystalbet_poll_sec` is 60
+in the owner's config and completely irrelevant, because one sweep of 1103
+games takes 191 s. Gap between consecutive CB soccer cycles: median 171 s, p90
+724 s, max 3300 s. Pinnacle re-prices the same board 2.3x more often.
+
+Corroborated from the other side: the persisted `cb_change_cache_soccer.json`
+holds a **52-minute spread** of `last_expanded_at` in one file — i.e. at any
+instant the oldest CB soccer price on screen is ~50 min older than the newest.
+Tennis's cache spread was 25 HOURS.
+
+And `src/edge.py` never referenced `fetched_at`. Not once. So a 50-minute-old
+CB price was scored against a 90-second-old Pinnacle fair and the drift between
+them was reported as edge. The change cache makes it invisible: when the
+list-view loadinfo is unchanged the cached detail rows are re-emitted **carrying
+their original `fetched_at`** — which is exactly the alt-line and team-total
+markets in the screenshot, since those are detail-page-only for soccer.
+
+Drift of CB soccer prices, 8 460 tick series:
+
+| lag | p90 | p99 | >3% | >6% |
+|---|---|---|---|---|
+| 3 min | 0.00% | 1.96% | 0.5% | 0.1% |
+| 10 min | 0.84% | 5.50% | 2.8% | 0.7% |
+| 30 min | 2.94% | 11.50% | 9.8% | 3.5% |
+| 50 min | 3.88% | 12.90% | 14.5% | **5.5%** |
+
+The screenshot's rows were 6.17–9.31%. At 50 minutes, 5.5 % of prices have moved
+>6 %; with ~1100 events and many markets each, that tail fills a screen.
+
+### What shipped
+
+Owner picked the re-verify loop over an age gate — the right call, because a
+gate hides rows while this confirms them.
+
+**`Opportunity.cb_fetched_at`** carried through `edge.py` (both construction
+sites) into `age_sec` on every API row, and an **Age column** on the Arbs tab:
+dimmed under 5 min, red over 15, thresholds taken from the drift table above.
+Nothing is hidden — a stale row can still be a real edge, it just has not been
+confirmed.
+
+**`_opportunity_reverify_loop`**: every `OPP_REVERIFY_SEC` (120), re-pull CB
+detail for ONLY the games currently showing an edge >= `OPP_REVERIFY_MIN_EDGE`
+(3 %), capped at `OPP_REVERIFY_MAX_GAMES` (25, edge-sorted). A handful of
+ExpandDetail postbacks instead of a board sweep. Same shape as the existing
+`_anomaly_watch_loop`.
+
+`fetch_crystalbet_basketball_games` was basketball-hardcoded; generalised to
+`fetch_crystalbet_games(sport_name, ids, permissive=…)` with the old name kept
+as a wrapper. **`permissive=False` matters**: the anomaly watch wants every
+ladder rung, but the +EV path needs strict-classified rows or the matcher gets
+markets it cannot pair — worse than a stale row.
+
+### Three decisions in the merge
+
+- **Whole-event replacement, not row-by-row.** A line the book has PULLED must
+  disappear, not survive as the stalest row on the page — the exact failure the
+  loop exists to remove.
+- **An event whose re-pull returns nothing keeps its old rows.** An expansion
+  failure is not evidence the markets are gone; wiping would delete real rows
+  every time CB flaked.
+- **CB only.** Measured cycle averages: lider 9.9 s, betlive 11.9 s, crocobet
+  16.1 s, xbet 20.8 s — against CB's 191 s. Re-verifying a fresh book spends
+  requests for nothing.
+
+`/api/status` gained an `opp_reverify` block with `rows_before`/`rows_after`, so
+the loop can be judged rather than trusted. A low survival rate is the loop
+working.
+
+### Verified
+
+Beyond the unit tests: drove the loop's body directly — a 47-minute-old CB price
+of 3.25 against a Pinnacle fair of 2.99 shows an edge with `age 47min`; after a
+re-pull returning the real current 2.95 the age resets to 0 s and the edge is
+recomputed downward, while an unchanged price keeps its edge and simply becomes
+confirmed-fresh.
+
+---
+
+## 2026-08-12 — Half-time / HT-FT calculator on the Calc tab
+
+Owner dropped `ht_from_ft.py` in the repo root and asked for it on the Calc tab:
+HT/FT 1/1 and 2/2, plus half-time derived from the FT market — *"sometimes ht is
+unknown though"*, which is the whole point: the half-time price is an OUTPUT,
+not an input. 1208 → **1243 tests**.
+
+### The port off scipy
+
+The module imported `scipy.optimize.brentq`, `scipy.optimize.least_squares` and
+`scipy.stats.poisson`. scipy is not installed here and is not in
+requirements.txt — the stack is deliberately numpy-only. All three already had
+a numpy equivalent **in this repo**:
+
+    poisson.pmf   -> soccer_model._poisson_pmf
+    brentq        -> the bisection inside _devig_power / _devig_shin
+    least_squares -> a local damped Gauss-Newton (log-space, box-clipped),
+                     the same shape as soccer_model.fit_lambdas
+
+Delegating the devig also removes a real hazard: the dropped module carried its
+own shin/power implementations, so the dashboard would have had two devigs that
+could drift apart. `additive` stays local — it is a corner of this sweep and
+nothing else uses it.
+
+**Parity was checked, not assumed.** scipy went into a scratch venv, the
+original ran over six fixtures (heavy favourite / balanced / away favourite /
+high and low totals), and the outputs are pinned in
+`tests/test_ht_from_ft.py::SCIPY_REFERENCE`. Worst drift: **2.9e-7** in
+probability, **2.0e-8** in lambda. A port that silently drifts is worse than no
+port, because every number it produces still looks plausible.
+
+### Wiring
+
+Server-side, `POST /api/ht_from_ft`. Not a JS port: a sweep is 1.4 s (16
+corners) to 5.2 s (108), which is far too heavy per keystroke and far too much
+numerics to duplicate. So the button POSTs, the endpoint memoises identical
+inputs for 5 min (repeat call 1.5 s → 0.08 s), and `analyze()` returns a
+structured result both the API and the CLI render.
+
+### Two things the build caught
+
+**A numpy scalar leaking into the response.** `bet` was `numpy.bool_`, which
+pydantic refuses with `Unable to serialize unknown type` — a 500. It only
+appears once a book price is supplied, because with none the flag stays a python
+`False`, so the first three test requests passed and the fourth 500'd. Now
+everything is coerced at the boundary, and a test json.dumps() the whole payload.
+
+**The `bet` flag must use the WORST corner.** That is the module's own stated
+decision rule and it is the one thing a UI could quietly get wrong — marking a
+price bettable because it beats the central fair, when the gap between central
+and worst is exactly the model noise the band exists to expose. Tested directly:
+a price placed halfway between `fair` and `min_bet_odds` must show a positive
+`edge`, a negative `worst_edge`, and `bet: False`.
+
+### It reproduces the Chinese U20 finding independently
+
+Same fixture from the anomalies conversation earlier today (Shanghai U20, FT
+1.55/3.60/5.25, total 2.5 at 2.15/1.55):
+
+| market | book | fair | worst-corner edge |
+|---|---|---|---|
+| HT home | 3.05 | **2.35** | +23.7 % << BET |
+| HT/FT 1/1 | 4.30 | **2.70** | +48.2 % << BET |
+| HT/FT 2/2 | 4.80 | **13.70** | −67.9 % |
+
+Arrived at by a completely different route from `soccer_model` — a two-half
+Poisson with score-dependent H2 rates, versus that model's split-scaled halves —
+and it lands on the same two conclusions: CB's half-time home price is far too
+long, and its 2/2 far too short. The 2/2 being 65 % short of fair is the same
+cell the `htft_combo` dominance rule flags as impossible and currently suppresses
+for being above the 4.5 bettable-range ceiling.
+
+---
+
+## 2026-08-12 — Arb/+EV alerts: from one box to a gate set
+
+Owner: *"change alert settings to more advanced so I can choose, kelly range
+odds range too instead of only %, and I don't know what else is better."*
+
+The opportunity alert had exactly two settings — `alert_enabled` and
+`alert_threshold` — and everything else was hardcoded in `alerts.js`. Now a
+panel on /arbs.html (same `<details class="alert-config">` shape as the
+Anomalies one) writes 17 keys that the shared poller reads. 1142 → **1208
+tests**.
+
+### Why % alone was the wrong knob
+
+An edge PERCENTAGE says nothing about whether a row is bettable, because the
+biggest percentages sit on the longest prices — exactly where Pinnacle's fair
+number is least certain and where the Kelly stake is smallest. Straight off the
+live board while building this:
+
+| row | edge% | prob-edge | Kelly |
+|---|---|---|---|
+| Lider soccer ML @ 4.80 | +3.79 % | **0.79pp** | 2.5 |
+| Lider soccer ML @ 5.40 | +1.55 % | **0.29pp** | 0.9 |
+| (synthetic) @ 2.00 vs 1.90 fair | +5.30 % | **2.63pp** | 40 |
+| (synthetic) @ 10.00 vs 8.00 fair | +25.0 % | **2.50pp** | 2 |
+
+Percent ranks the 10.00 above the 2.00; probability points rank them the other
+way, and probability points are right. So `Prob. edge ≥` — `(1/fair − 1/book)
+× 100` — is in the panel next to the % box. This is the same lesson the `live/`
+project learned when EV% was exploding on longshots.
+
+### The gates
+
+All are AND — a row must clear every filled one, blank is ignored. Deliberately
+the OPPOSITE of the anomaly panel's OR semantics, and the note in the UI says
+so: there you are casting a net, here you are narrowing one.
+
+edge % · prob-edge pp · re-alert step · odds min→max · Kelly min→max ·
+Pinnacle limit ≥ · kickoff min→max · kind · confidence · sport · book ·
+market · period.
+
+Three decisions worth recording:
+
+- **Empty chip selection = ALL, not none.** Unticking the last chip widens the
+  alert; silencing is what the master switch is for. The real reason is drift:
+  American football was added to this dashboard *today*, and a seed list stored
+  as an explicit selection would have silently excluded it. Options are also
+  merged from whatever the live feed shows, so the panel can never offer a
+  narrower world than the table.
+- **ARB rows are exempt from the Kelly gate.** `edge.py` leaves arb staking to
+  the bettor, so `kelly_stake` is 0 on every ARB row — a Kelly floor would have
+  silenced arbs entirely. Caught by writing the test, not by running it.
+- **A missing Pinnacle limit passes the limit gate.** Absent means unknown, not
+  zero; failing those rows would silence every book/market where Pinnacle ships
+  no limits.
+
+Two hardcoded rules became configurable without changing their defaults: the
+5pp re-alert step (`DEFAULT_RE_ALERT_PP`), and the `weak`-pairing exclusion from
+the 2026-07-26 audit, which is now the default of the Confidence chips.
+
+### The subtle one
+
+The poller fetches `/api/opportunities?min_edge=1` as a "catch-all". With a
+configurable edge gate that stopped being true: an edge gate below 1 % asks
+about rows the server never sends, so the panel would look configured and the
+chime would simply never fire. The query floor now widens to match.
+
+### Verification
+
+Beyond the wiring test, the REAL `passesGates`/`ppEdge`/`readOppGates` were
+extracted from alerts.js and run under a fake localStorage against 4 live
+opportunity rows plus 6 controlled ones covering the paths live data didn't hit
+(ARB with kelly 0, longshot, short price, weak pairing, 5-days-out kickoff,
+missing Pinnacle limit). Confirmed: no gates → 10/10; blank boxes ≡ no gates;
+every added gate only narrows; ARB survives a Kelly floor; pp≥2 drops exactly
+the two live longshot rows.
+
+`tests/test_arb_alerts_wiring.py` pins the 17 localStorage keys in BOTH
+directions, asserts every gate is actually consumed by `passesGates`, and
+asserts the pp/percent ranking disagreement above numerically — the same
+reasoning as the anomaly-alert wiring test, because a page can look correct
+while doing nothing.
+
+---
+
+## 2026-08-12 — Global 7-day data horizon (one cap, every book)
+
+Owner: *"I don't need any data later than 7 days to be pulled, from any book —
+maybe add it to a config, adjustable, default 7."*
+
+`src/horizon.py` + `limits.max_start_days` (default **7.0**, seeded from
+`MAX_START_DAYS`, live on the Config tab, `0` disables). 1124 → **1141 tests**.
+
+### Why it needed its own module
+
+Every book already had *something*, and no two agreed:
+
+- 1xbet had `HORIZON_HOURS` (36 h) — an energy budget, not a policy, and it
+  needed a per-sport override the moment American football arrived;
+- Crocobet and Setanta had `DETAIL_HOURS`, which only picks between a full
+  ladder and the cheap tier — both still pull the whole board;
+- CrystalBet, Pinnacle, Lider-Bet and Betlive had **no horizon at all**.
+
+So the cap is a ceiling over the top rather than a replacement:
+`effective = min(book_horizon, MAX_START_DAYS)` via `horizon.capped_hours()`.
+Written that way on purpose — the 1xbet AF override stays at 240 h and simply
+runs at 168 h today, so it still says what it means and comes back into play if
+the cap is raised, instead of being silently pinned to whatever the cap was on
+the day it was written.
+
+### Applied where it saves the most — never the same place twice
+
+| book | where | what it saves |
+|---|---|---|
+| CrystalBet | after the list parse, before anything per-game | the ExpandDetail round trip AND the list-view row |
+| Pinnacle | `_index_matchups` | a dropped matchup takes its WHOLE market block — the market loop skips any row whose matchupId it can't resolve |
+| 1xbet | `min()` against `HORIZON_HOURS` | the per-event `GetGameZip` |
+| Lider-Bet | per match, before its markets | parse only (matchData is one batched GET) |
+| Betlive | per event, next to the `_is_live` check | parse only |
+| Crocobet | on the board, before the near/far split | the per-event ladder call |
+| Setanta | on the event map, before the market sweep | `GetMarketsByEventIds` batches by event id |
+
+**Plus the four secondary sweeps**, which are separate fetch paths and would
+otherwise have made "no book pulls past 7 days" true only of the main loops:
+`betlive_watch`'s discover loop (one `refreshOdds` per candidate) and
+`soft_scan`'s own CB / Betlive / Lider enumerations (one detail call per
+surviving event). A test asserts both modules reference the horizon, because a
+missing filter is silent — the symptom is more data, not an error.
+
+### Unknown start times are KEPT
+
+A missing kickoff is not evidence that an event is far away, and dropping those
+rows would lose real fixtures. The matcher already takes the same view (an
+unknown time falls back to name confidence rather than being rejected).
+`filter_items` also keeps a row whose start-time accessor *throws* — pulling one
+extra event is much cheaper than silently losing fixtures to an attribute error.
+
+### Measured effect, same fetch, cap on
+
+| book (americanfootball) | before | after |
+|---|---|---|
+| CrystalBet | 12 921 rows / 177 events | **954 / 20** |
+| Pinnacle | 1 243 / 81 | 152 / 20 |
+| 1xbet | 493 / 24 | 614 / 24 |
+| Lider-Bet | 4 657 / 53 | 598 / 20 |
+| Betlive | 53 / 53 | 20 / 20 |
+| Crocobet | 1 031 / 53 | 206 / 20 |
+| Setanta | 1 199 / 173 | 140 / 20 |
+
+Every book converges on the same 20 fixtures. 1xbet's 24 are genuinely extra —
+it carries Arena Football IFL and Finland's Vaahteraliiga, which the others
+don't; its furthest surviving kickoff is 5.02 days out, inside the cap.
+
+**The other sports barely notice**, which is the point — this is not a blunt
+cut, it is removing data nobody was going to bet. Pinnacle prematch matchups
+kept: basketball **100 %** (27/27), tennis **100 %** (185/185), soccer **89 %**
+(602/674), American football **25 %** (20/81). AF is the sport that needed it,
+because it is the only board that is mostly weeks out — Pinnacle publishes
+Super Bowl futures and CB lists NFL fixtures into December.
+
+---
+
+## 2026-08-12 — Phase 3.2: American football, the fourth sport (seven books)
+
+CB sport_id **27**, 177 in-scope games. Surveyed against the **whole board** —
+every game, every detail page, 39 distinct market titles — plus a full sport-id
+and market-code census on each of the other six books. Full reference:
+`docs/americanfootball.md`.
+
+The reason for the whole-board discipline is yesterday's tennis pass: a
+30-match sample shipped a classifier covering 29% of the board. **Every trap
+below was invisible at sample size.**
+
+1067 → **1124 tests**, all green.
+
+### What the board looks like
+
+| book | id | rows / events (live) | verified vs Pinnacle (median pp) |
+|---|---|---|---|
+| CrystalBet | `27` | 12 921 / 177 | ML 0.80, spread 1.26, total 1.07, TT 1.06 |
+| Pinnacle | `15` ("Football") | 1 243 / 81 | — reference |
+| 1xbet | `13` | 493 / 24 | ML 0.97, spread 1.51, total 0.46 |
+| Lider-Bet | `s:34` | 4 657 / 53 | ML 0.83, spread 1.21, total 1.02 |
+| Betlive | `15` | 53 / 53 | ML 0.82 |
+| Crocobet | `16` | 1 031 / 53 | ML 0.46, spread 1.28, total 1.34 |
+| Setanta | `"AF"` | 1 199 / 173 | ML 0.67, spread 1.01, total 0.90 |
+
+Worst single observation anywhere: 5.65pp. Basketball was accepted at 0.4–2.8pp,
+tennis at 0.99–1.45pp medians. Nothing here is a label match — every mapping was
+price-verified on live matched fixtures before it shipped.
+
+### CB list view: identical to basketball, so it delegates
+
+All 177 containers shipped Format B with 8 cols in basketball's order. Two
+cosmetic differences, neither of which the parser cares about: AF's ML-away
+entry is a bare `"2"` (basketball ships `"\t2"`) — harmless because
+`_identify_loadinfo_roles` resolves ML-vs-AH away by POSITION relative to the
+handicap landmark; and the OU landmark is named `'Tot'` (basketball `'Point'`,
+tennis `'Game'`) — only the `handicap='total'` flag is read.
+
+### Four traps in the detail page
+
+**1. The missing space.** `Total Points(incl. overtime)*` — no space before the
+paren. Basketball's `[\s(]+` already tolerates it. A pattern written as
+`total points \(` drops **141 of 177 events** and looks fine in review.
+
+**2. Two quarter spellings on the SAME page.** CB serves
+`1st Quarter - Total Points` next to `2 quarter - total`. Basketball's rules
+only know the ordinal form, so 2/3/4-quarter ladders fall through the strict
+path — and its permissive `_derive_period` matches `\b(1st|first|1)\b.*quarter`
+for Q1 but `\b(2nd|second)\b` for Q2, so a bare `"2 quarter - total"` derives
+period **FT**. Its ~17-point rungs then interleave with the ~45-point full-game
+ladder and the monotonicity detector reports an anomaly on every rung. AF
+carries its own period deriver accepting bare digits for all four quarters.
+
+**3. Regulation vs incl-OT.** AF can be tied at the end of regulation and CB
+prices that leg (13.2 on Seattle–New England, ≈5% devigged — matching the ~6–7%
+of NFL games that actually reach overtime). Pinnacle's AF moneyline is 2-way
+incl-OT: **217 entries on the live board, not one with a `draw` designation**.
+So `Main result` must never become the matched moneyline. It is emitted on the
+permissive path only, where it feeds the new `ot_vs_regulation` check.
+
+**4. Every book's codes are a near copy with ONE substitution.**
+
+- **Crocobet**: `-2527` ML, `-2950` spread, `182/183` team totals — all
+  basketball's. But the total is **`-30172`**, not basketball's `-2966`, which
+  does not appear on the AF board at all. Copying basketball's table would have
+  emitted ML + spread + team totals and **no totals** — 629 of 1031 live rows,
+  silently.
+- **Setanta**: ML is **`mt 1`** (tennis's code), not basketball's 145. `mt 2`
+  *does* exist on AF, at periods 1–4/4010, as the 3-way **regulation** result —
+  so mistaking it for the moneyline would pair regulation against Pinnacle's
+  incl-OT price. Periods follow **basketball's** convention
+  (`0=FT, 4010=H1, 1..4=Q`), confirmed by the lines themselves: period 4010
+  totals sit at 28.5 (a half), period 1 at 10.5 (a quarter).
+- **Betlive**: the curated tier's only usable AF market is named
+  `Match Winner (12)` — the column pair is part of the name. Without the alias,
+  0 rows from 96 events.
+- **1xbet**: basketball's codes exactly, but **the horizon default made it emit
+  nothing**. `HORIZON_HOURS=36` assumes a board with games today; AF plays
+  weekly slots, so all 130 enumerated events sat outside the window and 1xbet
+  contributed 0 rows while logging a cheerful "enumerated 130 events". Added
+  `HORIZON_HOURS_BY_SPORT` / `SUBGAME_HOURS_BY_SPORT` (240 h / 72 h for AF);
+  the board is ~130 GetGameZip calls, so a wide horizon is cheap. **0 → 493
+  rows.**
+- **Lider-Bet**: ships `Winner (OT)` / `Handicap (OT)` / `Total (OT)`, all
+  already in `_classify_market`'s aliases. The section id was the whole change.
+
+### New check: B9 `ot_vs_regulation`
+
+CB posts the same period twice, and the pair satisfies an identity with no model
+in it:
+
+    P(win incl OT) = P(win in regulation) + P(tie) · P(win the overtime | tie)
+
+The conditional lives in [0,1], so the incl-OT probability is **boxed** between
+`P(win reg)` and `P(win reg) + P(tie)`. Outside that box the pair is not
+aggressive, it is impossible.
+
+Calibrated on all 50 (event, period) pairs that post both markets: floor
+residual p90 **+0.24** / max **+4.26**, ceiling residual p90 **+0.95** / max
+**+5.08**, inside a box only ~3.6pp wide; |coin-flip gap| p90 3.29 / max 7.36.
+`OT_BOX_PP = 3.0` and `OT_COINFLIP_PP = 8.0` flag **3 of 50**, all three
+inspected by hand and real — e.g. Jacksonville–Cleveland, regulation
+1.35/12.8/3.15 (68% + 5% tie, ceiling 73%) against incl-OT 1.19/3.55 (78%).
+
+**Caveat recorded in the code:** residual size depends on the devig model.
+`src.vig` uses a power devig which pushes more vig onto the longshot tie leg;
+proportional devigging shrinks those three cases by 1–2pp. 3.0 is calibrated
+against the power devig the rest of the system uses.
+
+### B1 `ml_vs_spread` is alive again
+
+Yesterday's entry recorded that this check had **never fired in 4606 flags**,
+because it needs a 2-way ML *and* a line-0 rung in the same period and neither
+sport has both. AF has both: **169 of 177 events carry a 2-way ML, 71 carry a
+0.0 spread rung**. The check now runs on 71 events and produced its first real
+flag. No code change — the sport supplied the missing rung.
+
+### A shared bug this exposed (pre-existing, now fixed)
+
+`cb_detail` keyed variant dedup on
+`(period, market_type, line, submarket, team_side)`, so a 2-way and a 3-way
+moneyline on the same period collided and whichever the page rendered first
+**silently deleted the other**. Found because `ot_vs_regulation` produced zero
+flags on a board where I could see both markets by hand.
+
+It was already doing the same thing to **basketball**, where CB posts
+`Full Time Result(1X2)*` alongside `Winner (incl. overtime)` and B6
+`htft_combo` is written to consume the regulation legs — verified directly on
+`data/raw/cb_single_match_detail.html`. Selection count is now part of the key.
+The strict (+EV) classifiers never emit both shapes for one period, so only the
+permissive/anomaly path changes; all 1067 pre-existing tests stayed green.
+
+### Matching: the collision that wasn't
+
+CB appends the **mascot** (`Rutgers Scarlet Knights`), Pinnacle uses the bare
+school (`Rutgers`). That needs no alias — `token_set_ratio` scores it 100
+because the Pinnacle side is a subset.
+
+College mascots overlap NFL nicknames badly on single names, though:
+`Miami Hurricanes` vs `Miami Dolphins` = 66.7, `Fresno State Bulldogs` vs
+`NC State` = 76.9, both above the `SCORE_TIGHT` floor of 65. It looked like AF
+would need a league-family guard in the matcher. **Measured instead: zero
+cross-family name pairs clear SCORE_TIGHT**, because the matcher requires
+*both* sides to score and a coincidental one-side collision never pairs with a
+second one. 0 of 177 accepted matches crossed a league family. No guard added —
+recording the negative result so nobody re-adds it on a hunch.
+
+What does break the join is narrower, and went to `team_aliases.yaml`: the
+school being an initialism or a different word (`Umass Minutemen` vs
+`Massachusetts` = **28.6**, `Fiu Panthers`, `St. Wolfpack`), plus four CB typos
+(`Tusla`, `Lousville`, `Stenford`, `Norh Dakota`). Each was confirmed by its
+**opponent** matching in the same fixture. NCAA teams Pinnacle does not carry
+were deliberately not aliased — that is a coverage gap, not a naming one, and
+an alias for an absent counterpart can only mismatch later. Match rate 77 → 81
+of the ~89 CB events Pinnacle actually covers.
+
+Betlive still carries `Edmonton Eskimos`, the CFL team's pre-2021 name.
+
+### Cost
+
+Whole-board CB detail sweep: **79–93 s / 177 games**, so AF runs `:full`
+comfortably (tennis is 500+ games, hence `:list`). `ANOMALY_EXTRA_SPORTS` now
+defaults to `soccer,tennis,americanfootball`, with
+`ANOMALY_EXTRA_HORIZON_H_BY_SPORT["americanfootball"] = 240` — the 12 h default
+exists because a full soccer sweep is ~14 min and never completed a pass, but AF
+is the opposite shape and a 12 h window would scan an empty board most days and
+never see the `Main result` 3-way the new check needs.
+
+### Known gaps
+
+- **Only 4 of 177 games carried the half/quarter menu** — the four CFL fixtures
+  inside 3 days. CB opens the deep menu near kickoff, so the quarter naming
+  above is CFL's. NFL/NCAA wording is unverified until the season starts; the
+  rules were written as tolerant regex families (ordinal *or* bare digit,
+  `total` *or* `total points`) rather than exact strings for exactly this
+  reason. Re-survey once NFL week 1 is inside the window.
+- `Odd/even`, `Will there be overtime`, `Winning margin` and the
+  handicap-and-total combos stay unclassified — no `Odds` representation for
+  yes/no, 7-way or 4-way combo shapes. Same blocker as tennis's correct-score
+  family.
+
+---
+
 ## 2026-06-15 — Multi-book: Lider-Bet + Betlive added (each vs Pinnacle + cross-book)
 
 Added two more Georgian soft books alongside CrystalBet, all compared to

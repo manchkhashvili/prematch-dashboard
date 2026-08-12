@@ -145,6 +145,73 @@
       font-family: var(--mono);
       font-size: 10px;
     }
+    /* ── half-time-from-full-time section ── */
+    .ht-inputs {
+      display: grid;
+      grid-template-columns: 118px repeat(3, 92px);
+      gap: 8px 12px;
+      align-items: center;
+    }
+    .ht-inputs input[type="number"] {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      width: 100%;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    .ht-inputs input[type="number"]:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .ht-inputs label, .ht-inputs .col-head {
+      color: var(--text-dim); font-size: 12px;
+    }
+    .ht-inputs .col-head {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+      color: var(--text-faint); font-weight: 600; text-align: center;
+    }
+    .ht-actions {
+      display: flex; align-items: center; gap: 10px;
+      margin: 14px 0 4px; flex-wrap: wrap;
+    }
+    .ht-actions button {
+      background: var(--accent); color: var(--bg); border: none;
+      border-radius: 4px; padding: 7px 18px; font-size: 12px; font-weight: 600;
+      letter-spacing: .04em; text-transform: uppercase; cursor: pointer;
+    }
+    .ht-actions button[disabled] { opacity: .5; cursor: progress; }
+    table.ht-out {
+      width: 100%; border-collapse: collapse; margin-top: 14px;
+      font-family: var(--mono); font-size: 12px;
+    }
+    table.ht-out th {
+      text-align: right; padding: 5px 8px; color: var(--text-faint);
+      font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1px solid var(--border); font-weight: 600;
+    }
+    table.ht-out th:first-child, table.ht-out td:first-child { text-align: left; }
+    table.ht-out td {
+      text-align: right; padding: 5px 8px;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+    table.ht-out tr.grp td {
+      color: var(--text-faint); font-size: 10px; text-transform: uppercase;
+      letter-spacing: .06em; border-bottom: none; padding-top: 12px;
+    }
+    table.ht-out tr.star td { background: var(--bg); }
+    table.ht-out tr.star td:first-child { font-weight: 700; color: var(--text); }
+    table.ht-out td.band { color: var(--text-faint); }
+    table.ht-out td.bet  { color: var(--ok, #3fb950); font-weight: 700; }
+    table.ht-out td.neg  { color: var(--text-faint); }
+    .ht-note { margin-top: 10px; }
+    .ht-warn {
+      margin-top: 10px; padding: 8px 10px; border-radius: 4px;
+      background: rgba(210,153,34,.12); border: 1px solid rgba(210,153,34,.4);
+      color: var(--text-dim); font-size: 11px; line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -213,6 +280,85 @@
         the market. Optionally enter your CB (or any book's) decimal odds on
         the right for an instant edge% + quarter-Kelly stake check.
         Formula: <code>edge = my_odds × fair_prob − 1</code>.
+      </div>
+    </div>
+
+    <!-- ── Half-time from full-time ─────────────────────────────────── -->
+    <div class="calc-section">
+      <h2>Half-time &amp; HT/FT from the full-time market</h2>
+
+      <p class="help" style="margin-top:0">
+        Fits Poisson goal rates <b>through</b> a two-half model so they always
+        reproduce the full-time prices you enter, then reads off the half-time
+        and HT/FT markets. Because FT 1X2 plus one total is 3 constraints on 2
+        rates, it sweeps the assumption space (devig × fit × H1 goal share ×
+        H2 score-dependence) and reports a <b>band</b>, not a point estimate.
+        The half-time price is <b>not</b> an input — that is the point: it is
+        usually the market the book does not post, or posts lazily.
+      </p>
+
+      <div class="ht-inputs">
+        <span></span>
+        <span class="col-head">1 / over</span>
+        <span class="col-head">X / line</span>
+        <span class="col-head">2 / under</span>
+
+        <label for="ht-ft1" title="Full-time 1X2 — the anchor. Required.">FT 1X2 *</label>
+        <input type="number" id="ht-ft1" step="0.01" min="1.01" placeholder="1.55" />
+        <input type="number" id="ht-ftx" step="0.01" min="1.01" placeholder="3.60" />
+        <input type="number" id="ht-ft2" step="0.01" min="1.01" placeholder="5.25" />
+
+        <label for="ht-tline" title="Full-time total — the only clean anchor on SCALE. Required.">FT total *</label>
+        <input type="number" id="ht-tover" step="0.01" min="1.01" placeholder="2.15 over" />
+        <input type="number" id="ht-tline" step="0.5" placeholder="2.5" />
+        <input type="number" id="ht-tunder" step="0.01" min="1.01" placeholder="1.55 under" />
+
+        <label class="col-head" style="text-align:left; padding-top:8px;">Book prices — all optional</label>
+        <span></span><span></span><span></span>
+
+        <label for="ht-b-ht1" title="Leave blank when the book does not post a half-time line — the fair value is still derived.">HT 1X2</label>
+        <input type="number" id="ht-b-ht1" step="0.01" min="1.01" placeholder="—" />
+        <input type="number" id="ht-b-htx" step="0.01" min="1.01" placeholder="—" />
+        <input type="number" id="ht-b-ht2" step="0.01" min="1.01" placeholder="—" />
+
+        <label for="ht-b-11" title="The two HT/FT cells that carry almost all the money.">HT/FT 1/1, 2/2</label>
+        <input type="number" id="ht-b-11" step="0.01" min="1.01" placeholder="1/1" />
+        <span></span>
+        <input type="number" id="ht-b-22" step="0.01" min="1.01" placeholder="2/2" />
+
+        <label for="ht-b-o05">HT total 0.5</label>
+        <input type="number" id="ht-b-o05" step="0.01" min="1.01" placeholder="over" />
+        <span></span>
+        <input type="number" id="ht-b-u05" step="0.01" min="1.01" placeholder="under" />
+
+        <label for="ht-b-o15">HT total 1.5</label>
+        <input type="number" id="ht-b-o15" step="0.01" min="1.01" placeholder="over" />
+        <span></span>
+        <input type="number" id="ht-b-u15" step="0.01" min="1.01" placeholder="under" />
+      </div>
+
+      <div class="ht-actions">
+        <button type="button" id="ht-go">Calculate</button>
+        <label style="font-size:12px; color:var(--text-dim);">
+          Min edge
+          <input type="number" id="ht-minedge" value="5" step="1" min="0"
+                 style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:4px 6px; width:60px; font-family:var(--mono); font-size:12px;" />%
+        </label>
+        <label style="font-size:12px; color:var(--text-dim); display:flex; align-items:center; gap:5px;"
+               title="16 assumption corners (~1.5s) instead of 108 (~5s). The full sweep gives a wider, more honest band.">
+          <input type="checkbox" id="ht-fast" checked /> fast sweep
+        </label>
+        <span id="ht-status" class="help" style="margin-top:0"></span>
+      </div>
+
+      <div id="ht-warn" class="ht-warn" style="display:none"></div>
+      <div id="ht-result"></div>
+
+      <div class="help ht-note">
+        <b>min bet odds</b> is the worst corner of the band — the module's own
+        decision rule is to bet only when the book beats <i>that</i>, not the
+        central fair. Anything between the two is model noise.
+        A <code>&lt;&lt; BET</code> means the worst-corner edge clears your min edge.
       </div>
     </div>
 
@@ -562,6 +708,177 @@ document.getElementById("calc-reset").addEventListener("click", () => {
 loadState();
 renderGrid();
 recompute();
+
+// ── Half-time & HT/FT from the full-time market ─────────────────────────────
+// Everything here is server-side: the model is a Poisson two-half fit swept
+// over ~16-108 assumption corners (1.5-5 s), which is far too heavy to run per
+// keystroke and far too much numerics to duplicate in JS. So the button POSTs
+// to /api/ht_from_ft and this only renders. See src/ht_from_ft.py.
+const HT_KEYS = {
+  "ht-b-ht1": "ht_1",   "ht-b-htx": "ht_X",   "ht-b-ht2": "ht_2",
+  "ht-b-11": "htft_1/1", "ht-b-22": "htft_2/2",
+  "ht-b-o05": "ht_over_0.5", "ht-b-u05": "ht_under_0.5",
+  "ht-b-o15": "ht_over_1.5", "ht-b-u15": "ht_under_1.5",
+};
+// The two cells the user actually bets get emphasised in the output.
+const HT_STAR = new Set(["htft_1/1", "htft_2/2"]);
+const HT_LABEL = {
+  "ht_1": "HT home", "ht_X": "HT draw", "ht_2": "HT away",
+  "ht_over_0.5": "HT over 0.5", "ht_under_0.5": "HT under 0.5",
+  "ht_over_1.5": "HT over 1.5", "ht_under_1.5": "HT under 1.5",
+  "ht_over_2.5": "HT over 2.5", "ht_under_2.5": "HT under 2.5",
+};
+
+const htEl = id => document.getElementById(id);
+const htNum = id => {
+  const v = (htEl(id).value || "").trim();
+  if (v === "") return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+};
+const HT_STORE = "calc_htft_inputs_v1";
+
+function htSaveInputs() {
+  const o = {};
+  for (const id of ["ht-ft1", "ht-ftx", "ht-ft2", "ht-tline", "ht-tover",
+                    "ht-tunder", "ht-minedge", ...Object.keys(HT_KEYS)]) {
+    o[id] = htEl(id).value;
+  }
+  o.fast = htEl("ht-fast").checked;
+  try { localStorage.setItem(HT_STORE, JSON.stringify(o)); } catch (e) {}
+}
+function htRestoreInputs() {
+  let o;
+  try { o = JSON.parse(localStorage.getItem(HT_STORE) || "null"); } catch (e) { return; }
+  if (!o) return;
+  for (const [k, v] of Object.entries(o)) {
+    if (k === "fast") { htEl("ht-fast").checked = !!v; continue; }
+    const el = htEl(k);
+    if (el && v != null) el.value = v;
+  }
+}
+
+function fmtOdds(v) {
+  if (v == null || !isFinite(v)) return "∞";
+  return v >= 100 ? v.toFixed(0) : v.toFixed(2);
+}
+function fmtPct(v) {
+  if (v == null) return "";
+  return (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+}
+
+function htRender(r) {
+  const lm = r.lambda, fc = r.ft_check;
+  const warn = htEl("ht-warn");
+  if (fc.shaky) {
+    warn.style.display = "";
+    warn.innerHTML = `<b>The FT prices do not sit on a clean Poisson surface</b>
+      — the refit reproduces them only to ${(fc.max_resid * 100).toFixed(1)}pp
+      (${(fc.home * 100).toFixed(1)}/${(fc.draw * 100).toFixed(1)}/${(fc.away * 100).toFixed(1)}
+      vs ${(fc.target_home * 100).toFixed(1)}/${(fc.target_draw * 100).toFixed(1)}/${(fc.target_away * 100).toFixed(1)}).
+      Everything derived below is shaky; treat it as a rough screen only.`;
+  } else {
+    warn.style.display = "none";
+  }
+
+  const rows = [];
+  let group = null;
+  for (const m of r.markets) {
+    const g = m.key.startsWith("htft_") ? "HT/FT"
+            : m.key.startsWith("ht_over") || m.key.startsWith("ht_under") ? "Half-time totals"
+            : "Half-time result";
+    if (g !== group) {
+      group = g;
+      rows.push(`<tr class="grp"><td colspan="7">${g}</td></tr>`);
+    }
+    const label = HT_LABEL[m.key] || m.key.replace("htft_", "HT/FT ");
+    const star = HT_STAR.has(m.key);
+    const book = m.book == null ? "" : fmtOdds(m.book);
+    const edge = m.edge == null ? "" : fmtPct(m.edge);
+    const worst = m.worst_edge == null ? "" : fmtPct(m.worst_edge);
+    const wcls = m.worst_edge == null ? "" : (m.bet ? "bet" : (m.worst_edge < 0 ? "neg" : ""));
+    rows.push(
+      `<tr class="${star ? "star" : ""}">` +
+      `<td>${label}</td>` +
+      `<td>${fmtOdds(m.fair)}</td>` +
+      `<td class="band">${fmtOdds(m.band_lo)} – ${fmtOdds(m.band_hi)}</td>` +
+      `<td>${fmtOdds(m.min_bet_odds)}</td>` +
+      `<td>${book}</td>` +
+      `<td>${edge}</td>` +
+      `<td class="${wcls}">${worst}${m.bet ? " &lt;&lt; BET" : ""}</td>` +
+      `</tr>`);
+  }
+
+  htEl("ht-result").innerHTML =
+    `<div class="summary" style="margin-top:12px">
+       <span>goal rates: home <b>${lm.home.toFixed(2)}</b>
+         [${lm.home_lo.toFixed(2)}–${lm.home_hi.toFixed(2)}]</span>
+       <span>away <b>${lm.away.toFixed(2)}</b>
+         [${lm.away_lo.toFixed(2)}–${lm.away_hi.toFixed(2)}]</span>
+       <span>match <b>${lm.match.toFixed(2)}</b></span>
+       <span>${r.corners} assumption corners</span>
+     </div>
+     <table class="ht-out">
+       <thead><tr>
+         <th>market</th><th>fair</th><th>band</th>
+         <th title="worst corner of the band — the decision line">min bet odds</th>
+         <th>book</th><th title="edge at the central estimate">edge</th>
+         <th title="edge at the WORST corner — the one that matters">worst</th>
+       </tr></thead>
+       <tbody>${rows.join("")}</tbody>
+     </table>`;
+}
+
+async function htCalculate() {
+  const ft = [htNum("ht-ft1"), htNum("ht-ftx"), htNum("ht-ft2")];
+  const line = htNum("ht-tline"), over = htNum("ht-tover"), under = htNum("ht-tunder");
+  const status = htEl("ht-status");
+  if (ft.some(v => v == null || v <= 1) || line == null || over == null || under == null) {
+    status.textContent = "need FT 1X2 and the FT total (line + over + under)";
+    return;
+  }
+  const book = {};
+  for (const [id, key] of Object.entries(HT_KEYS)) {
+    const v = htNum(id);
+    if (v != null && v > 1) book[key] = v;      // blank = unknown, which is fine
+  }
+  const btn = htEl("ht-go");
+  btn.disabled = true;
+  status.textContent = "fitting…";
+  htSaveInputs();
+  const t0 = performance.now();
+  try {
+    const res = await fetch("/api/ht_from_ft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ft, total: [line, over, under], book,
+        min_edge: (htNum("ht-minedge") ?? 5) / 100,
+        fast: htEl("ht-fast").checked,
+      }),
+    });
+    if (!res.ok) {
+      let msg = res.status + "";
+      try { msg = (await res.json()).detail || msg; } catch (e) {}
+      status.textContent = "error: " + msg;
+      return;
+    }
+    htRender(await res.json());
+    status.textContent = `done in ${((performance.now() - t0) / 1000).toFixed(1)}s`;
+  } catch (e) {
+    status.textContent = "error: " + e;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+htEl("ht-go").addEventListener("click", htCalculate);
+for (const id of ["ht-ft1", "ht-ftx", "ht-ft2", "ht-tline", "ht-tover", "ht-tunder",
+                  "ht-minedge", "ht-fast", ...Object.keys(HT_KEYS)]) {
+  htEl(id).addEventListener("change", htSaveInputs);
+  htEl(id).addEventListener("keydown", e => { if (e.key === "Enter") htCalculate(); });
+}
+htRestoreInputs();
 </script>
 </body>
 </html>

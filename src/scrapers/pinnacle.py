@@ -71,6 +71,7 @@ import httpx
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src import horizon  # noqa: E402
 from src.models import Odds  # noqa: E402
 from src.vig import american_to_decimal  # noqa: E402
 
@@ -80,6 +81,10 @@ PINNACLE_BASE = "https://guest.api.arcadia.pinnacle.com/0.1"
 SPORT_ID_BASKETBALL = 4
 SPORT_ID_SOCCER = 29
 SPORT_ID_TENNIS = 33  # verify on first live run — adjust if Pinnacle ships tennis on a different id
+# Pinnacle calls American football "Football" (soccer is "Soccer", id 29).
+# Confirmed 2026-08-12 from /0.1/sports: id 15, 393 matchups, leagues
+# NCAA / NFL / NFL Pre Season / Canadian Football.
+SPORT_ID_AMERICANFOOTBALL = 15
 
 # Per-sport Referer mostly cosmetic — Pinnacle's WAF doesn't enforce it
 # strictly — but matches what a real user would send. Other headers shared.
@@ -126,6 +131,12 @@ ALLOWED_MARKET_TYPES_BY_SPORT: dict[str, set[str]] = {
     "basketball": {"moneyline", "spread", "total"},                  # Phase 1 set
     "soccer":     {"moneyline", "spread", "total", "team_total"},    # Phase 2 set
     "tennis":     {"moneyline", "spread", "total"},                  # Phase 3.1 — same as basketball
+    # Phase 3.2 — American football. team_total is IN (unlike basketball):
+    # Pinnacle ships 136 team_total entries with side=home/away across the AF
+    # board, and CB prices the counterpart on 16 % of games as "HomeTeam Total
+    # (incl. overtime)" / "AwayTeam Total (incl. overtime)", so both legs of
+    # the pair exist and the rows are matchable rather than phantom.
+    "americanfootball": {"moneyline", "spread", "total", "team_total"},
 }
 
 
@@ -365,6 +376,20 @@ async def fetch_pinnacle_tennis(*, concurrency: int = 10) -> list[Odds]:
     """Fetch all prematch tennis Odds. 2-way ML + spread + total, no child matchups."""
     return await _fetch_pinnacle_for_sport(
         SPORT_ID_TENNIS, "tennis", concurrency=concurrency,
+    )
+
+
+async def fetch_pinnacle_americanfootball(*, concurrency: int = 10) -> list[Odds]:
+    """Fetch all prematch American-football Odds.
+
+    2-way ML + spread + total + team_total, periods 0 (FT) and 1 (H1) only —
+    Pinnacle ships no prematch quarters for AF (surveyed 2026-08-12: 1518
+    period-0 entries, 36 period-1, nothing else). No child matchups: the AF
+    board carries zero `parentId` entries, so the corners/games folding path
+    is inert here.
+    """
+    return await _fetch_pinnacle_for_sport(
+        SPORT_ID_AMERICANFOOTBALL, "americanfootball", concurrency=concurrency,
     )
 
 
@@ -616,11 +641,18 @@ def _index_matchups(matchups: list[dict], now: datetime) -> dict[int, dict]:
         _index_child_matchups separately.
       - Skip specials (type=="special") — Pinnacle's unstructured prop entries.
       - Skip live matchups (startTime <= now).
+      - Skip matchups starting beyond the global data horizon (src/horizon.py).
+        Done here rather than in _build_odds_for_league because a matchup that
+        never enters this index takes its ENTIRE market block with it — the
+        market loop skips any row whose matchupId it can't resolve. On the
+        American football board that also drops Pinnacle's Super Bowl and
+        conference futures, which carry markets but no useful kickoff.
       - Skip if we can't extract both home + away from `participants`.
 
     Returns only parent matchups.
     """
     out: dict[int, dict] = {}
+    cut = horizon.cutoff()
     for m in matchups:
         if not isinstance(m, dict):
             continue
@@ -632,6 +664,8 @@ def _index_matchups(matchups: list[dict], now: datetime) -> dict[int, dict]:
             continue
         start = _parse_iso(m.get("startTime"))
         if start is None or start <= now:
+            continue
+        if not horizon.keeps(start, cut=cut):
             continue
         home = away = None
         for p in (m.get("participants") or []):

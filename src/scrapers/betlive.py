@@ -32,6 +32,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league
 
@@ -43,7 +44,7 @@ LEAGUE_EVENTS_URL = f"{BASE}/api/event/getLeagueEvents"
 IMPERSONATE = "chrome124"
 
 # Betlive sportId per dashboard sport name (verified 2026-06-15).
-SPORT_ID = {"soccer": 1, "basketball": 6, "tennis": 5}
+SPORT_ID = {"soccer": 1, "basketball": 6, "tennis": 5, "americanfootball": 15}
 
 # providerId whose providerEventId is a real SportRadar match id.
 SPORTRADAR_PROVIDER_IDS = frozenset({14})
@@ -103,7 +104,13 @@ def _classify_market(raw_name: str, sels: set[str]) -> tuple[str, int] | None:
                 # Betlive basketball's curated ML is literally named "12 (OT)"
                 # (2-way incl overtime; outcomes "1"/"2") — found 2026-07-11
                 # when basketball emitted 0 rows from 140 events.
-                "12 (ot)", "12"):
+                "12 (ot)", "12",
+                # American football's curated ML carries the column pair in
+                # the name: "Match Winner (12)", outcomes "1"/"2" — found
+                # 2026-08-12 when AF emitted 0 rows from 96 events. The
+                # curated tier ships nothing else usable for AF (the only
+                # other named market is a sub-period "1st Half Total").
+                "match winner (12)", "match winner (12) (ot)"):
         return ("moneyline", 2)
     return None
 
@@ -158,6 +165,10 @@ def _parse_event(ev: dict, sport_name: str, fetched_at: datetime) -> list[Odds]:
     start_time = ticks_to_utc(ev.get("startDate"))
     if _is_live(ev, start_time, fetched_at):
         return []                       # in-play leak — not a prematch price
+    # Global data horizon (src/horizon.py) — the far end of the same filter the
+    # live check applies to the near end.
+    if not horizon.keeps(start_time):
+        return []
     event_id = ev.get("id")
 
     sr_match_id = None
@@ -281,6 +292,10 @@ async def fetch_betlive_basketball() -> list[Odds]:
 
 async def fetch_betlive_tennis() -> list[Odds]:
     return await fetch_betlive("tennis")
+
+
+async def fetch_betlive_americanfootball() -> list[Odds]:
+    return await fetch_betlive("americanfootball")
 
 
 if __name__ == "__main__":   # smoke: python -m src.scrapers.betlive [sport]

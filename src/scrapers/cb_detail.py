@@ -439,39 +439,54 @@ def parse_detail_page(
         return [odds for _, odds in ranked]
 
     # Merge: keep lowest-rank variant per
-    # (period, market_type, line, submarket, team_side) key. Submarket and
+    # (period, market_type, n_sel, line, submarket, team_side) key. Submarket and
     # team_side stop corners-total-9.5 from accidentally colliding with
     # goals-total-9.5, and home-team-total-1.5 from colliding with
     # away-team-total-1.5. For basketball (submarket=None, team_side=None
     # everywhere) the key reduces to the prior 3-tuple — no behavior change.
     # Tied ranks (shouldn't happen in practice) → first wins.
+    #
+    # n_sel (the number of selections) separates a 2-WAY moneyline from a
+    # 3-WAY one. They are different markets — CB posts both on the same page
+    # ("Winner (incl. overtime)" alongside "Full Time Result(1X2)" on
+    # basketball, alongside "Main result" on American football) — but they used
+    # to collide on an identical (period, "moneyline", None, None, None) key,
+    # so whichever the page happened to render first silently deleted the
+    # other. That quietly starved two checks of an input they are written to
+    # use: htft_combo needs the REGULATION 1X2 legs (HT/FT settles on
+    # regulation), and americanfootball's ot_vs_regulation needs both sides of
+    # the pair by definition. The strict (+EV) classifiers never emit both
+    # shapes for one period, so this only changes the permissive/anomaly path.
     keyed: dict[
-        tuple[str, str, Optional[float], Optional[str], Optional[str]],
+        tuple[str, str, int, Optional[float], Optional[str], Optional[str]],
         tuple[int, Odds],
     ] = {}
     for rank, odds in ranked:
-        key = (odds.period, odds.market_type, odds.line,
+        key = (odds.period, odds.market_type, len(odds.selections), odds.line,
                odds.submarket, odds.team_side)
         existing = keyed.get(key)
         if existing is None or rank < existing[0]:
             keyed[key] = (rank, odds)
 
-    # Drop all fallback (rank>0) rows for any (period, market_type, submarket,
-    # team_side) group where a preferred (rank=0) row exists. Without this,
-    # "2nd Half - Total (incl. OT)" (.5 lines, rank=0) and "2nd Half - Total*"
-    # (.0 lines, rank=1) survive as separate line values and get interleaved
-    # into a single ladder, producing spurious monotonicity violations.
-    preferred_groups: set[tuple[str, str, Optional[str], Optional[str]]] = set()
+    # Drop all fallback (rank>0) rows for any (period, market_type, n_sel,
+    # submarket, team_side) group where a preferred (rank=0) row exists. Without
+    # this, "2nd Half - Total (incl. OT)" (.5 lines, rank=0) and "2nd Half -
+    # Total*" (.0 lines, rank=1) survive as separate line values and get
+    # interleaved into a single ladder, producing spurious monotonicity
+    # violations.
+    preferred_groups: set[tuple[str, str, int, Optional[str], Optional[str]]] = set()
     for rank, odds in keyed.values():
         if rank == 0:
             preferred_groups.add(
-                (odds.period, odds.market_type, odds.submarket, odds.team_side)
+                (odds.period, odds.market_type, len(odds.selections),
+                 odds.submarket, odds.team_side)
             )
 
     return [
         o for rank, o in keyed.values()
         if rank == 0
-        or (o.period, o.market_type, o.submarket, o.team_side) not in preferred_groups
+        or (o.period, o.market_type, len(o.selections), o.submarket,
+            o.team_side) not in preferred_groups
     ]
 
 
