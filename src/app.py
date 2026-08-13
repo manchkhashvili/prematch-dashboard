@@ -1552,9 +1552,6 @@ async def _anomaly_extra_loop():
             continue
         for sport in sports:
             try:
-                budget = runtime_config.num("limits", "anomaly_extra_max_sec",
-                                            ANOMALY_EXTRA_MAX_SEC)
-                deadline = time.monotonic() + budget if budget > 0 else None
                 odds = await fetch_crystalbet_anomaly_ladders(
                     sport, headed=not CB_HEADLESS,
                     start_within_hours=horizon.capped_hours(
@@ -1562,12 +1559,16 @@ async def _anomaly_extra_loop():
                             sport,
                             runtime_config.num("limits", "anomaly_extra_horizon_h",
                                                ANOMALY_EXTRA_HORIZON_H))),
-                    # Two ways to stop: the Config-tab switch, and the wall-clock
-                    # budget. Both matter — this scan holds the sport's CB lock,
-                    # so "run until done" means "block the sport until done".
-                    should_continue=lambda dl=deadline: (
-                        runtime_config.active("scans", "anomaly_extra")
-                        and (dl is None or time.monotonic() < dl)))
+                    # Two ways to stop, and they are NOT interchangeable. The
+                    # switch is a predicate the caller owns; the budget is a
+                    # duration only the scraper can time, because the lock wait
+                    # and the list refresh happen before the expansion loop and
+                    # would otherwise eat the whole allowance (measured: soccer
+                    # reached the loop 889 s in, and expanded nothing).
+                    should_continue=lambda: runtime_config.active(
+                        "scans", "anomaly_extra"),
+                    max_expand_sec=runtime_config.num(
+                        "limits", "anomaly_extra_max_sec", ANOMALY_EXTRA_MAX_SEC))
                 # Budget truncation is expected and publishable (the pass is the
                 # soonest-kickoff prefix, and the tail kept its list-view Odds).
                 # Being switched OFF mid-sweep is not: keep the last snapshot

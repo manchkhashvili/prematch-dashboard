@@ -738,6 +738,31 @@ _EXTRACT_BLOCK_TIMEOUT_SEC = 5.0      # evaluate to read the block's outerHTML
 # Log a progress line every N games so long cold-start cycles don't run silently.
 _PROGRESS_LOG_EVERY = 25
 
+# The ladder scan keeps its OWN change/detail cache under this namespace. It
+# has to be separate from the dashboard's: the two run different classifiers
+# (permissive vs strict) over the same games, so one cache would serve each
+# path the other's rows.
+#
+# Why the scan is cached at all, measured 2026-08-13. `bypass_cache` meant "no
+# cache of any kind", so every pass re-expanded every in-horizon game. The
+# per-game cost is not the 0.85 s the old comment assumed — americanfootball
+# managed 14 games in 229 s, i.e. **~16 s/game**, because CB's ExpandDetail
+# re-renders the WHOLE loaded panel and the scan loads every league. At that
+# rate a 500-game soccer horizon is a 2.2-hour pass; no wall-clock budget makes
+# that fit, it only decides how small a prefix you see. The main dashboard path
+# has always been viable for exactly one reason — it expands only games whose
+# list-view hash MOVED — and the scan can have the same deal.
+#
+# Effect: the first pass is expensive and partial, later passes re-expand only
+# what moved, so coverage accumulates across passes instead of resetting to the
+# nearest N every time.
+_LADDER_CACHE_NS = "{}:ladder"
+# Tighter than the dashboard's 6 h. A ladder anomaly is an ALT-LINE claim, and
+# an unmoved main does not prove an unmoved rung — it only makes it likely. Two
+# hours is ~8 scan passes: long enough for coverage to build, short enough that
+# nothing on screen is from a different session of the board.
+_LADDER_CACHE_MAX_AGE_SEC = 2 * 60 * 60
+
 # When expand keeps failing, don't keep serving stale cached detail forever.
 # Past this age, fall back to fresh list-view Odds instead of last-known-good
 # cached detail. List view is always fresh per cycle so it's a safer fallback
@@ -1066,6 +1091,7 @@ async def _fetch_for_sport(
     classify_override: Any = None, bypass_cache: bool = False,
     use_http: bool | None = None, start_within_hours: float | None = None,
     should_continue: Any = None, expand_within_hours: float | None = None,
+    max_expand_sec: float | None = None,
 ) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
@@ -1076,13 +1102,22 @@ async def _fetch_for_sport(
       4. Consult per-sport change cache; expand new/changed games; reuse
          cached detail Odds for stable games
       5. Return all Odds (detail-page where available, list-view otherwise)
+
+    `max_expand_sec` bounds the ladder (bypass_cache) expansion loop, and the
+    clock starts when THAT LOOP starts — not when the call was made. A caller
+    cannot time this from outside: steps 1 and 2 run first and are unbounded
+    (lock wait behind another CB task, then the whole league tree). Measured
+    2026-08-13, a caller-side deadline was spent before expansion began — soccer
+    burned 889 s on lock-wait + list refresh and then expanded 0 of 500 games.
     """
     sport_id = sport.SPORT_ID
     sport_name = sport.SPORT_NAME
     fetched_at = datetime.now(tz=timezone.utc)
 
     sport_lock = _get_sport_lock(sport_id)
+    t_call = time.monotonic()
     async with sport_lock:
+        t_locked = time.monotonic()
         # ── 1. List view refresh (transport-dispatched, retry-once inside) ──
         page, list_html = await _refresh_list_html_for_sport(
             sport_id, sport_name, headed=headed, use_http=use_http,
@@ -1090,6 +1125,7 @@ async def _fetch_for_sport(
 
         # ── 2. Per-game extraction from list HTML ──
         games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
+        t_listed = time.monotonic()
         # Global data horizon (src/horizon.py). Applied HERE — after the one
         # list postback that has to happen anyway, before anything per-game —
         # so a far fixture costs neither an ExpandDetail round trip (the
@@ -1136,21 +1172,41 @@ async def _fetch_for_sport(
             return all_odds
 
         # ── 3-bis. Cache-bypass full expansion (anomaly scan path) ──
-        # When bypass_cache is set we ALWAYS expand every game with the given
-        # classifier and never touch the shared change_cache / detail cache.
-        # This keeps the hourly anomaly scan (permissive classifier) from
-        # contaminating the dashboard's strict-classified basketball cache, and
-        # guarantees the ladders are current each scan. Falls back to list-view
-        # Odds for any game that fails to expand.
+        # `bypass_cache` means "do not touch the DASHBOARD's caches" — the two
+        # paths run different classifiers (permissive vs strict) over the same
+        # games, so sharing one cache would serve each path the other's rows.
+        # It used to mean "no cache at all", which at ~16 s per expansion made a
+        # 500-game horizon a 2.2-hour pass; the scan now keeps its own caches
+        # under a `sport:ladder` namespace (see _LADDER_CACHE_NS). Falls back to
+        # the cached ladder, then to list-view Odds, when an expansion fails.
         if bypass_cache:
             t_scan0 = time.monotonic()
-            # Horizon filter (2026-07-11): a FULL soccer expansion is ~956
-            # games x ~0.85s = ~14 min while HOLDING the sport lock — the
-            # extra-sport anomaly scan never completed a pass. Ladder
-            # anomalies are most actionable near kickoff anyway, so expand
-            # only games starting within the horizon, soonest first (partial
-            # progress covers the nearest games). None = whole board
-            # (basketball keeps that: ~100 games is fine).
+            # Ladder-scan cache, in its own namespace (see _LADDER_CACHE_NS).
+            # Pruned against the WHOLE board rather than the in-horizon subset,
+            # so a game does not lose its cached ladder every time the horizon
+            # happens not to reach it.
+            lname = _LADDER_CACHE_NS.format(sport_name)
+            lcache = change_cache.get_cache(lname)
+            ldetail = _get_sport_detail_cache(lname)
+            board_ids = {g.event_id for g in games}
+            lcache.prune_missing(board_ids)
+            for eid in list(ldetail):
+                if eid not in board_ids:
+                    ldetail.pop(eid, None)
+
+            def _cached_ladder(g) -> list[Odds] | None:
+                rows = ldetail.get(g.event_id)
+                if _is_cached_detail_fresh_enough(
+                        rows, lcache.entries.get(g.event_id),
+                        max_age_sec=_LADDER_CACHE_MAX_AGE_SEC):
+                    return rows
+                return None
+
+            # Horizon filter (2026-07-11): expand only games starting within the
+            # horizon, soonest first — ladder anomalies are most actionable near
+            # kickoff, and with the budget below the ordering is what makes a
+            # truncated pass the USEFUL prefix rather than an arbitrary slice.
+            # None = whole board (basketball keeps that: ~100 games is fine).
             if start_within_hours is not None:
                 cutoff = fetched_at + timedelta(hours=start_within_hours)
                 in_h = [g for g in games
@@ -1160,8 +1216,15 @@ async def _fetch_for_sport(
                          sport_name, start_within_hours, len(in_h), len(games))
                 games = in_h
             all_odds: list[Odds] = []
-            n_ok = n_fail = 0
-            stopped_at = 0
+            n_ok = n_fail = n_cached = 0
+            stopped_at: int | None = None
+            # The clock starts HERE. Lock-wait and the list refresh precede this
+            # loop and are unbounded, so a deadline the caller computed before
+            # the call has already been spent by a slow board: measured
+            # 2026-08-13, soccer reached this line 889 s after the call and
+            # expanded 0 of 500 games under a 240 s caller-side budget.
+            expand_until = (t_scan0 + max_expand_sec
+                            if max_expand_sec and max_expand_sec > 0 else None)
             for i, game in enumerate(games, 1):
                 # Cooperative abort — the normal path has had this for a while
                 # and this path did not, which made the sweep UNSTOPPABLE: the
@@ -1173,32 +1236,59 @@ async def _fetch_for_sport(
                 # behind it and none of them ran once.
                 #
                 # Checked every game rather than every _PROGRESS_LOG_EVERY: a
-                # soccer expansion is ~6 s, so a 25-game granularity overshoots
-                # a deadline by two and a half minutes. The callable is a clock
-                # read; calling it once per postback costs nothing.
-                if should_continue is not None and not should_continue():
+                # ladder expansion is seconds, so a 25-game granularity
+                # overshoots a deadline by minutes. Both checks are a clock read
+                # or a dict lookup; once per postback costs nothing.
+                out_of_time = expand_until is not None and time.monotonic() >= expand_until
+                if out_of_time or (should_continue is not None and not should_continue()):
                     stopped_at = i - 1
-                    log.info("CB %s anomaly-scan expansion STOPPED at %d/%d "
-                             "(budget spent or switched off) — remaining games "
-                             "keep their list-view Odds",
-                             sport_name, stopped_at, len(games))
+                    # The tail is NOT dropped. Each remaining game contributes
+                    # its cached ladder if it still has a fresh one, otherwise
+                    # its list-view Odds — so a truncated pass narrows what got
+                    # REFRESHED, not what is on screen. Without this every pass
+                    # deleted the flags for every game past the cut.
+                    n_tail = 0
                     for rest in games[i - 1:]:
-                        all_odds.extend(rest.list_odds)
+                        cached = _cached_ladder(rest)
+                        if cached:
+                            all_odds.extend(cached)
+                            n_cached += 1
+                            n_tail += 1
+                        else:
+                            all_odds.extend(rest.list_odds)
+                    log.info("CB %s anomaly-scan expansion STOPPED at %d/%d "
+                             "(%s) — %d of the %d remaining games served from "
+                             "the ladder cache",
+                             sport_name, stopped_at, len(games),
+                             "budget spent" if out_of_time else "switched off",
+                             n_tail, len(games) - stopped_at)
                     break
                 if i % _PROGRESS_LOG_EVERY == 0:
                     log.info(
-                        "CB %s anomaly-scan expansion: %d/%d (expanded=%d, fallback=%d)",
-                        sport_name, i, len(games), n_ok, n_fail,
+                        "CB %s anomaly-scan expansion: %d/%d "
+                        "(expanded=%d, cached=%d, fallback=%d)",
+                        sport_name, i, len(games), n_ok, n_cached, n_fail,
                     )
+                # Unmoved mains → serve the cached ladder and spend the budget
+                # on a game that actually changed.
+                if not lcache.needs_expansion(game.event_id, game.loadinfo):
+                    cached = _cached_ladder(game)
+                    if cached:
+                        all_odds.extend(cached)
+                        n_cached += 1
+                        continue
                 try:
                     detail_odds = await _expand_game(
                         game, fetched_at, sport, page,
                         classify=classify_override, ladder_mode=True, use_http=use_http,
                     )
                     if detail_odds:
+                        lcache.mark_loaded(game.event_id, game.loadinfo)
+                        ldetail[game.event_id] = detail_odds
                         all_odds.extend(detail_odds)
                         n_ok += 1
                     else:
+                        lcache.mark_list_only(game.event_id, game.loadinfo)
                         all_odds.extend(game.list_odds)
                         n_fail += 1
                 except Exception as e:
@@ -1206,19 +1296,32 @@ async def _fetch_for_sport(
                         "anomaly-scan expand failed for %s (%s vs %s): %s",
                         game.event_id, game.home, game.away, e,
                     )
-                    all_odds.extend(game.list_odds)
+                    lcache.mark_expand_failed(game.event_id, game.loadinfo)
+                    cached = _cached_ladder(game)
+                    all_odds.extend(cached if cached else game.list_odds)
                     n_fail += 1
+            # Phase split, because the phases have completely different fixes.
+            # `truncated_at` is None ONLY when the pass ran to the end — using
+            # `stopped_at or None` made a stop at the FIRST game (stopped_at=0)
+            # report as a clean finish, which is precisely how "expanded 0 of
+            # 500" managed to look healthy.
             _last_ladder_scan[sport_name] = {
                 "at": fetched_at.isoformat(),
                 "in_horizon": len(games),
                 "expanded": n_ok,
+                "cached": n_cached,
                 "fallback": n_fail,
-                "truncated_at": stopped_at or None,
-                "sec": round(time.monotonic() - t_scan0, 1),
+                "truncated_at": stopped_at,
+                "wait_sec": round(t_locked - t_call, 1),    # queued behind CB
+                "list_sec": round(t_listed - t_locked, 1),  # league tree + parse
+                "expand_sec": round(time.monotonic() - t_scan0, 1),
+                "sec": round(time.monotonic() - t_call, 1),
             }
             log.info(
-                "CB %s anomaly-scan cycle complete: %d expanded, %d fallback → %d Odds",
-                sport_name, n_ok, n_fail, len(all_odds),
+                "CB %s anomaly-scan cycle complete: %d expanded, %d cached, "
+                "%d fallback → %d Odds (wait %.0fs, list %.0fs, expand %.0fs)",
+                sport_name, n_ok, n_cached, n_fail, len(all_odds),
+                t_locked - t_call, t_listed - t_locked, time.monotonic() - t_scan0,
             )
             return all_odds
 
@@ -1359,16 +1462,23 @@ _ANOMALY_SPORT_TABLE = {
 async def fetch_crystalbet_anomaly_ladders(
     sport_name: str, *, headed: bool = False,
     start_within_hours: float | None = None, should_continue: Any = None,
+    max_expand_sec: float | None = None,
 ) -> list[Odds]:
     """Full-detail anomaly scrape for ANY supported sport (2026-07-11 —
     the scan was basketball-only before). Same semantics as the basketball
     variant below: force_detail + bypass_cache (+ permissive classifier where
-    one exists)."""
+    one exists).
+
+    `max_expand_sec` caps the EXPANSION phase only (see `_fetch_for_sport`);
+    the lock wait and the list refresh in front of it are not the caller's to
+    time and are reported separately.
+    """
     mod, clf = _ANOMALY_SPORT_TABLE[sport_name]
     return await _fetch_for_sport(
         mod, headed=headed, force_detail=True,
         classify_override=clf, bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
         start_within_hours=start_within_hours, should_continue=should_continue,
+        max_expand_sec=max_expand_sec,
     )
 
 

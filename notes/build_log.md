@@ -5373,3 +5373,70 @@ hazard — both select the same soonest-N games, the horizon just stops being wh
 decides N. `anomaly_extra_horizon_h: 48` can stay as it is.
 
 13 new tests (`tests/test_scan_starvation.py`); **1302 green**.
+
+### Same day, second pass: the budget was in the wrong place, and 0.85 s/game was a fiction
+
+The owner restarted and reported *"there was plenty of games there and they
+disappeared, mostly cb soccer I guess"*. `extra.cost` — added an hour earlier
+for exactly this — answered it immediately:
+
+| sport | started | published | total | expand | in horizon | expanded |
+|---|---|---|---|---|---|---|
+| soccer | 08:41:02 | 08:55:51 | 889 s | **0.0 s** | 500 | **0** |
+| tennis | 08:55:51 | 09:05:38 | 586 s | **0.0 s** | 266 | **0** |
+| americanfootball | 09:05:38 | 09:09:44 | 247 s | 229.4 s | 20 | 13 |
+| basketball | — | — | — | 196.2 s | 25 | 24 |
+
+**Two bugs of mine, one real finding.**
+
+*Bug 1 — a caller cannot time this call.* `deadline = monotonic() + 240` was
+computed in `_anomaly_extra_loop` before `fetch_crystalbet_anomaly_ladders`. Two
+unbounded phases run before the expansion loop: waiting for the sport lock
+behind another CB task, then refreshing the whole league tree. Soccer spent
+**889 s** in those, so the budget was gone before the first postback and the
+loop broke at game 1. `max_expand_sec` is now a scraper-side parameter anchored
+to the start of the expansion loop, and `wait_sec` / `list_sec` / `expand_sec`
+are reported separately — they have completely different fixes.
+
+*Bug 2 — the truncation report hid it.* `"truncated_at": stopped_at or None`
+maps a stop at the FIRST game (`stopped_at == 0`) to `None`, i.e. "ran to
+completion". So "expanded 0 of 500" reported as a clean pass. `stopped_at` is
+now `int | None` and only None when the loop actually finished. A field that
+reads healthy in the worst case is worse than no field.
+
+*The finding — the per-game cost is ~16 s, not 0.85 s.* The AF row is clean:
+229.4 s for 14 games. The `~956 games x ~0.85 s = ~14 min` in the old comments
+is off by a factor of ~19, and `docs/performance.md` says why in its first
+section — an `ExpandDetail` re-renders the **entire loaded panel**, and the scan
+loads every league. Every game costs a whole-board render plus an html5lib
+parse.
+
+At 16 s/game a 500-game soccer horizon is a **2.2-hour** pass. No budget makes
+that fit; it only decides how small a prefix you see. That is the whole reason
+the flags vanished, and it is not fixable by tuning the number.
+
+### What actually fixes coverage: the scan gets a change cache
+
+`bypass_cache=True` meant "no cache of any kind" — every pass re-expanded every
+in-horizon game. The dashboard path survives the same arithmetic for exactly one
+reason: it expands only games whose list-view hash **moved**. The stated reason
+the scan could not do that was contamination — the two run different classifiers
+(permissive vs strict) over the same games — which is an argument for a separate
+namespace, not for no cache. So: `sport:ladder`, its own `ChangeCache` and
+detail-odds dict.
+
+- freshness bound **2 h**, not the dashboard's 6 h. A ladder anomaly is an
+  alt-line claim, and an unmoved main does not prove an unmoved rung — it only
+  makes it likely. Two hours is ~8 passes: long enough for coverage to build,
+  short enough that nothing on screen is from another session of the board;
+- pruned against the **whole board**, not the in-horizon subset, so a game does
+  not lose its ladder every time the horizon happens not to reach it;
+- a truncated pass now narrows what got **refreshed**, not what is on screen:
+  the tail contributes its cached ladder, or its list-view Odds if it has none
+  yet. Dropping the tail is what deleted the flags.
+
+Cold pass: expensive and partial, as before. Second pass on an unmoved board:
+**zero postbacks, full ladder for every game** (asserted end-to-end, driving the
+real branch against fakes rather than reading the source).
+
+12 more tests, 25 in `tests/test_scan_starvation.py`; 1314 green.

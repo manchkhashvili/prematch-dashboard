@@ -68,16 +68,76 @@ def test_the_ladder_path_checks_every_game_not_every_progress_block():
                for ln in normal.splitlines() if "should_continue" in ln)
 
 
-def test_games_past_the_cut_keep_their_list_view_odds():
+def test_games_past_the_cut_are_not_dropped():
     """A truncated pass REPLACES the snapshot, so dropping the tail outright
-    would delete those games' flags every pass. Their list-view Odds cost
-    nothing — they are already parsed — and keep the board-level checks alive."""
+    deletes those games' flags every pass — which is what the owner saw as
+    "there was plenty of games there and they disappeared". The tail keeps its
+    cached ladder if it has a fresh one, and its already-parsed list-view Odds
+    otherwise."""
     import inspect
     ladder = (inspect.getsource(CB._fetch_for_sport)
               .partition("if bypass_cache:")[2]
               .partition("# ── 3. Cache pruning")[0])
-    stop = ladder.index("not should_continue()")
-    assert "rest.list_odds" in ladder[stop:stop + 900]
+    tail = ladder[ladder.index("stopped_at = i - 1"):]
+    assert "_cached_ladder(rest)" in tail
+    assert "rest.list_odds" in tail
+
+
+# ── the ladder cache ─────────────────────────────────────────────────────────
+
+def test_the_ladder_scan_caches_in_its_own_namespace():
+    """It cannot share the dashboard's: the two run different classifiers
+    (permissive vs strict) over the same games, so one cache would serve each
+    path the other's rows."""
+    assert CB._LADDER_CACHE_NS.format("soccer") == "soccer:ladder"
+    assert CB._LADDER_CACHE_NS.format("soccer") != "soccer"
+    ladder = (__import__("inspect").getsource(CB._fetch_for_sport)
+              .partition("if bypass_cache:")[2]
+              .partition("# ── 3. Cache pruning")[0])
+    assert "_LADDER_CACHE_NS.format(sport_name)" in ladder
+    assert "change_cache.get_cache(lname)" in ladder
+    assert "_get_sport_detail_cache(lname)" in ladder
+
+
+def test_an_unmoved_game_does_not_spend_the_budget():
+    """The whole point. At ~16 s/game a 500-game horizon is a 2.2-hour pass; no
+    budget makes that fit, it only decides how small a prefix you see. Expanding
+    only what MOVED is the same deal the dashboard path has always had, and it
+    is why coverage can accumulate across passes."""
+    ladder = (__import__("inspect").getsource(CB._fetch_for_sport)
+              .partition("if bypass_cache:")[2]
+              .partition("# ── 3. Cache pruning")[0])
+    assert "lcache.needs_expansion(game.event_id, game.loadinfo)" in ladder
+    gate = ladder.index("lcache.needs_expansion")
+    expand = ladder.index("await _expand_game")
+    assert gate < expand, "the cache check must precede the postback"
+    assert "lcache.mark_loaded(game.event_id, game.loadinfo)" in ladder
+    assert "ldetail[game.event_id] = detail_odds" in ladder
+
+
+def test_the_ladder_cache_expires_faster_than_the_dashboard_cache():
+    """A ladder anomaly is an ALT-LINE claim and an unmoved main does not prove
+    an unmoved rung — it only makes it likely. So this cache may not inherit the
+    6-hour bound that exists for a different purpose (surviving restarts)."""
+    assert CB._LADDER_CACHE_MAX_AGE_SEC < CB._STALE_CACHE_MAX_AGE_SEC
+    assert CB._LADDER_CACHE_MAX_AGE_SEC >= 30 * 60, (
+        "shorter than a few scan passes and coverage can never accumulate")
+    ladder = (__import__("inspect").getsource(CB._fetch_for_sport)
+              .partition("if bypass_cache:")[2]
+              .partition("# ── 3. Cache pruning")[0])
+    assert "max_age_sec=_LADDER_CACHE_MAX_AGE_SEC" in ladder
+
+
+def test_the_ladder_cache_is_pruned_against_the_whole_board():
+    """Not against the in-horizon subset — a game must not lose its cached
+    ladder every time the horizon happens not to reach it."""
+    ladder = (__import__("inspect").getsource(CB._fetch_for_sport)
+              .partition("if bypass_cache:")[2]
+              .partition("# ── 3. Cache pruning")[0])
+    prune = ladder.index("lcache.prune_missing(board_ids)")
+    horizon_filter = ladder.index("start_within_hours is not None")
+    assert prune < horizon_filter, (
+        "pruning must happen before `games` is narrowed to the horizon")
 
 
 # ── the budget ───────────────────────────────────────────────────────────────
@@ -90,12 +150,58 @@ def test_the_extra_scan_has_a_wall_clock_budget():
 
 
 def test_the_budget_and_the_switch_are_both_honoured():
-    """The callable the loop builds must go False for EITHER reason."""
+    """Two separate stop conditions, deliberately not merged into one callable:
+    the switch is a predicate the caller owns, the budget is a duration only
+    the scraper can time."""
     import inspect
     src = inspect.getsource(A._anomaly_extra_loop)
     assert 'runtime_config.active("scans", "anomaly_extra")' in src
-    assert "time.monotonic() <" in src
     assert "anomaly_extra_max_sec" in src, "the budget must be runtime-tunable"
+    assert "max_expand_sec=" in src
+
+
+def test_the_budget_is_timed_by_the_scraper_not_the_caller():
+    """The bug in the first cut of this fix. A caller-computed deadline is
+    spent by the two unbounded phases that precede expansion — lock wait, then
+    the league tree. Measured live: soccer reached the expansion loop 889 s
+    after the call under a 240 s caller-side budget and expanded 0 of 500
+    games, while reporting `truncated_at: null` (a clean finish)."""
+    import inspect
+    caller = inspect.getsource(A._anomaly_extra_loop)
+    assert "time.monotonic() + budget" not in caller, (
+        "the caller cannot time a phase it does not start")
+    scraper = inspect.getsource(CB._fetch_for_sport)
+    ladder = scraper.partition("if bypass_cache:")[2].partition("# ── 3. Cache pruning")[0]
+    assert "expand_until = (t_scan0 + max_expand_sec" in ladder, (
+        "the deadline must be anchored to the start of the EXPANSION loop")
+    # ...and t_scan0 must be set after the list refresh, not before the lock.
+    pre = scraper.partition("if bypass_cache:")[0]
+    assert "t_scan0" not in pre
+
+
+def test_a_stop_on_the_very_first_game_is_reported_as_truncation():
+    """`stopped_at or None` mapped a stop at game 1 (stopped_at == 0) to None,
+    i.e. 'ran to completion' — which is exactly how 'expanded 0 of 500' passed
+    for healthy."""
+    ladder = (__import__("inspect").getsource(CB._fetch_for_sport)
+              .partition("if bypass_cache:")[2]
+              .partition("# ── 3. Cache pruning")[0])
+    code = "\n".join(ln for ln in ladder.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert '"truncated_at": stopped_at,' in code
+    assert "stopped_at or None" not in code
+    assert "stopped_at: int | None = None" in code, (
+        "the not-truncated case must be distinguishable from a stop at zero")
+
+
+def test_the_phases_are_timed_separately():
+    """Lock wait, list refresh and expansion have completely different fixes,
+    so one aggregate number cannot tell you which one is hurting."""
+    ladder = (__import__("inspect").getsource(CB._fetch_for_sport)
+              .partition("if bypass_cache:")[2]
+              .partition("# ── 3. Cache pruning")[0])
+    for field in ("wait_sec", "list_sec", "expand_sec"):
+        assert f'"{field}"' in ladder
 
 
 def test_a_deadline_callable_flips_when_it_is_spent():
@@ -148,6 +254,128 @@ def test_expansion_stops_at_the_deadline_and_keeps_the_tail():
     assert len(out) == 100, "every in-horizon game is still represented"
     assert out[0] == "detail-0", "the soonest kickoffs are the ones expanded"
     assert out[-1] == "list-99"
+
+
+# ── the ladder branch, driven for real ───────────────────────────────────────
+
+def _drive_ladder_scan(monkeypatch, games, *, max_expand_sec=None,
+                       expand_cost=0.0, sport_name="soccer"):
+    """Run _fetch_for_sport's ladder branch against fake games, and report
+    which events actually cost a postback."""
+    from src.scrapers.sports import soccer as _soccer
+    expanded: list[str] = []
+
+    async def fake_refresh(*a, **kw):
+        return object(), "<html/>"
+
+    def fake_extract(html, fetched_at, *, sport):
+        return list(games)
+
+    async def fake_expand(game, fetched_at, sport, page, **kw):
+        if expand_cost:
+            await asyncio.sleep(expand_cost)
+        expanded.append(game.event_id)
+        return [f"ladder-{game.event_id}-{len(expanded)}"]
+
+    monkeypatch.setattr(CB, "_refresh_list_html_for_sport", fake_refresh)
+    monkeypatch.setattr(CB, "_extract_games_from_list_html", fake_extract)
+    monkeypatch.setattr(CB, "_expand_game", fake_expand)
+
+    odds = asyncio.run(CB._fetch_for_sport(
+        _soccer, headed=False, force_detail=True, bypass_cache=True,
+        classify_override=None, max_expand_sec=max_expand_sec))
+    return odds, expanded
+
+
+class _FakeGame:
+    def __init__(self, i, *, loadinfo="v1"):
+        from datetime import datetime, timedelta, timezone
+        self.event_id = f"E{i}"
+        self.home, self.away = f"H{i}", f"A{i}"
+        self.start_time = datetime.now(tz=timezone.utc) + timedelta(hours=1 + i)
+        self.list_odds = [f"list-{self.event_id}"]
+        self.loadinfo = loadinfo
+
+
+@pytest.fixture(autouse=True)
+def _clean_ladder_cache():
+    from src.scrapers import change_cache
+    ns = CB._LADDER_CACHE_NS.format("soccer")
+    change_cache.reset_cache(ns)
+    CB._sport_detail_odds_caches.pop(ns, None)
+    CB._last_ladder_scan.clear()
+    yield
+    change_cache.reset_cache(ns)
+    CB._sport_detail_odds_caches.pop(ns, None)
+    CB._last_ladder_scan.clear()
+
+
+def test_an_unmoved_board_costs_nothing_on_the_second_pass(monkeypatch):
+    """The measured fix for coverage. Pass 1 pays for every game; pass 2 pays
+    for none of them, and still returns a full ladder for all of them."""
+    games = [_FakeGame(i) for i in range(6)]
+    odds1, exp1 = _drive_ladder_scan(monkeypatch, games)
+    assert exp1 == [g.event_id for g in games], "cold pass expands everything"
+    assert len(odds1) == 6
+
+    odds2, exp2 = _drive_ladder_scan(monkeypatch, games)
+    assert exp2 == [], "an unmoved board must not cost a single postback"
+    assert len(odds2) == 6, "and must still yield a ladder for every game"
+    assert odds2 == odds1, "served from cache, so byte-identical"
+    assert CB._last_ladder_scan["soccer"]["cached"] == 6
+
+
+def test_only_the_game_whose_mains_moved_is_re_expanded(monkeypatch):
+    games = [_FakeGame(i) for i in range(6)]
+    before, _ = _drive_ladder_scan(monkeypatch, games)
+    games[3].loadinfo = "v2"          # this one's list-view odds changed
+    after, expanded = _drive_ladder_scan(monkeypatch, games)
+    assert expanded == ["E3"]
+    assert len(after) == 6
+    changed = {b for b, a in zip(before, after) if b != a}
+    assert changed == {"ladder-E3-4"}, (
+        "exactly the moved game gets a fresh ladder; the other five are served "
+        f"unchanged from cache (got {changed})")
+
+
+def test_a_truncated_pass_still_returns_the_whole_horizon(monkeypatch):
+    """"There was plenty of games there and they disappeared." A pass that runs
+    out of budget must narrow what got REFRESHED, not what is on screen."""
+    games = [_FakeGame(i) for i in range(8)]
+    _drive_ladder_scan(monkeypatch, games)            # warm the cache
+    for g in games:
+        g.loadinfo = "v2"                             # force re-expansion
+    odds, expanded = _drive_ladder_scan(
+        monkeypatch, games, max_expand_sec=0.05, expand_cost=0.02)
+
+    assert 0 < len(expanded) < 8, "the budget must bite, and not instantly"
+    st = CB._last_ladder_scan["soccer"]
+    assert st["truncated_at"] == len(expanded)
+    assert len(odds) == 8, "every in-horizon game is still represented"
+    assert sum(1 for o in odds if o.startswith("ladder-")) == 8, (
+        "the tail keeps its cached ladder rather than falling back to mains")
+
+
+def test_a_cold_truncated_pass_falls_back_to_list_odds(monkeypatch):
+    """With no cache to fall back on there is nothing better than the mains —
+    but the games must still appear, not vanish."""
+    games = [_FakeGame(i) for i in range(8)]
+    odds, expanded = _drive_ladder_scan(
+        monkeypatch, games, max_expand_sec=0.05, expand_cost=0.02)
+    assert 0 < len(expanded) < 8
+    assert len(odds) == 8
+    assert any(o.startswith("list-") for o in odds)
+
+
+def test_the_ladder_cache_does_not_leak_into_the_dashboard_cache(monkeypatch):
+    """Different classifiers over the same games. One cache would serve each
+    path the other's rows."""
+    from src.scrapers import change_cache
+    games = [_FakeGame(i) for i in range(3)]
+    _drive_ladder_scan(monkeypatch, games)
+    assert CB._get_sport_detail_cache("soccer:ladder"), "ladder cache populated"
+    assert not CB._get_sport_detail_cache("soccer"), "dashboard cache untouched"
+    assert not change_cache.get_cache("soccer").entries
 
 
 # ── the cost is reportable ───────────────────────────────────────────────────

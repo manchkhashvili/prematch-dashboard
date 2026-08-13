@@ -224,6 +224,50 @@ The sweep could not be aborted by the Config-tab switch, by a global pause, or
 by anything else. The horizon was the only bound, and a horizon bounds *how many
 games*, not *how long the rest of the board waits*.
 
+### The per-game cost is ~16 s, not 0.85 s
+
+The first cut of the fix put the deadline in the **caller**, and the next pass
+proved that wrong in a way worth keeping:
+
+| sport | started | published | total | expand | in horizon | expanded |
+|---|---|---|---|---|---|---|
+| soccer | 08:41:02 | 08:55:51 | 889 s | **0.0 s** | 500 | **0** |
+| tennis | 08:55:51 | 09:05:38 | 586 s | **0.0 s** | 266 | **0** |
+| americanfootball | 09:05:38 | 09:09:44 | 247 s | 229.4 s | 20 | 13 |
+
+A caller cannot time this call. Two unbounded phases run before the expansion
+loop — waiting for the sport lock behind another CB task, then refreshing the
+whole league tree — and soccer spent **889 s** in them. The 240 s budget was
+gone before the first postback, so the loop broke at game 1 and expanded
+nothing. `max_expand_sec` is now a scraper-side parameter whose clock starts at
+the expansion loop, and the three phases are reported separately (`wait_sec`,
+`list_sec`, `expand_sec`) because they have completely different fixes.
+
+The AF row is the useful one: **229.4 s for 14 games = ~16 s per game.** The
+`~0.85 s/game` in the old code comments is off by a factor of ~19, and the
+reason is the fact at the top of this document — an `ExpandDetail` re-renders
+the **entire loaded panel**, and the ladder scan loads every league. So the
+scan pays a whole-board render plus an html5lib parse per game.
+
+At 16 s/game a 500-game soccer horizon is a **2.2-hour** pass. No wall-clock
+budget makes that fit; a budget only decides how small a prefix you see. The
+main dashboard path survives the same arithmetic for exactly one reason: it
+expands only games whose list-view hash **moved**. The scan now gets the same
+deal — its own change/detail cache under a `sport:ladder` namespace (it cannot
+share the dashboard's, since the two run different classifiers over the same
+games), with a **2 h** freshness bound rather than the dashboard's 6 h, because
+a ladder anomaly is an alt-line claim and an unmoved main only makes an unmoved
+rung *likely*.
+
+Consequences:
+
+- the cold pass is expensive and partial; later passes re-expand only what
+  moved, so **coverage accumulates across passes** instead of resetting to the
+  nearest N every time;
+- a truncated pass narrows what got **refreshed**, not what is on screen — the
+  tail keeps its cached ladder, or its list-view Odds if it has no cache yet.
+  Dropping the tail is what made flagged games disappear from the tab.
+
 ### The rule
 
 **Horizon says how much is worth scanning; a wall-clock budget says how long
@@ -247,3 +291,11 @@ Two consequences worth knowing:
 `/api/anomalies` → `extra.cost` reports per sport what the horizon actually
 bought: `in_horizon`, `expanded`, `truncated_at`, `sec`. Anything that costs
 minutes of a shared lock should have to say so.
+
+### Not persisted, deliberately
+
+`cache_persistence` saves named sports, so the `:ladder` namespaces are not
+written to disk. A restart therefore costs one cold pass per sport — which is
+the honest behaviour: the 2 h freshness bound would drop most of a restored
+cache anyway, and a restored ladder that looked fresh would be the exact failure
+this whole entry is about.
