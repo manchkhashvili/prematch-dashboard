@@ -378,6 +378,123 @@ def test_the_ladder_cache_does_not_leak_into_the_dashboard_cache(monkeypatch):
     assert not change_cache.get_cache("soccer").entries
 
 
+# ── a re-verified game must STAY re-verified ─────────────────────────────────
+
+def test_a_re_pull_is_written_back_to_the_cache(monkeypatch):
+    """Owner: "why we have like 4h old arbs if we recheck them constantly".
+
+    Because rechecking did not stick. `fetch_crystalbet_games` re-expanded the
+    game and merged fresh rows into _state, but never touched the change/detail
+    cache — so the next full cycle found the list-view hash unchanged, served
+    the SAME cached detail rows the re-pull had just disproved, and replaced the
+    slot wholesale. Measured live: a tennis game whose 4 edges all evaporated on
+    a fresh price (rows_before 4 -> rows_after 0) would have had all four back,
+    still stamped with their original 4h30m-old fetched_at, within one cycle.
+    """
+    from src.scrapers import change_cache
+    from src.scrapers.sports import tennis as _tennis
+
+    game = _FakeGame(1)
+    change_cache.reset_cache("tennis")
+    CB._sport_detail_odds_caches.pop("tennis", None)
+    # The board is in the state the bug needs: a cached ladder from hours ago,
+    # and a list-view hash that has not moved since.
+    CB._get_sport_detail_cache("tennis")[game.event_id] = ["STALE"]
+
+    async def fake_refresh(*a, **kw):
+        return object(), "<html/>"
+
+    monkeypatch.setattr(CB, "_refresh_list_html_for_sport", fake_refresh)
+    monkeypatch.setattr(CB, "_extract_games_from_list_html",
+                        lambda html, fa, *, sport: [game])
+
+    async def fake_expand(g, fetched_at, sport, page, **kw):
+        return ["FRESH"]
+
+    monkeypatch.setattr(CB, "_expand_game", fake_expand)
+
+    out = asyncio.run(CB.fetch_crystalbet_games(
+        "tennis", [game.event_id], permissive=False, label="opportunity re-verify"))
+    assert out == ["FRESH"]
+
+    # The next full cycle must not be able to resurrect the stale rows.
+    assert CB._get_sport_detail_cache("tennis")[game.event_id] == ["FRESH"]
+    entry = change_cache.get_cache("tennis").entries.get(game.event_id)
+    assert entry is not None and entry.last_expanded_at is not None
+    assert not change_cache.get_cache("tennis").needs_expansion(
+        game.event_id, game.loadinfo), (
+        "hash unchanged, so the next cycle serves cache — which must now be the "
+        "fresh rows")
+
+    change_cache.reset_cache("tennis")
+    CB._sport_detail_odds_caches.pop("tennis", None)
+
+
+def test_the_write_back_respects_the_classifier_namespaces(monkeypatch):
+    """Strict rows belong to the dashboard's cache, ladder_mode rows to the
+    scan's. Crossing them is the contamination the namespaces exist for."""
+    from src.scrapers import change_cache
+    game = _FakeGame(2)
+
+    async def fake_refresh(*a, **kw):
+        return object(), "<html/>"
+
+    async def fake_expand(g, fetched_at, sport, page, **kw):
+        return ["LADDER"]
+
+    monkeypatch.setattr(CB, "_refresh_list_html_for_sport", fake_refresh)
+    monkeypatch.setattr(CB, "_extract_games_from_list_html",
+                        lambda html, fa, *, sport: [game])
+    monkeypatch.setattr(CB, "_expand_game", fake_expand)
+
+    # basketball, because it is the sport that HAS a permissive classifier —
+    # tennis has none (_ANOMALY_SPORT_TABLE maps it to None), so a permissive
+    # call for tennis raises rather than silently downgrading to strict.
+    for ns in ("basketball", "basketball:ladder"):
+        change_cache.reset_cache(ns)
+        CB._sport_detail_odds_caches.pop(ns, None)
+
+    asyncio.run(CB.fetch_crystalbet_games(
+        "basketball", [game.event_id], permissive=True, label="watch"))
+    assert CB._get_sport_detail_cache("basketball:ladder") == {game.event_id: ["LADDER"]}
+    assert not CB._get_sport_detail_cache("basketball"), (
+        "permissive rows must never land in the strict dashboard cache")
+
+    for ns in ("basketball", "basketball:ladder"):
+        change_cache.reset_cache(ns)
+        CB._sport_detail_odds_caches.pop(ns, None)
+
+
+def test_a_failed_re_expansion_does_not_poison_the_cache(monkeypatch):
+    """An expansion that returns nothing is not evidence the markets changed —
+    it must leave the previous cached rows alone rather than marking the game
+    loaded with no data."""
+    from src.scrapers import change_cache
+    game = _FakeGame(3)
+    change_cache.reset_cache("tennis")
+    CB._sport_detail_odds_caches.pop("tennis", None)
+    CB._get_sport_detail_cache("tennis")[game.event_id] = ["PREVIOUS"]
+
+    async def fake_refresh(*a, **kw):
+        return object(), "<html/>"
+
+    async def fake_expand(g, fetched_at, sport, page, **kw):
+        return []
+
+    monkeypatch.setattr(CB, "_refresh_list_html_for_sport", fake_refresh)
+    monkeypatch.setattr(CB, "_extract_games_from_list_html",
+                        lambda html, fa, *, sport: [game])
+    monkeypatch.setattr(CB, "_expand_game", fake_expand)
+
+    out = asyncio.run(CB.fetch_crystalbet_games(
+        "tennis", [game.event_id], permissive=False, label="opportunity re-verify"))
+    assert out == game.list_odds
+    assert CB._get_sport_detail_cache("tennis")[game.event_id] == ["PREVIOUS"]
+
+    change_cache.reset_cache("tennis")
+    CB._sport_detail_odds_caches.pop("tennis", None)
+
+
 # ── the cost is reportable ───────────────────────────────────────────────────
 
 def test_the_sweep_records_what_the_horizon_cost():

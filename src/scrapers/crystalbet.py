@@ -1516,6 +1516,10 @@ async def fetch_crystalbet_games(
     shares the sport-lock with every other CB task so it can never interleave
     with a running full cycle.
 
+    A successful re-expansion is written back into the cache matching this
+    call's classifier, so the next full cycle serves the fresh rows instead of
+    re-serving the stale ones this call was spent disproving.
+
     `permissive` picks the classifier, and it matters:
       True  (ladder_mode) — the anomaly watch loop, which wants every 2-way
             ladder rung regardless of title phrasing.
@@ -1534,6 +1538,22 @@ async def fetch_crystalbet_games(
                 else sport.classify_market_title)
     sport_id = sport.SPORT_ID
     fetched_at = datetime.now(tz=timezone.utc)
+    # Write the fresh rows back into the cache whose CLASSIFIER matches, so the
+    # re-pull survives the next cycle. Without this the loop was a no-op with
+    # extra steps: it re-expanded the game and merged fresh rows into _state,
+    # then the next full cycle found the list-view hash unchanged, served the
+    # SAME cached detail rows the re-pull had just disproved, and replaced the
+    # slot wholesale. Measured 2026-08-13 — a tennis game whose 4 edges all
+    # evaporated on a fresh price (rows_before 4 → rows_after 0) would have had
+    # all four back, still stamped with their original 4h30m-old `fetched_at`,
+    # within one cycle. That is the "4-hour-old arb we recheck constantly".
+    #
+    # Strict rows belong to the dashboard's cache; ladder_mode rows belong to
+    # the scan's. Crossing them is the contamination the two namespaces exist
+    # to prevent.
+    ns = _LADDER_CACHE_NS.format(sport_name) if permissive else sport_name
+    wb_cache = change_cache.get_cache(ns)
+    wb_detail = _get_sport_detail_cache(ns)
     sport_lock = _get_sport_lock(sport_id)
     async with sport_lock:
         page, list_html = await _refresh_list_html_for_sport(
@@ -1550,6 +1570,9 @@ async def fetch_crystalbet_games(
                     g, fetched_at, sport, page, classify=classify,
                     ladder_mode=permissive, use_http=_ANOMALY_USE_HTTP,
                 )
+                if detail:
+                    wb_detail[g.event_id] = detail
+                    wb_cache.mark_loaded(g.event_id, g.loadinfo)
                 out.extend(detail if detail else g.list_odds)
             except Exception as e:
                 log.warning("%s re-scan expand failed for %s (%s vs %s): %s",

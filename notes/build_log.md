@@ -5440,3 +5440,39 @@ Cold pass: expensive and partial, as before. Second pass on an unmoved board:
 real branch against fakes rather than reading the source).
 
 12 more tests, 25 in `tests/test_scan_starvation.py`; 1314 green.
+
+### And a third: rechecking did not stick
+
+Owner, on a CB tennis ARB showing `4h30m`: *"why we have like 4h old arbs if we
+recheck them constantly"*. The loop was finally running by then and answered the
+first half itself — `rows_before: 4, rows_after: 0`, all four edges on that game
+evaporated on a fresh price. But the age was real, and the reason it could reach
+4h30m is a separate defect.
+
+**Where a 4h30m price comes from.** Not a slow cycle — CB tennis was cycling
+every ~10 min. The dashboard path serves *cached detail rows* for any game whose
+list-view hash has not moved, up to `_STALE_CACHE_MAX_AGE_SEC` = **6 hours**, and
+cached rows correctly keep the `fetched_at` of the cycle they were EXPANDED in.
+So a game CB has not repriced in 4.5 h shows a 4.5-hour-old ladder. That part is
+working as designed and is honestly reported.
+
+**Why rechecking never fixed it.** `fetch_crystalbet_games` re-expanded the game
+and merged fresh rows into `_state` — and never touched the change/detail cache.
+So the next full cycle found the hash unchanged, served the same cached rows the
+re-pull had just disproved, and replaced the slot wholesale. The re-verify loop
+was a no-op with extra steps: it spent a postback proving an edge false, and the
+cache put the edge straight back, still stamped with its original age.
+
+Fix: a successful re-expansion writes back into the cache whose CLASSIFIER
+matches the call — strict → the dashboard's, `ladder_mode` → the scan's
+`sport:ladder`. Crossing them is exactly the contamination the two namespaces
+exist to prevent. An expansion returning nothing writes nothing: no data is not
+evidence the markets changed, so the previous rows stand.
+
+Latent, found while testing and left alone deliberately: `fetch_crystalbet_games`
+with `permissive=True` raises for tennis, which has no permissive classifier
+(`_ANOMALY_SPORT_TABLE` maps it to `None`). Only basketball's watch loop calls
+that path today. Better a visible crash than a silent downgrade to the strict
+classifier, which would quietly write strict rows under a ladder key.
+
+3 more tests, 28 in `tests/test_scan_starvation.py`; 1317 green.
