@@ -65,6 +65,7 @@ import logging
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -499,11 +500,37 @@ _init_count: int = 0                     # browser inits across the process life
 _REINIT_EVERY_N_CYCLES = 50  # ~4 hours at the default 5-min cadence
 
 
+# Last ladder (bypass_cache) sweep per sport, so the cost of the anomaly-scan
+# horizon is REPORTABLE instead of invisible. Raising the horizon in the Config
+# tab used to have no visible price until the board silently wedged.
+_last_ladder_scan: dict[str, dict] = {}
+
+
 def _get_sport_lock(sport_id: int) -> asyncio.Lock:
     """Return (creating if needed) the per-sport refresh lock."""
     if sport_id not in _sport_locks:
         _sport_locks[sport_id] = asyncio.Lock()
     return _sport_locks[sport_id]
+
+
+def sport_busy(sport_name: str) -> bool:
+    """Is another CB task mid-cycle on this sport's page?
+
+    Every CB task serialises on the per-sport lock, so `await`ing it is an
+    unbounded wait behind whatever holds it — a full ladder sweep is minutes.
+    Callers that have something better to do (the opportunity re-verify loop
+    moving on to the next sport) probe this and skip rather than queue.
+    """
+    sport = _SPORT_MODULES.get(sport_name)
+    if sport is None:
+        return False
+    lock = _sport_locks.get(sport.SPORT_ID)
+    return bool(lock and lock.locked())
+
+
+def last_ladder_scan_stats() -> dict[str, dict]:
+    """Per-sport cost of the most recent full-ladder sweep (see _last_ladder_scan)."""
+    return {k: dict(v) for k, v in _last_ladder_scan.items()}
 
 
 async def _ensure_browser_singleton(*, headed: bool) -> None:
@@ -1116,6 +1143,7 @@ async def _fetch_for_sport(
         # guarantees the ladders are current each scan. Falls back to list-view
         # Odds for any game that fails to expand.
         if bypass_cache:
+            t_scan0 = time.monotonic()
             # Horizon filter (2026-07-11): a FULL soccer expansion is ~956
             # games x ~0.85s = ~14 min while HOLDING the sport lock — the
             # extra-sport anomaly scan never completed a pass. Ladder
@@ -1133,7 +1161,30 @@ async def _fetch_for_sport(
                 games = in_h
             all_odds: list[Odds] = []
             n_ok = n_fail = 0
+            stopped_at = 0
             for i, game in enumerate(games, 1):
+                # Cooperative abort — the normal path has had this for a while
+                # and this path did not, which made the sweep UNSTOPPABLE: the
+                # `should_continue` the anomaly loops already pass was accepted
+                # and then never called here. Measured 2026-08-13: the extra
+                # scan held the soccer lock for 47 min straight (476 games at a
+                # 48 h horizon), during which the CB soccer PRICE poll, the
+                # opportunity re-verify loop and the tennis/AF scans all queued
+                # behind it and none of them ran once.
+                #
+                # Checked every game rather than every _PROGRESS_LOG_EVERY: a
+                # soccer expansion is ~6 s, so a 25-game granularity overshoots
+                # a deadline by two and a half minutes. The callable is a clock
+                # read; calling it once per postback costs nothing.
+                if should_continue is not None and not should_continue():
+                    stopped_at = i - 1
+                    log.info("CB %s anomaly-scan expansion STOPPED at %d/%d "
+                             "(budget spent or switched off) — remaining games "
+                             "keep their list-view Odds",
+                             sport_name, stopped_at, len(games))
+                    for rest in games[i - 1:]:
+                        all_odds.extend(rest.list_odds)
+                    break
                 if i % _PROGRESS_LOG_EVERY == 0:
                     log.info(
                         "CB %s anomaly-scan expansion: %d/%d (expanded=%d, fallback=%d)",
@@ -1157,6 +1208,14 @@ async def _fetch_for_sport(
                     )
                     all_odds.extend(game.list_odds)
                     n_fail += 1
+            _last_ladder_scan[sport_name] = {
+                "at": fetched_at.isoformat(),
+                "in_horizon": len(games),
+                "expanded": n_ok,
+                "fallback": n_fail,
+                "truncated_at": stopped_at or None,
+                "sec": round(time.monotonic() - t_scan0, 1),
+            }
             log.info(
                 "CB %s anomaly-scan cycle complete: %d expanded, %d fallback → %d Odds",
                 sport_name, n_ok, n_fail, len(all_odds),

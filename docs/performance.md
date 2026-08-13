@@ -181,3 +181,69 @@ yet. `s(conc10)` is the realistic poller figure (these books are stateless GETs;
 concurrency scales near-linearly — watch for rate limits). Practical read:
 extended for Lider (and Betlive) is ~free at sane concurrency; doing it for CB is
 what actually costs — so the cache or a longer CB extended cadence is the lever.
+
+---
+
+## The per-sport lock: why a wide scan horizon stops a sport dead
+
+Measured on the live dashboard **2026-08-13**, after `anomaly_extra_horizon_h`
+was raised 12 → 48 in the Config tab.
+
+Every CrystalBet task serialises on a **per-sport `asyncio.Lock`**
+(`crystalbet._sport_locks`). That is correct — the ASP.NET page carries per-
+session viewstate and two interleaved `ExpandDetail` postbacks on the same page
+corrupt each other. The consequence is that lock hold time is not a scraper
+detail, it is the **sport's whole scheduling budget**:
+
+| holder | what queues behind it |
+|---|---|
+| ladder/anomaly sweep (`bypass_cache`) | the price poll, the opportunity re-verify loop, the next scan |
+
+A 48 h horizon on soccer is **476 games** in horizon against 135 at the 12 h
+default (counted from the live CB board). The sweep held the soccer lock for
+**47 minutes** and had not finished. In that window:
+
+- CB soccer ran **one** price cycle in four hours (`poll_cycles`: 07:29, then
+  nothing) while basketball/tennis/AF cycled normally — every soccer row on the
+  Arbs tab was a **43-minute-old** price scored against a 10-minute-old Pinnacle
+  fair, which is drift reported as edge;
+- the opportunity re-verify loop — whose entire job is to re-pull exactly those
+  rows — blocked on the same lock and reported `at: null` after an hour of
+  uptime, having never completed a pass;
+- `_anomaly_extra_loop` walks its sports **in order**, so tennis and american
+  football were never reached: `extra.sports == []`, and the Anomalies tab was
+  empty for two sports that were working fine.
+
+One knob, three symptoms, none of them pointing at the knob.
+
+### What made it unbounded
+
+`_fetch_for_sport`'s `bypass_cache` branch **accepted a `should_continue`
+callable and never called it** (the normal branch had checked it for months).
+The sweep could not be aborted by the Config-tab switch, by a global pause, or
+by anything else. The horizon was the only bound, and a horizon bounds *how many
+games*, not *how long the rest of the board waits*.
+
+### The rule
+
+**Horizon says how much is worth scanning; a wall-clock budget says how long
+everything else may be made to wait for it.** `ANOMALY_EXTRA_MAX_SEC` (default
+240 s, runtime-tunable as `limits.anomaly_extra_max_sec`) now bounds each sport's
+pass. Games are expanded soonest-kickoff first, so a truncated pass is the useful
+prefix, and games past the cut keep their already-parsed list-view Odds rather
+than vanishing from the snapshot.
+
+Two consequences worth knowing:
+
+- **A horizon wider than the budget can reach is a no-op**, not a hazard. Both
+  select the same soonest-N games; the horizon just stops being the thing that
+  decides N. Leaving it at 48 h is fine.
+- **An aborted sweep must not publish.** Now that the sweep *can* stop early,
+  hitting Pause mid-sweep would otherwise overwrite a good snapshot with the
+  stump it got as far as — emptying the tab as a side effect of pausing. Both
+  scan loops keep the previous snapshot when they were switched off mid-flight;
+  only budget truncation publishes.
+
+`/api/anomalies` → `extra.cost` reports per sport what the horizon actually
+bought: `in_horizon`, `expanded`, `truncated_at`, `sec`. Anything that costs
+minutes of a shared lock should have to say so.

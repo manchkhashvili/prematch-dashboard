@@ -133,6 +133,7 @@ back to the env-seeded defaults.
 | `OPP_REVERIFY_SEC`         | 120           | Re-pull CB detail for the games currently showing an opportunity, so an edge is confirmed on a fresh price. `0` disables. See "Stale prices" below. |
 | `OPP_REVERIFY_MAX_GAMES`   | 25            | Cap on the re-verify shortlist (edge-sorted, so the biggest claims are kept). |
 | `OPP_REVERIFY_MIN_EDGE`    | 3.0           | Only re-pull games whose edge is worth acting on. |
+| `ANOMALY_EXTRA_MAX_SEC`    | 240           | Wall-clock budget per sport per ladder-scan pass. The scan holds the CB **per-sport lock**, so this is what stops a wide `anomaly_extra_horizon_h` from wedging the sport's price poll and re-verify loop (measured: 47 min, see `docs/performance.md`). Games are expanded soonest-kickoff first; the rest keep their list-view Odds. Live as `limits.anomaly_extra_max_sec`. |
 | `PINNACLE_POLL_SEC`        | 60            | Pinnacle poll cadence per sport. |
 | `CRYSTALBET_POLL_SEC`      | 60            | CrystalBet poll cadence per sport (was 180 in the Playwright era; a browser-free list cycle is ~1-2s). |
 | `CB_TRANSPORT`             | http          | CB byte-mover: `http` (browser-free ASP.NET postbacks via curl_cffi — ~10× faster detail, no Chromium) or `playwright` (browser, escape hatch if CB changes the postback protocol). Same data either way — parity-verified 2026-06-12 and re-verified 2026-07-28 (soccer 1017/1017 games + 311/311 markets, basketball 515/515, zero structural diffs): `scripts/cb_parity_check.py`. Note the browser path resolves DNS itself and so bypasses the `dns_pin` fix in `cb_http.py`. |
@@ -419,6 +420,16 @@ The re-verify merge replaces a re-pulled event **wholesale** rather than merging
 row by row, so a line the book has since pulled disappears instead of surviving
 as the stalest row on the page. An event whose re-pull returns nothing keeps its
 old rows — an expansion failure is not evidence the markets are gone.
+
+**If `Age` is stuck in the tens of minutes on CB rows, the loop is being
+starved, not misconfigured.** Every CB task serialises on a per-sport lock, and
+the ladder/anomaly sweep holds it for its whole pass — measured 2026-08-13, a
+48 h `anomaly_extra_horizon_h` held the soccer lock for 47 minutes, during which
+CB soccer ran one price cycle in four hours and this loop never completed a
+single pass (`opp_reverify.at: null`). The loop now **probes** `sport_busy()` and
+skips a busy sport for that tick (`skipped_busy` in the same status block)
+instead of queueing behind it, and the sweep itself is bounded by
+`ANOMALY_EXTRA_MAX_SEC`. Full account in `docs/performance.md`.
 
 ## Edge math
 

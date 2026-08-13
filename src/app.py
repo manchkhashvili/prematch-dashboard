@@ -76,6 +76,7 @@ from src.scrapers.crystalbet import (
     fetch_crystalbet_basketball_prematch,
     fetch_crystalbet_soccer_prematch,
     fetch_crystalbet_tennis_prematch,
+    last_ladder_scan_stats as _cb_last_ladder_scan_stats,
     get_detail_status_map,
     get_last_expanded_map,
     parse_html as parse_cb_html,
@@ -469,6 +470,24 @@ ANOMALY_EXTRA_HORIZON_H = float(os.environ.get("ANOMALY_EXTRA_HORIZON_H", "12"))
 ANOMALY_EXTRA_HORIZON_H_BY_SPORT = {
     "americanfootball": float(os.environ.get("ANOMALY_AF_HORIZON_H", "240")),
 }
+# Wall-clock budget per sport per pass. The horizon alone does NOT bound this
+# scan's cost, and the scan holds the CB per-sport lock for its whole duration —
+# so an over-wide horizon does not merely scan more, it stops the sport dead.
+#
+# Measured 2026-08-13, with anomaly_extra_horizon_h raised to 48 h in the Config
+# tab: 476 soccer games in horizon (vs 135 at the 12 h default), ~6 s each, and
+# the sweep held the soccer lock for 47 minutes without finishing. In that
+# window CB soccer prices ran ONE cycle (07:29, then nothing), the opportunity
+# re-verify loop never completed a single pass, and the tennis/AF scans — which
+# the loop reaches only after soccer returns — never started at all. The Arbs
+# tab was pricing 45-minute-old CB against 10-minute-old Pinnacle, and the
+# Anomalies tab was empty because two of three sports had never been scanned.
+#
+# The horizon says how MUCH is worth scanning; this says how long the rest of
+# the board is allowed to wait for it. Games are expanded soonest-kickoff first,
+# so a truncated pass is the useful prefix, and the games past the cut keep
+# their list-view Odds rather than vanishing from the snapshot.
+ANOMALY_EXTRA_MAX_SEC = float(os.environ.get("ANOMALY_EXTRA_MAX_SEC", "240"))
 _ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS",
                                     "soccer,tennis,americanfootball")
 # CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
@@ -1254,6 +1273,16 @@ async def _compute_anomalies() -> bool:
             _anomalies_error = str(e)[:200]
         return False
 
+    # The sweep is abortable now (crystalbet honours should_continue on the
+    # ladder path, which it silently ignored before). An abort returns a PARTIAL
+    # board, and publishing that would empty the tab as a side effect of hitting
+    # Pause — so a scan that was switched off mid-flight keeps the last good
+    # snapshot instead of overwriting it with its own stump.
+    if not runtime_config.active("scans", "anomaly"):
+        log.info("anomaly scan: switched off mid-sweep — keeping the previous "
+                 "snapshot rather than publishing a partial board")
+        return False
+
     anoms = find_ladder_anomalies(cb_odds, markets=ANOMALY_MARKETS, min_pct=0.0)
     rows = [_anomaly_base_row(a) for a in anoms]
     coverage = _coverage_stats(cb_odds)
@@ -1523,6 +1552,9 @@ async def _anomaly_extra_loop():
             continue
         for sport in sports:
             try:
+                budget = runtime_config.num("limits", "anomaly_extra_max_sec",
+                                            ANOMALY_EXTRA_MAX_SEC)
+                deadline = time.monotonic() + budget if budget > 0 else None
                 odds = await fetch_crystalbet_anomaly_ladders(
                     sport, headed=not CB_HEADLESS,
                     start_within_hours=horizon.capped_hours(
@@ -1530,8 +1562,20 @@ async def _anomaly_extra_loop():
                             sport,
                             runtime_config.num("limits", "anomaly_extra_horizon_h",
                                                ANOMALY_EXTRA_HORIZON_H))),
-                    should_continue=lambda: runtime_config.active(
-                        "scans", "anomaly_extra"))
+                    # Two ways to stop: the Config-tab switch, and the wall-clock
+                    # budget. Both matter — this scan holds the sport's CB lock,
+                    # so "run until done" means "block the sport until done".
+                    should_continue=lambda dl=deadline: (
+                        runtime_config.active("scans", "anomaly_extra")
+                        and (dl is None or time.monotonic() < dl)))
+                # Budget truncation is expected and publishable (the pass is the
+                # soonest-kickoff prefix, and the tail kept its list-view Odds).
+                # Being switched OFF mid-sweep is not: keep the last snapshot
+                # rather than replacing it with a stump.
+                if not runtime_config.active("scans", "anomaly_extra"):
+                    log.info("extra anomaly scan %s: switched off mid-sweep — "
+                             "keeping the previous snapshot", sport)
+                    break
                 anoms = find_ladder_anomalies(odds, markets=ANOMALY_MARKETS, min_pct=0.0)
                 rows = [_anomaly_base_row(a) for a in anoms]
                 ts = datetime.now(tz=timezone.utc)
@@ -1655,6 +1699,7 @@ async def _opportunity_reverify_loop():
     """Re-pull CB detail for the games currently showing an opportunity, so an
     edge is confirmed against a fresh price before it is acted on."""
     from src.scrapers.crystalbet import fetch_crystalbet_games
+    from src.scrapers.crystalbet import sport_busy as cb_sport_busy
 
     log.info("opportunity re-verify loop ENABLED — every %ds, up to %d games, "
              "edges >= %.1f%%", OPP_REVERIFY_SEC, OPP_REVERIFY_MAX_GAMES,
@@ -1676,13 +1721,31 @@ async def _opportunity_reverify_loop():
                     ids = by_sport.setdefault(sp, [])
                     if eid not in ids:
                         ids.append(eid)          # opps are edge-sorted already
-            if not by_sport:
-                continue
-
+            # Stamped BEFORE the work and published unconditionally below, so a
+            # loop that had nothing to do reads as "ran, found nothing" rather
+            # than as a dead loop. `at: null` after an hour of uptime was the
+            # only visible symptom of the lock starvation this loop hit, and it
+            # was indistinguishable from the loop never having been started.
             stats = {"at": datetime.now(tz=timezone.utc).isoformat(),
-                     "games": 0, "rows_before": 0, "rows_after": 0, "sports": {}}
+                     "games": 0, "rows_before": 0, "rows_after": 0,
+                     "candidates": sum(len(v) for v in by_sport.values()),
+                     "skipped_busy": [], "sports": {}}
             for sport, ids in by_sport.items():
                 if sport not in SPORT_NAMES:
+                    continue
+                # Do not QUEUE behind a running CB sweep. Everything CB
+                # serialises on a per-sport lock, so awaiting a busy sport is an
+                # unbounded wait — measured 2026-08-13, a ladder sweep held the
+                # soccer lock for 47 min and this loop, which blocks on the
+                # first sport in the dict, never completed a single pass in an
+                # hour of uptime. Skipping keeps the other sports moving; the
+                # next tick is 120 s away and the stale rows are still flagged
+                # by their Age column meanwhile.
+                if cb_sport_busy(sport):
+                    log.info("opportunity re-verify %s: CB busy (sweep in "
+                             "flight) — skipping %d games this tick",
+                             sport, len(ids))
+                    stats["skipped_busy"].append(sport)
                     continue
                 ids = ids[:OPP_REVERIFY_MAX_GAMES]
                 before = sum(1 for o in opps
@@ -2394,6 +2457,12 @@ async def api_anomalies(
             "scan_sec": runtime_config.secs("anomaly_extra_sec", ANOMALY_EXTRA_SEC),
             "computed_at": dict(_extra_anom_at),
             "errors": dict(_extra_anom_error),
+            # What the horizon actually cost, per sport: games in horizon, how
+            # many got expanded, where the budget cut the pass. Without this the
+            # only feedback from widening the horizon is the board going quiet.
+            "cost": _cb_last_ladder_scan_stats(),
+            "max_sec": runtime_config.num("limits", "anomaly_extra_max_sec",
+                                          ANOMALY_EXTRA_MAX_SEC),
         },
         "count": len(rows),
         "anomalies": rows,

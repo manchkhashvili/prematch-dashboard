@@ -5282,3 +5282,94 @@ Blocked on `MarketType = Literal["moneyline","spread","total","team_total","htft
 Scheme A also carries `To win 1st set & win the match`, which is P(1/1) and
 would bring the htft dominance/correlation bounds to the 71% of matches lacking
 `1st Set / Match`.
+
+---
+
+## 2026-08-13 — one lock, three symptoms: the scan that stopped a sport
+
+Owner: *"anomalies are almost empty after 30min run, and also why do we have 40
+min age games if we refresh that games having 3%+ arbs"*. Two questions, one
+cause.
+
+### What was actually happening
+
+`data/runtime_config.json` had `anomaly_extra_horizon_h: 48.0` (raised from the
+12 h default in the Config tab). On the live CB soccer board that is **476 games
+in horizon against 135** — counted from `ticks.db`:
+
+| horizon | CB soccer games |
+|---|---|
+|  6 h |  19 |
+| 12 h | 135 |
+| 24 h | 159 |
+| 48 h | **476** |
+| 7 d  | 1327 |
+
+The extra ladder scan expands all of them **while holding the per-sport CB
+lock**, and it had been holding the soccer lock for **47 minutes** without
+finishing. Everything CB-soccer queues on that lock:
+
+- `poll_cycles` — CB soccer: **1 cycle in 4 hours** (07:29:04, then nothing),
+  against basketball 17, tennis 5, AF 19 in the same window. `/api/status` had
+  CB soccer at `age_sec: 2800` while every other book sat at 130–330 s;
+- `/api/opportunities?book=cb` — 15 rows, **all 15 at `age_sec: 2587`**, one
+  timestamp, because they are all from that single 07:29 sweep. The screenshot's
+  38m42s rows were exactly this: a 43-minute-old CB price scored against a
+  10-minute-old Pinnacle fair, with the drift between them reported as edge;
+- `opp_reverify.at: null` — the re-verify loop, whose whole job is to re-pull
+  those rows, awaits the same lock and had **never completed a pass** in an hour
+  of uptime. It iterates sports in dict order and soccer came first, so nothing
+  else got re-verified either;
+- `extra.sports: []`, `extra.computed_at: {}` — `_anomaly_extra_loop` walks
+  `[soccer, tennis, americanfootball]` **in order**, so tennis and AF were never
+  reached. The Anomalies tab held 1 anomaly (crocobet) and 3 consistency flags
+  (2 cb from the 07:25 basketball scan, 1 liderbet) because two of the three
+  extra sports had never been scanned once.
+
+### Why it could not stop
+
+`_fetch_for_sport`'s `bypass_cache` branch **accepted `should_continue` and
+never called it.** The normal branch has checked it on the progress boundary for
+months; the ladder branch — the one that holds the lock for minutes — did not.
+The sweep was unstoppable by the Config-tab switch, by a global pause, or by
+anything else. Both anomaly loops were already passing the callable in good
+faith.
+
+That is also why the wedge could not be cleared from the UI: switching
+`anomaly_extra` off does nothing to the in-flight sweep.
+
+### The fix
+
+- **The ladder path honours `should_continue`**, checked **every game** rather
+  than every `_PROGRESS_LOG_EVERY`. A CB soccer ladder expansion is seconds, so
+  25-game granularity overshoots a deadline by minutes. The normal path keeps
+  the cheaper boundary, where an iteration is a cache hit.
+- **`ANOMALY_EXTRA_MAX_SEC`** (default 240 s, runtime `limits.anomaly_extra_max_sec`):
+  a wall-clock budget per sport per pass, layered on the same callable. The
+  horizon bounds how many games are worth scanning; it never bounded how long
+  the rest of the board waits for them.
+- **Games past the cut keep their list-view Odds.** A truncated pass replaces
+  the snapshot, so dropping the tail would delete those games' flags every pass;
+  the rows are already parsed and cost nothing.
+- **An aborted sweep does not publish.** Now that the sweep can stop early,
+  hitting Pause mid-sweep would overwrite a good snapshot with its stump —
+  emptying the tab as a side effect of pausing. Both loops keep the previous
+  snapshot when switched off mid-flight. Budget truncation still publishes:
+  soonest-kickoff-first ordering makes the prefix the useful part.
+- **The re-verify loop probes instead of queueing** — `crystalbet.sport_busy()`,
+  and a busy sport is skipped for this tick (recorded as `skipped_busy`) so one
+  wedged sport cannot starve the others. It also **always stamps `at`** now: a
+  tick that found nothing to do reads as "ran, found nothing" instead of being
+  indistinguishable from a loop that was never started, which is precisely how
+  this hid.
+- **The cost is reportable** — `/api/anomalies` → `extra.cost` gives per sport
+  `in_horizon / expanded / truncated_at / sec`. Raising the horizon had no
+  visible price until the board went quiet.
+
+### The part worth keeping
+
+A horizon **wider** than the budget can reach is now a no-op rather than a
+hazard — both select the same soonest-N games, the horizon just stops being what
+decides N. `anomaly_extra_horizon_h: 48` can stay as it is.
+
+13 new tests (`tests/test_scan_starvation.py`); **1302 green**.
