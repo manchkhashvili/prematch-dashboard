@@ -109,9 +109,11 @@ LIMITS: dict[str, tuple] = {
     # soccer has a game that big. The FLOOR defaults OFF — it was justified on
     # ladder rungs, but the 50-300 band carries an HT/FT grid in a third of
     # games, so a floor cut into the consistency checks for 2.9% of the cost.
+    # Ceiling ships at 500 -> 480 games / 376s. Raise to 900 for 1293 games /
+    # 951s and 6x the HT/FT coverage; 811 games sit in one band at 700-900.
     # 0 disables that side. See docs/performance.md.
     "anomaly_min_markets": (lambda: _env_float("ANOMALY_MIN_MARKETS", 0.0), 0.0, 100000.0),
-    "anomaly_max_markets": (lambda: _env_float("ANOMALY_MAX_MARKETS", 1000.0), 0.0, 100000.0),
+    "anomaly_max_markets": (lambda: _env_float("ANOMALY_MAX_MARKETS", 500.0), 0.0, 100000.0),
     "setanta_detail_hours":    (lambda: _env_float("SETANTA_DETAIL_HOURS", 24.0), 1.0, 240.0),
     "crocobet_detail_hours":   (lambda: _env_float("CROCOBET_DETAIL_HOURS", 24.0), 1.0, 240.0),
 }

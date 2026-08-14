@@ -5576,3 +5576,62 @@ files, live `runtime_config.json` untouched), but the process died and had to be
 restarted by hand. Smoke instances get killed by PID from `lsof -t` now.
 
 35 new tests (18 sport-toggle, 17 band); 1352 green.
+
+### Same day, later: ceiling to 500, and a gradual pass
+
+Owner: *"lets drop it to 500 and add in configs to change that number"*, then
+*"can it go with low numbers to high and push that anomalies/flags gradually"*.
+
+The knob already existed (`limits.anomaly_max_markets`, live on the Config tab);
+what was missing was the information needed to use it, because **the ceiling is
+not a smooth control**. The soccer board is not smoothly distributed:
+
+    band          games   share   htft
+    0-50             95    5.2%    0/6
+    50-300          281   15.4%    2/6
+    300-500         104    5.7%    6/6
+    500-700           2    0.1%    6/6
+    700-900         811   44.4%    6/6   <- 44% of the board, one band
+    900-1000         25    1.4%    6/6
+    1000-1500       223   12.2%    6/6
+    1500-2000         3    0.2%    6/6
+    2000+           281   15.4%    6/6
+
+811 games — 44 % — sit at 700-900 markets, all carrying an HT/FT grid, all
+expanding in 0.75 s. They are the cheapest rungs on the board, and every ceiling
+below 700 drops them in one step:
+
+    ceiling   kept   sweep    games w/ HT/FT
+        500    480    376 s    104  ( 7.2 %)   <- shipped
+        700    482    378 s    106  ( 7.3 %)
+        900   1293    951 s    917  (63.3 %)
+       1000   1318   1021 s    942  (65.0 %)
+        off   1825   2232 s   1449  (  100 %)
+
+So 500 and 700 cost the same, and 900 costs 3x for 6x the HT/FT coverage. 500
+shipped as asked, with that table written next to the constant, in the config
+docstring AND in the Config tab's own description text — the knob is only useful
+if the cliff is visible where you turn it.
+
+**Gradual**, two changes:
+
+  * **cheapest-first ordering.** Was soonest-kickoff-first; now ascending market
+    count. Safe *because* of the ceiling — everything still in scope expands in
+    ~0.70-0.75 s, so the cost spread the kickoff ordering protected against is
+    gone, and kickoff proximity is served by scanning often (the ladder cache
+    makes repeat passes cheap) rather than by ordering. Games with no badge sort
+    last: unknown cost, and CB omits the badge when every extra market is
+    locked.
+  * **progressive publish.** `on_progress` fires every 25 games with the odds so
+    far; the loop recomputes anomalies + flags and publishes them mid-pass,
+    carrying `first_seen` exactly as the final publish does so a flag found at
+    game 25 does not look newly-found on every callback. `/api/anomalies` gains
+    `extra.progress` = `{done, total}` per sport. A throwing callback is caught
+    and logged — publishing is a convenience and must not kill a scan.
+
+Note for whoever reads this next: **changing a default in code does not change a
+running install.** Saved config wins over defaults by design, so the owner's
+`data/runtime_config.json` keeps `anomaly_max_markets: 2000` until it is changed
+in the Config tab. The new defaults only apply to keys the file has never seen.
+
+1361 green.

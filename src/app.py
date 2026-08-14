@@ -737,6 +737,9 @@ _extra_anomalies: dict[str, list[dict]] = {}
 _extra_anom_odds: dict[str, list] = {}
 _extra_anom_consistency: dict[str, list[dict]] = {}
 _extra_anom_at: dict[str, str] = {}
+# Live progress of the in-flight ladder pass, so the Anomalies tab can say
+# "142/509 games" instead of leaving a partial snapshot looking complete.
+_extra_anom_progress: dict[str, dict] = {}
 _extra_anom_error: dict[str, str] = {}
 
 
@@ -1601,6 +1604,35 @@ async def _anomaly_extra_loop():
             if not runtime_config.sport_active(sport):
                 continue          # per-sport master switch
             try:
+                # Publish partway through, so a minutes-long pass fills the tab
+                # steadily instead of landing as one lump at the end (owner:
+                # "push that anomalies/flags gradually"). Combined with the
+                # cheapest-first ordering in the scraper, the early callbacks
+                # already carry the bulk of the board.
+                #
+                # `first_seen` is carried through each partial exactly as the
+                # final publish does, so a flag that appears at 25 games keeps
+                # its original timestamp when the pass completes rather than
+                # looking newly-found on every callback.
+                async def _progress(partial, done, total, _sport=sport):
+                    if not runtime_config.active("scans", "anomaly_extra"):
+                        return
+                    p_rows = [_anomaly_base_row(a) for a in find_ladder_anomalies(
+                        partial, markets=ANOMALY_MARKETS, min_pct=0.0)]
+                    p_ts = datetime.now(tz=timezone.utc)
+                    p_flags = _merge_flag_first_seen(
+                        [_consistency_to_dict(f) for f in find_consistency_flags(partial)],
+                        _extra_anom_consistency.get(_sport, []), p_ts.isoformat())
+                    async with _state_lock:
+                        _extra_anom_odds[_sport] = partial
+                        _extra_anomalies[_sport] = p_rows
+                        _extra_anom_consistency[_sport] = p_flags
+                        _extra_anom_at[_sport] = p_ts.isoformat()
+                        _extra_anom_progress[_sport] = {"done": done, "total": total}
+                    log.info("extra anomaly scan %s: %d/%d games — %d anomalies, "
+                             "%d flags so far", _sport, done, total,
+                             len(p_rows), len(p_flags))
+
                 odds = await fetch_crystalbet_anomaly_ladders(
                     sport, headed=not CB_HEADLESS,
                     start_within_hours=horizon.capped_hours(
@@ -1623,7 +1655,8 @@ async def _anomaly_extra_loop():
                     min_markets=int(runtime_config.num(
                         "limits", "anomaly_min_markets", 0)),
                     max_markets=int(runtime_config.num(
-                        "limits", "anomaly_max_markets", 1000)))
+                        "limits", "anomaly_max_markets", 500)),
+                    on_progress=_progress)
                 # Budget truncation is expected and publishable (the pass is the
                 # soonest-kickoff prefix, and the tail kept its list-view Odds).
                 # Being switched OFF mid-sweep is not: keep the last snapshot
@@ -1647,6 +1680,7 @@ async def _anomaly_extra_loop():
                     _extra_anomalies[sport] = rows
                     _extra_anom_consistency[sport] = flags + soft
                     _extra_anom_at[sport] = ts.isoformat()
+                    _extra_anom_progress[sport] = {"done": None, "total": None}
                     _extra_anom_error.pop(sport, None)
                 log.info("extra anomaly scan %s: %d odds, %d anomalies, %d flags",
                          sport, len(odds), len(rows), len(flags) + len(soft))
@@ -2536,6 +2570,7 @@ async def api_anomalies(
             # many got expanded, where the budget cut the pass. Without this the
             # only feedback from widening the horizon is the board going quiet.
             "cost": _cb_last_ladder_scan_stats(),
+            "progress": dict(_extra_anom_progress),
             "max_sec": runtime_config.num("limits", "anomaly_extra_max_sec",
                                           ANOMALY_EXTRA_MAX_SEC),
         },

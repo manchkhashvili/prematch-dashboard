@@ -786,11 +786,30 @@ _LADDER_CACHE_NS = "{}:ladder"
 #     >1000            509      1211 s (54%)  1021 s   <- default
 #      >800            941      1553 s (70%)   679 s
 #
-# 1000 is the owner's call and the knee of the curve: it halves the sweep, and
-# it touches NOTHING else — basketball's biggest game is under 1000 markets, and
-# tennis and american football have no game above 500 at all. A global ceiling
-# is therefore a soccer-only filter in practice, which is exactly what was asked
-# for, with no per-sport override to keep in sync.
+# The ceiling is a TUNING knob, not a constant — `limits.anomaly_max_markets`
+# on the Config tab, live, no restart. It ships at 500 (owner's call). What it
+# costs and buys, on the real soccer distribution:
+#
+#     ceiling   games kept   sweep    games w/ an HT/FT grid
+#         500          480    376 s     104   ( 7.2 %)   <- shipped
+#         700          482    378 s     106   ( 7.3 %)
+#         900         1293    951 s     917   (63.3 %)
+#        1000         1318   1021 s     942   (65.0 %)
+#        2000         1546   1353 s    1170   (80.7 %)
+#         off         1825   2232 s    1449   (  100 %)
+#
+# The board is NOT smoothly distributed and the knob is not smooth either: 811
+# games — 44 % of it — sit in one band at 700-900 markets, every one carrying an
+# HT/FT grid, every one expanding in 0.75 s. They are the cheapest rungs on the
+# board. Any ceiling below 700 drops all of them at once, which is why 500 and
+# 700 cost the same and 900 costs three times as much for six times the HT/FT
+# coverage. Raise this to 900 if the Anomalies tab looks thin on htft_combo /
+# htft_fair; that is the one number that changes the shape.
+#
+# It touches nothing outside soccer either way — basketball's biggest game is
+# under 1000 markets and tennis/AF have nothing above 500 — so a global ceiling
+# is a soccer-only filter in practice, with no per-sport override to keep in
+# sync.
 #
 # THE FLOOR IS OFF BY DEFAULT, and that is a correction rather than an omission.
 # It was justified on ladder rungs alone — but consistency checks need no ladder,
@@ -812,7 +831,7 @@ _LADDER_CACHE_NS = "{}:ladder"
 # 0 on either bound disables that side. The band applies ONLY to the ladder
 # scan; the dashboard price path expands on its own horizon and is untouched.
 _LADDER_MIN_MARKETS = 0
-_LADDER_MAX_MARKETS = 1000
+_LADDER_MAX_MARKETS = 500
 # Tighter than the dashboard's 6 h. A ladder anomaly is an ALT-LINE claim, and
 # an unmoved main does not prove an unmoved rung — it only makes it likely. Two
 # hours is ~8 scan passes: long enough for coverage to build, short enough that
@@ -1174,6 +1193,7 @@ async def _fetch_for_sport(
     should_continue: Any = None, expand_within_hours: float | None = None,
     max_expand_sec: float | None = None,
     min_markets: int | None = None, max_markets: int | None = None,
+    on_progress: Any = None,
 ) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
@@ -1295,10 +1315,29 @@ async def _fetch_for_sport(
                 cutoff = fetched_at + timedelta(hours=start_within_hours)
                 in_h = [g for g in games
                         if g.start_time is not None and g.start_time <= cutoff]
-                in_h.sort(key=lambda g: g.start_time)
                 log.info("CB %s anomaly scan horizon %.0fh: %d/%d games",
                          sport_name, start_within_hours, len(in_h), len(games))
                 games = in_h
+
+            # CHEAPEST FIRST (owner, 2026-08-14: "can it go with low numbers to
+            # high and push that anomalies/flags gradually"). Ordering by market
+            # count ascending rather than by kickoff, because with a budget the
+            # order decides what a truncated pass contains, and cheapest-first
+            # maximises the number of games examined per pass — which is what
+            # makes flags appear steadily instead of in one lump at the end.
+            #
+            # This replaces soonest-kickoff-first, and the reason that is safe
+            # now is the ceiling: every game still in scope expands in ~0.70-
+            # 0.75 s, so the spread the kickoff ordering was protecting against
+            # no longer exists. Kickoff proximity is served by scanning often
+            # (the ladder cache makes repeat passes cheap), not by ordering.
+            #
+            # Games with no badge sort LAST: unknown cost, and CB omits the
+            # badge when every extra market is locked, so there is usually
+            # nothing to expand there anyway.
+            games.sort(key=lambda g: (g.market_count if g.market_count is not None
+                                      else 10 ** 9,
+                                      g.start_time or fetched_at))
 
             # Market-count band (see _LADDER_MIN_MARKETS). Applied AFTER the
             # horizon and before the budget, because it is the filter that makes
@@ -1388,6 +1427,19 @@ async def _fetch_for_sport(
                         "(expanded=%d, cached=%d, fallback=%d)",
                         sport_name, i, len(games), n_ok, n_cached, n_fail,
                     )
+                    # Publish what we have so far. A soccer pass is minutes
+                    # long and used to land as one lump at the end; with
+                    # cheapest-first ordering the early rows are already the
+                    # bulk of the board, so the tab fills steadily instead.
+                    if on_progress is not None:
+                        try:
+                            await on_progress(
+                                list(all_odds) + [o for rest in games[i:]
+                                                  for o in (_cached_ladder(rest) or [])],
+                                i, len(games))
+                        except Exception:
+                            log.exception("CB %s scan progress callback failed",
+                                          sport_name)
                 # Unmoved mains → serve the cached ladder and spend the budget
                 # on a game that actually changed.
                 if not lcache.needs_expansion(game.event_id, game.loadinfo):
@@ -1586,6 +1638,7 @@ async def fetch_crystalbet_anomaly_ladders(
     start_within_hours: float | None = None, should_continue: Any = None,
     max_expand_sec: float | None = None,
     min_markets: int | None = None, max_markets: int | None = None,
+    on_progress: Any = None,
 ) -> list[Odds]:
     """Full-detail anomaly scrape for ANY supported sport (2026-07-11 —
     the scan was basketball-only before). Same semantics as the basketball
@@ -1603,6 +1656,7 @@ async def fetch_crystalbet_anomaly_ladders(
         start_within_hours=start_within_hours, should_continue=should_continue,
         max_expand_sec=max_expand_sec,
         min_markets=min_markets, max_markets=max_markets,
+        on_progress=on_progress,
     )
 
 

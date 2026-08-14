@@ -198,15 +198,35 @@ def test_the_floor_is_off_by_default():
     assert rc.LIMITS["anomaly_min_markets"][0]() == 0.0
 
 
-def test_htft_bearing_games_survive_the_defaults(monkeypatch):
-    """A game in the 50-300 band — where a third carry an HT/FT grid — must be
-    expanded under the shipped defaults, not banded out."""
-    games = [_G(0, 60), _G(1, 250), _G(2, 900), _G(3, 1200)]
+def test_small_games_survive_the_defaults(monkeypatch):
+    """The floor being off is what protects these. A third of the 50-300 band
+    carries an HT/FT grid, and the owner had seen a +2 game raise a flag —
+    nothing at the small end may be dropped."""
+    games = [_G(0, 2), _G(1, 60), _G(2, 250), _G(3, 480)]
     _, expanded = _run(monkeypatch, games,
                        min_markets=CB._LADDER_MIN_MARKETS,
                        max_markets=CB._LADDER_MAX_MARKETS)
-    assert expanded == ["E0", "E1", "E2"], (
-        "small and mid games must all still be expanded; only >1000 is dropped")
+    assert expanded == ["E0", "E1", "E2", "E3"], "no floor means no floor"
+
+
+def test_the_shipped_ceiling_drops_the_700_900_band(monkeypatch):
+    """Stated plainly because it is the cost of 500 rather than an accident:
+    44% of the soccer board sits at 700-900 markets and every one of those games
+    carries an HT/FT grid. At 500 they are all skipped — HT/FT coverage goes
+    from 65% of games to 7.2%. Raising `limits.anomaly_max_markets` to 900 is
+    the documented way back, live and without a restart."""
+    games = [_G(0, 480), _G(1, 777), _G(2, 839), _G(3, 1200)]
+    odds, expanded = _run(monkeypatch, games,
+                          min_markets=CB._LADDER_MIN_MARKETS,
+                          max_markets=CB._LADDER_MAX_MARKETS)
+    assert expanded == ["E0"]
+    assert CB._last_ladder_scan["soccer"]["skipped_big"] == 3
+    # ...but they are still on the board via their list-view rows.
+    assert {"list-1", "list-2", "list-3"} <= set(odds)
+
+    _, expanded_900 = _run(monkeypatch, games, min_markets=0, max_markets=900)
+    assert expanded_900 == ["E0", "E1", "E2"], (
+        "900 is the setting that brings the HT/FT band back")
 
 
 def test_the_band_is_applied_after_the_horizon_and_before_the_budget():
@@ -223,13 +243,39 @@ def test_the_band_is_applied_after_the_horizon_and_before_the_budget():
 
 
 def test_the_defaults_match_what_was_measured():
-    """Ceiling 1000 is the knee: soccer 2232s -> 1021s (-54%), and it touches
-    no other sport — basketball's biggest game is under 1000 markets and
-    tennis/AF have nothing above 500."""
+    """Ceiling ships at 500 — 480 soccer games, a 376s sweep. Owner's call with
+    the trade-off table in hand; see test_the_ceiling_is_not_a_smooth_knob."""
     assert CB._LADDER_MIN_MARKETS == 0
-    assert CB._LADDER_MAX_MARKETS == 1000
+    assert CB._LADDER_MAX_MARKETS == 500
     from src import runtime_config as rc
-    assert rc.LIMITS["anomaly_max_markets"][0]() == 1000.0
+    assert rc.LIMITS["anomaly_max_markets"][0]() == 500.0
+    assert rc.LIMITS["anomaly_max_markets"][1] == 0.0, "0 must stay allowed (= off)"
+
+
+def test_the_ceiling_is_not_a_smooth_knob():
+    """The one thing anyone tuning this needs to know, kept next to the number
+    rather than in a doc. 811 soccer games — 44% of the board — sit in a single
+    band at 700-900 markets, all carrying an HT/FT grid, all expanding in 0.75s.
+    Every ceiling below 700 drops all of them at once:
+
+        ceiling   kept   sweep   games w/ HT/FT
+            500    480    376s    104  ( 7.2%)
+            700    482    378s    106  ( 7.3%)
+            900   1293    951s    917  (63.3%)
+           1000   1318   1021s    942  (65.0%)
+
+    So 500 and 700 cost the same, and 900 costs 3x for 6x the HT/FT coverage.
+    """
+    from pathlib import Path
+    from src import app as A
+    doc = Path(CB.__file__).read_text()
+    assert "811" in doc and "700-900" in doc, (
+        "the cliff must be documented AT the constant — a bare 500 reads as a "
+        "smooth knob and it is not")
+    html = (Path(A.__file__).resolve().parent.parent / "static" / "config.html").read_text()
+    assert "anomaly_max_markets" in html
+    assert "700" in html and "900" in html, (
+        "the tuning table belongs on the page where tuning happens")
 
 
 def test_the_band_is_runtime_tunable():
@@ -250,3 +296,64 @@ def test_the_price_path_is_untouched(monkeypatch):
               .partition("# ── 3. Cache pruning")[2])
     assert "market_count" not in normal
     assert "n_small" not in normal
+
+
+# ── gradual: cheapest first, published as it goes ────────────────────────────
+
+def test_games_are_expanded_cheapest_first(monkeypatch):
+    """Owner: "can it go with low numbers to high and push that anomalies/flags
+    gradually". Ordering by market count ascending maximises the games examined
+    per pass, which is what makes flags appear steadily rather than in one lump.
+
+    This replaces soonest-kickoff-first, and the ceiling is what makes that
+    safe: every game still in scope expands in ~0.70-0.75s, so the cost spread
+    the kickoff ordering protected against no longer exists."""
+    games = [_G(0, 480, hours=1), _G(1, 60, hours=9), _G(2, 300, hours=5)]
+    _, expanded = _run(monkeypatch, games, min_markets=0, max_markets=500,
+                       start_within_hours=48)
+    assert expanded == ["E1", "E2", "E0"], "ascending market count, not kickoff"
+
+
+def test_a_game_with_no_badge_is_expanded_last(monkeypatch):
+    """Unknown cost, and CB omits the badge when every extra market is locked —
+    so there is usually nothing there. Last, but never dropped."""
+    games = [_G(0, None, hours=1), _G(1, 400, hours=9)]
+    _, expanded = _run(monkeypatch, games, min_markets=0, max_markets=500,
+                       start_within_hours=48)
+    assert expanded == ["E1", "E0"]
+
+
+def test_partial_results_are_published_during_the_pass(monkeypatch):
+    """A soccer pass is minutes long. Without this the tab shows nothing at all
+    until it finishes, then everything at once."""
+    seen = []
+
+    async def on_progress(partial, done, total):
+        seen.append((done, total, len(partial)))
+
+    games = [_G(i, 100 + i) for i in range(60)]
+    _run(monkeypatch, games, min_markets=0, max_markets=500,
+         on_progress=on_progress)
+    assert seen, "no progress callback fired across 60 games"
+    assert [d for d, _, _ in seen] == [25, 50], "fires on the progress boundary"
+    assert all(t == 60 for _, t, _ in seen)
+    assert seen[0][2] < seen[1][2], "each publish carries strictly more rows"
+
+
+def test_a_failing_progress_callback_cannot_break_the_scan(monkeypatch):
+    """Publishing is a convenience. A scan that dies because a UI-facing
+    callback threw would be a bad trade."""
+    async def boom(partial, done, total):
+        raise RuntimeError("nope")
+
+    games = [_G(i, 100 + i) for i in range(30)]
+    odds, expanded = _run(monkeypatch, games, min_markets=0, max_markets=500,
+                          on_progress=boom)
+    assert len(expanded) == 30, "the pass must complete regardless"
+
+
+def test_the_scan_reports_live_progress():
+    from src import app as A
+    import inspect
+    assert "_extra_anom_progress" in inspect.getsource(A._anomaly_extra_loop)
+    assert '"progress": dict(_extra_anom_progress)' in inspect.getsource(A)
