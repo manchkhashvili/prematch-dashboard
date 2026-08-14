@@ -772,22 +772,47 @@ _LADDER_CACHE_NS = "{}:ladder"
 #     900-2000      236       1.46   0.62      29        19.9
 #     2000+         271       3.12   2.07      43        13.8
 #
-# Two separate findings, and the floor was not in the original idea:
-#   * below ~50 markets a game has NO ladder at all — 99 games returning zero
-#     usable rungs, which is pure spend;
-#   * above 2000 an expand costs 4.2x the 300-900 band for 1.5x the rungs.
+# THE CEILING is where the value is. From 7421 historical ladder anomalies
+# across 67 leagues, the top 10 leagues are 75% of all of them and every one is
+# a minor competition (New Zealand NBL, Brazil LDB U22, Lebanon, Rwanda, Vietnam
+# VBA...); genuine top-tier fixtures account for 9 rows, 0.12%. Big games are the
+# most expensive to expand and the least likely to be wrong.
 #
-# And the yield argument, from 7421 historical ladder anomalies across 67
-# leagues: the top 10 leagues are 75% of all of them and every one is a minor
-# competition (New Zealand NBL, Brazil LDB U22, Lebanon, Rwanda, Vietnam VBA...).
-# Genuine top-tier fixtures account for 9 rows — 0.12%. Big games are the most
-# expensive to expand and the least likely to be wrong, which is the whole
-# reason a band beats a budget here.
+# Exact soccer figures (1827 games with a badge, full sweep ~2232 s):
+#
+#     ceiling   games skipped   saved        sweep
+#     >2000            282       880 s (39%)  1353 s
+#     >1500            285       884 s (40%)  1348 s
+#     >1000            509      1211 s (54%)  1021 s   <- default
+#      >800            941      1553 s (70%)   679 s
+#
+# 1000 is the owner's call and the knee of the curve: it halves the sweep, and
+# it touches NOTHING else — basketball's biggest game is under 1000 markets, and
+# tennis and american football have no game above 500 at all. A global ceiling
+# is therefore a soccer-only filter in practice, which is exactly what was asked
+# for, with no per-sport override to keep in sync.
+#
+# THE FLOOR IS OFF BY DEFAULT, and that is a correction rather than an omission.
+# It was justified on ladder rungs alone — but consistency checks need no ladder,
+# and the owner had seen a "+2" game raise a flag. Re-measured per band on what
+# the CONSISTENCY checks actually consume:
+#
+#     band        games   rungs   htft   periods w/1X2   markets
+#     0-20           83       0    0/6               1         1
+#     20-50          14       6    0/6               1         8
+#     50-300        284       9    2/6               2        11
+#     300-900       911      29    6/6               2        44
+#
+# The 50-300 band carries an HT/FT grid in a third of games, so a floor at 50
+# was cutting into htft_combo / htft_fair. And the floor was never worth much:
+# 64 s of a 2232 s soccer sweep, 2.9 %. Tennis and AF save more of their own
+# (25 % / 37 %) but both already finish inside the budget, so it buys nothing
+# there either. Wrong trade, removed — the knob stays for anyone who wants it.
 #
 # 0 on either bound disables that side. The band applies ONLY to the ladder
 # scan; the dashboard price path expands on its own horizon and is untouched.
-_LADDER_MIN_MARKETS = 50
-_LADDER_MAX_MARKETS = 2000
+_LADDER_MIN_MARKETS = 0
+_LADDER_MAX_MARKETS = 1000
 # Tighter than the dashboard's 6 h. A ladder anomaly is an ALT-LINE claim, and
 # an unmoved main does not prove an unmoved rung — it only makes it likely. Two
 # hours is ~8 scan passes: long enough for coverage to build, short enough that
@@ -1282,14 +1307,17 @@ async def _fetch_for_sport(
             # historical anomalies. A game with no "+N" badge is KEPT — an
             # unknown count must not silently drop a fixture.
             n_small = n_big = 0
+            banded_out: list[Any] = []
             if lo_mk > 0 or hi_mk > 0:
                 kept = []
                 for g in games:
                     n = g.market_count
                     if n is not None and lo_mk > 0 and n < lo_mk:
                         n_small += 1
+                        banded_out.append(g)
                     elif n is not None and hi_mk > 0 and n > hi_mk:
                         n_big += 1
+                        banded_out.append(g)
                     else:
                         kept.append(g)
                 if n_small or n_big:
@@ -1299,6 +1327,14 @@ async def _fetch_for_sport(
                              len(kept), n_small, n_big, len(games))
                 games = kept
             all_odds: list[Odds] = []
+            # A banded-out game is not EXPANDED, but it is not erased either:
+            # its list-view Odds are already parsed and cost nothing, and they
+            # carry the FT 1X2 and main total that several consistency checks
+            # read. Skipping the expansion is a cost decision; dropping the
+            # game outright would be a coverage regression, and "don't go
+            # backwards" is the whole constraint on this filter.
+            for g in banded_out:
+                all_odds.extend(g.list_odds)
             n_ok = n_fail = n_cached = 0
             stopped_at: int | None = None
             # The clock starts HERE. Lock-wait and the list refresh precede this

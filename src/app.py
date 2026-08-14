@@ -1621,9 +1621,9 @@ async def _anomaly_extra_loop():
                     # Market-count band — the filter that makes the budget go
                     # further rather than just cutting it off sooner.
                     min_markets=int(runtime_config.num(
-                        "limits", "anomaly_min_markets", 50)),
+                        "limits", "anomaly_min_markets", 0)),
                     max_markets=int(runtime_config.num(
-                        "limits", "anomaly_max_markets", 2000)))
+                        "limits", "anomaly_max_markets", 1000)))
                 # Budget truncation is expected and publishable (the pass is the
                 # soonest-kickoff prefix, and the tail kept its list-view Odds).
                 # Being switched OFF mid-sweep is not: keep the last snapshot

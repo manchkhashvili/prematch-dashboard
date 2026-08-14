@@ -2,17 +2,20 @@
 
 Owner: "can we somehow skip big games in anomalies that have like 300+ positions
 on expanded versions? anyway its obscure games that have some anomalies and lags
-and nothing is in big ones".
+and nothing is in big ones" — then, on the first cut of this filter: "what is
+too small? do you consider consistency flags too? cause there was +2 event that
+fired it before, also htfts are mostly usefull make sure you dont go backwards".
 
-Both halves of that check out, and the filter is free because CB already tells
-us the count before we pay for an expand — the "+N" badge rides on the very div
-that triggers it:
+The second message corrected the first cut, and the correction is the point of
+this file. The filter is free either way because CB already tells us the count
+before we pay for an expand — the "+N" badge rides on the very div that triggers
+it:
 
     <div class="x_loop_game_active_add"
          onclick='DoGamesPostBack("ExpandDetail:2996090402")'>+4489</div>
 
-COST, measured live on the soccer board (1831 games carrying a badge), by
-expanding a sample per band and counting the ladder rungs a check can use:
+THE CEILING is where the value is. Cost per band, measured live by expanding a
+sample and counting the ladder rungs a check can use:
 
     band        games   sec/game     MB   rungs   rungs/sec
     0-50           99       0.70   0.03       0         0.0
@@ -21,20 +24,40 @@ expanding a sample per band and counting the ladder rungs a check can use:
     900-2000      236       1.46   0.62      29        19.9
     2000+         271       3.12   2.07      43        13.8
 
-YIELD, from 7421 historical ladder anomalies across 67 leagues: the top 10
-leagues are 75% of all of them and every one is a minor competition (New Zealand
-NBL, Brazil LDB U22, Lebanon, Rwanda, Vietnam VBA...). Genuine top-tier
-fixtures account for 9 rows — 0.12%. Big games are the most expensive to expand
-and the least likely to be wrong.
+Exact soccer savings (1827 games with a badge, full sweep ~2232 s):
 
-The floor was NOT part of the original idea and is worth as much: below ~50
-markets a game has no alt-line ladder at all, so those 99 games were pure spend
-returning zero usable rungs.
+    ceiling   skipped   saved         sweep
+    >2000        282     880 s (39%)   1353 s
+    >1000        509    1211 s (54%)   1021 s   <- shipped
+     >800        941    1553 s (70%)    679 s
 
-Effect on a full sweep, live per sport (estimated from the measured per-band
-costs): soccer 1877 -> 1507 games, 2201s -> 1287s (-42%); tennis 187 -> 140,
-131s -> 98s; americanfootball 170 -> 107, 120s -> 75s; basketball 65 -> 56.
-Only soccer has any game above the ceiling — elsewhere the floor does the work.
+1000 halves the soccer sweep and touches nothing else: basketball's biggest game
+is under 1000 markets, and tennis and american football have nothing above 500.
+A global ceiling is a soccer-only filter in practice.
+
+And the yield argument holds — of 7421 historical ladder anomalies across 67
+leagues the top 10 are 75% and every one is a minor competition (New Zealand
+NBL, Brazil LDB U22, Lebanon, Rwanda, Vietnam VBA...); genuine top-tier fixtures
+are 9 rows, 0.12%.
+
+THE FLOOR IS OFF. The first cut set it to 50 on the strength of ladder rungs
+alone, which was the wrong measurement — consistency checks need no ladder.
+Re-measured on what they actually consume:
+
+    band        games   rungs   htft   periods w/1X2   markets
+    0-20           83       0    0/6               1         1
+    20-50          14       6    0/6               1         8
+    50-300        284       9    2/6               2        11
+    300-900       911      29    6/6               2        44
+
+The 50-300 band carries an HT/FT grid in a third of games, so a floor at 50 was
+cutting into htft_combo / htft_fair — for 64 s of a 2232 s sweep, 2.9%. Tennis
+and AF save more of their own (25% / 37%) but already finish inside the budget,
+so it buys nothing there either.
+
+A banded-out game also keeps its list-view Odds now. Not expanded is not the
+same as erased: those rows are already parsed, and they carry the FT 1X2 and
+main total that several consistency checks read.
 """
 from __future__ import annotations
 
@@ -154,13 +177,36 @@ def test_zero_disables_each_side_independently(monkeypatch):
     assert exp == ["E0", "E1", "E2"], "both off = the old behaviour"
 
 
-def test_skipped_games_do_not_appear_at_all(monkeypatch):
-    """Unlike a budget truncation, a banded-out game is not in scope for this
-    scan — it must not contribute list-view rows either, or the snapshot grows
-    with exactly the games we decided not to look at."""
+def test_a_skipped_game_keeps_its_list_view_odds(monkeypatch):
+    """Not expanded is not the same as erased. Owner pushed back on exactly
+    this: consistency checks need no ladder, and dropping the game outright
+    would take its FT 1X2 and main total off the board too. Those rows are
+    already parsed, so keeping them costs nothing."""
     games = [_G(0, 2), _G(1, 800), _G(2, 6661)]
-    odds, _ = _run(monkeypatch, games, min_markets=50, max_markets=2000)
-    assert odds == ["ladder-E1"]
+    odds, expanded = _run(monkeypatch, games, min_markets=50, max_markets=2000)
+    assert expanded == ["E1"], "only the in-band game costs a postback"
+    assert set(odds) == {"list-0", "ladder-E1", "list-2"}
+
+
+def test_the_floor_is_off_by_default():
+    """It was justified on ladder rungs alone. Re-measured on what the
+    CONSISTENCY checks consume, the 50-300 band carries an HT/FT grid in a
+    third of games — so a floor at 50 cut into htft_combo / htft_fair for 2.9%
+    of the soccer sweep. Wrong trade; the knob stays, the default does not."""
+    assert CB._LADDER_MIN_MARKETS == 0
+    from src import runtime_config as rc
+    assert rc.LIMITS["anomaly_min_markets"][0]() == 0.0
+
+
+def test_htft_bearing_games_survive_the_defaults(monkeypatch):
+    """A game in the 50-300 band — where a third carry an HT/FT grid — must be
+    expanded under the shipped defaults, not banded out."""
+    games = [_G(0, 60), _G(1, 250), _G(2, 900), _G(3, 1200)]
+    _, expanded = _run(monkeypatch, games,
+                       min_markets=CB._LADDER_MIN_MARKETS,
+                       max_markets=CB._LADDER_MAX_MARKETS)
+    assert expanded == ["E0", "E1", "E2"], (
+        "small and mid games must all still be expanded; only >1000 is dropped")
 
 
 def test_the_band_is_applied_after_the_horizon_and_before_the_budget():
@@ -177,8 +223,13 @@ def test_the_band_is_applied_after_the_horizon_and_before_the_budget():
 
 
 def test_the_defaults_match_what_was_measured():
-    assert CB._LADDER_MIN_MARKETS == 50
-    assert CB._LADDER_MAX_MARKETS == 2000
+    """Ceiling 1000 is the knee: soccer 2232s -> 1021s (-54%), and it touches
+    no other sport — basketball's biggest game is under 1000 markets and
+    tennis/AF have nothing above 500."""
+    assert CB._LADDER_MIN_MARKETS == 0
+    assert CB._LADDER_MAX_MARKETS == 1000
+    from src import runtime_config as rc
+    assert rc.LIMITS["anomaly_max_markets"][0]() == 1000.0
 
 
 def test_the_band_is_runtime_tunable():

@@ -5534,10 +5534,36 @@ Full numbers in `docs/performance.md`. The short version: `+N ≤ 300` expands i
 bytes**), and 7421 historical anomalies say the top 10 leagues are 75% of them
 and all minor — genuine top-tier fixtures are **9 rows, 0.12%**.
 
-The floor was not in the owner's idea and is worth as much: below ~50 markets a
-game has **no ladder at all**, so 99 soccer games were being expanded for zero
-usable rungs. Soccer's full sweep drops 2201s → 1287s (−42%); against the 240s
-budget that is ~203 games per pass → ~281, all of which can yield a rung.
+The floor I added on top of that idea was **wrong, and the owner caught it**:
+*"what is too small? do you consider consistency flags too? cause there was +2
+event that fired it before, also htfts are mostly usefull make sure you dont go
+backwards"*. I had justified the floor on ladder rungs alone — but a consistency
+check needs no ladder. Re-measured on what those checks actually consume:
+
+    band        games   rungs   htft   periods w/1X2   markets
+    0-20           83       0    0/6               1         1
+    20-50          14       6    0/6               1         8
+    50-300        284       9    2/6               2        11
+    300-900       911      29    6/6               2        44
+
+The 50-300 band carries an HT/FT grid in a third of games, so a floor at 50 was
+quietly cutting `htft_combo` / `htft_fair`. And it was never worth much — 64 s
+of a 2232 s soccer sweep, 2.9 %. Tennis and AF save more of their own (25 % /
+37 %) but both already finish inside the budget, so it buys nothing there
+either. **Floor ships at 0 (off)**; the knob remains.
+
+Two further corrections from the same message:
+
+  * **the ceiling moved 2000 -> 1000**, the owner's number. Exact soccer
+    savings: >2000 skips 282 games for 880 s (39 %), >1000 skips 509 for 1211 s
+    (**54 %**), sweep 2232 s -> 1021 s. It is the knee of the curve and it
+    touches nothing else — basketball's largest game is under 1000 markets and
+    tennis/AF have nothing above 500, so a global ceiling is a soccer-only
+    filter in practice, verified live: soccer -54 %, the other three 0 %;
+  * **a banded-out game keeps its list-view Odds.** Not expanded is not the same
+    as erased — those rows are already parsed and carry the FT 1X2 and main
+    total that several consistency checks read. The first cut dropped them
+    entirely, which is exactly the "going backwards" being warned about.
 
 A game with no badge is KEPT — an unreadable count must not silently drop a
 fixture. The band is a ladder-scan filter only; the price path keeps every game.

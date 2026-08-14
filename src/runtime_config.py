@@ -104,11 +104,14 @@ LIMITS: dict[str, tuple] = {
     "cb_expand_within_hours": (lambda: _env_float("CB_EXPAND_WITHIN_HOURS", 0.0), 0.0, 240.0),
     # Ladder-scan market-count band (2026-08-14). The "+N" badge CB renders on
     # every game predicts expansion cost almost exactly, and it is known before
-    # paying for one. Below the floor a game has no ladder to check at all;
-    # above the ceiling an expand costs 4.2x for 1.5x the rungs and 0.12% of
-    # historical anomalies. 0 disables that side. See docs/performance.md.
-    "anomaly_min_markets": (lambda: _env_float("ANOMALY_MIN_MARKETS", 50.0), 0.0, 100000.0),
-    "anomaly_max_markets": (lambda: _env_float("ANOMALY_MAX_MARKETS", 2000.0), 0.0, 100000.0),
+    # paying for one. The CEILING is the lever: at 1000 it halves the soccer
+    # sweep (2232s -> 1021s) and touches no other sport, because nothing outside
+    # soccer has a game that big. The FLOOR defaults OFF — it was justified on
+    # ladder rungs, but the 50-300 band carries an HT/FT grid in a third of
+    # games, so a floor cut into the consistency checks for 2.9% of the cost.
+    # 0 disables that side. See docs/performance.md.
+    "anomaly_min_markets": (lambda: _env_float("ANOMALY_MIN_MARKETS", 0.0), 0.0, 100000.0),
+    "anomaly_max_markets": (lambda: _env_float("ANOMALY_MAX_MARKETS", 1000.0), 0.0, 100000.0),
     "setanta_detail_hours":    (lambda: _env_float("SETANTA_DETAIL_HOURS", 24.0), 1.0, 240.0),
     "crocobet_detail_hours":   (lambda: _env_float("CROCOBET_DETAIL_HOURS", 24.0), 1.0, 240.0),
 }

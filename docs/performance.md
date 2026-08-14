@@ -332,14 +332,30 @@ actually use** (lined spread/total rows):
 | 900–2000 | 236 | 1.46 | 0.62 | 29 | 19.9 |
 | 2000+ | 271 | 3.12 | 2.07 | 43 | 13.8 |
 
-Two findings, and the **floor was not part of the original idea**:
+### Correction: that measured ladders, not consistency
 
-- below ~50 markets a game has no alt-line ladder at all — 99 games returning
-  zero usable rungs between them, which is pure spend;
-- above 2000 an expand costs **4.2×** the sweet-spot band for **1.5×** the rungs.
+The first cut of this filter read the table above and set a **floor** at 50. That
+was the wrong measurement — a consistency check needs no ladder at all, and the
+owner had seen a `+2` game raise a flag. Re-measured on what the consistency
+checks actually consume:
 
-Head-to-head on the extremes: `+N ≤ 300` expands in 0.27s / 0.03 MB, `+N ≥ 2000`
-in 2.74s / 2.39 MB — **10.1× the time, 83.9× the bytes**.
+| band | games | rungs | htft | periods w/ 1X2 | markets |
+|---|---|---|---|---|---|
+| 0–20 | 83 | 0 | 0/6 | 1 | 1 |
+| 20–50 | 14 | 6 | 0/6 | 1 | 8 |
+| **50–300** | **284** | 9 | **2/6** | 2 | 11 |
+| 300–900 | 911 | 29 | 6/6 | 2 | 44 |
+
+The 50–300 band carries an **HT/FT grid in a third of games**, so a floor at 50
+was quietly cutting `htft_combo` and `htft_fair`. And it was never worth much:
+64s of a 2232s soccer sweep, **2.9%**. Tennis and AF save more of their own
+(25% / 37%) but both already finish inside the 240s budget, so it buys nothing
+there either. **The floor ships at 0 (off).** The knob remains for anyone who
+wants it.
+
+A banded-out game also keeps its **list-view Odds**. Not expanded is not the
+same as erased — those rows are already parsed and carry the FT 1X2 and main
+total that several consistency checks read.
 
 ### Yield: the big games are also the ones that are never wrong
 
@@ -362,19 +378,23 @@ budget — it is the filter that makes the budget go further rather than cutting
 it off sooner. A game with **no badge is kept**: an unreadable count must not
 silently drop a fixture.
 
-Full-sweep cost per sport, from the measured per-band figures:
+Exact soccer savings by ceiling (1827 games with a badge, full sweep ~2232s):
 
-| sport | games | too small | too big | kept | before | after |
-|---|---|---|---|---|---|---|
-| soccer | 1877 | 99 | 271 | 1507 | 2201s | **1287s (−42%)** |
-| tennis | 187 | 47 | 0 | 140 | 131s | 98s (−25%) |
-| americanfootball | 170 | 63 | 0 | 107 | 120s | 75s (−37%) |
-| basketball | 65 | 9 | 0 | 56 | 64s | 58s |
+| ceiling | games skipped | saved | resulting sweep |
+|---|---|---|---|
+| >2000 | 282 | 880s (39%) | 1353s |
+| >1500 | 285 | 884s (40%) | 1348s |
+| **>1000** | **509** | **1211s (54%)** | **1021s** |
+| >800 | 941 | 1553s (70%) | 679s |
 
-Only soccer has anything above the ceiling — those are the Brazilian and
-Argentine fixtures at 6000+ markets. Everywhere else the **floor** does the work.
-Against the 240s budget, soccer goes from ~203 games per pass to ~281, and the
-281 are all games that can actually yield a rung.
+**1000 is the shipped default** — the knee of the curve, and it touches nothing
+else: basketball's largest game is under 1000 markets, and tennis and american
+football have nothing above 500. A global ceiling is therefore a soccer-only
+filter in practice, with no per-sport override to keep in sync.
+
+Against the 240s budget soccer goes from ~203 games per pass to ~320, and with
+the ladder cache accumulating across passes the remaining ~1300 games are
+covered in about four.
 
 The band applies to the ladder scan **only**. The dashboard price path expands on
 `cb_expand_within_hours` and keeps every game — dropping a big fixture there
