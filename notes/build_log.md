@@ -5635,3 +5635,56 @@ running install.** Saved config wins over defaults by design, so the owner's
 in the Config tab. The new defaults only apply to keys the file has never seen.
 
 1361 green.
+
+### Immediately after: the 500 ceiling gutted basketball
+
+Owner, 15 minutes later: *"its so weird basketball games are also gone from
+consistency flags, that it used to fire"*. Correct, and it was mine.
+
+`extra.cost.basketball` on the live board said it exactly:
+
+    band [null, 500]   in_horizon 22   expanded 21   skipped_big 23
+    coverage: ladders 28 (was 200), games_without_ladder 30 (was 2)
+
+`fetch_crystalbet_basketball_anomaly_ladders` never took a band argument, so it
+silently inherited the module default. At 1000 that was harmless — the claim
+"affects soccer only" was true then. Basketball's board sits at **500-900**
+markets, so dropping the number to 500 skipped **23 of its 45 games**. My own
+per-sport table from an hour earlier said `basketball >500: 32 games skipped
+(63.8 %)` and I did not re-read it when changing the number.
+
+Fix, and the general rule it produced: **a filter that silently removes games
+must be opted into per sport, by a caller who has measured that sport.**
+
+  * `_LADDER_MAX_MARKETS = 0` — a caller that says nothing gets no filtering.
+    The old global default is what made an unmeasured sport inherit a
+    soccer-shaped decision;
+  * `ANOMALY_MAX_MARKETS_SPORTS = ("soccer",)`. Only soccer cannot finish a
+    sweep inside the 240 s budget — basketball 66 games / 69 s, tennis 165 /
+    116 s, AF 170 / 120 s all do, so a ceiling there can only remove coverage
+    they were getting for free;
+  * `fetch_crystalbet_basketball_anomaly_ladders` now takes the band and
+    `_compute_anomalies` passes it explicitly. Stating the position beats
+    inheriting it.
+
+Verified on a live instance with both scans running:
+
+    CB soccer     anomaly scan horizon 32h: 1058/1643 games
+    CB soccer     ladder band [-..500] markets: 356 games (0 too small, 702 too big)
+    CB basketball anomaly-scan cycle complete: 44 expanded, 1 fallback -> 8478 Odds
+    basketball coverage: ladders 379, rungs 8060, games_without_ladder 5
+
+No band line for basketball at all, 45 of 45 games in horizon, coverage back
+above where it started. And the gradual publish doing its job:
+
+    extra anomaly scan soccer:  25/356 games — 0 anomalies, 0 flags so far
+    extra anomaly scan soccer:  50/356 games — 0 anomalies, 2 flags so far
+    extra anomaly scan soccer: 100/356 games — 0 anomalies, 2 flags so far
+
+Second-order note on the owner's other observation ("soccer also after 15 min"):
+that one is cold start, not the band. CB soccer's own first cycle holds the
+sport lock while the extra scan queues behind it, so a fresh process shows
+nothing for soccer until that lands. `extra.progress` now makes it legible
+rather than looking like a dead scan.
+
+1365 green.

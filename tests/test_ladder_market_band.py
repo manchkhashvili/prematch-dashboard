@@ -202,10 +202,10 @@ def test_small_games_survive_the_defaults(monkeypatch):
     """The floor being off is what protects these. A third of the 50-300 band
     carries an HT/FT grid, and the owner had seen a +2 game raise a flag —
     nothing at the small end may be dropped."""
+    from src import runtime_config as rc
     games = [_G(0, 2), _G(1, 60), _G(2, 250), _G(3, 480)]
-    _, expanded = _run(monkeypatch, games,
-                       min_markets=CB._LADDER_MIN_MARKETS,
-                       max_markets=CB._LADDER_MAX_MARKETS)
+    _, expanded = _run(monkeypatch, games, min_markets=0,
+                       max_markets=int(rc.LIMITS["anomaly_max_markets"][0]()))
     assert expanded == ["E0", "E1", "E2", "E3"], "no floor means no floor"
 
 
@@ -215,10 +215,11 @@ def test_the_shipped_ceiling_drops_the_700_900_band(monkeypatch):
     carries an HT/FT grid. At 500 they are all skipped — HT/FT coverage goes
     from 65% of games to 7.2%. Raising `limits.anomaly_max_markets` to 900 is
     the documented way back, live and without a restart."""
+    from src import runtime_config as rc
+    soccer_ceiling = int(rc.LIMITS["anomaly_max_markets"][0]())   # 500
     games = [_G(0, 480), _G(1, 777), _G(2, 839), _G(3, 1200)]
-    odds, expanded = _run(monkeypatch, games,
-                          min_markets=CB._LADDER_MIN_MARKETS,
-                          max_markets=CB._LADDER_MAX_MARKETS)
+    odds, expanded = _run(monkeypatch, games, min_markets=0,
+                          max_markets=soccer_ceiling)
     assert expanded == ["E0"]
     assert CB._last_ladder_scan["soccer"]["skipped_big"] == 3
     # ...but they are still on the board via their list-view rows.
@@ -242,14 +243,47 @@ def test_the_band_is_applied_after_the_horizon_and_before_the_budget():
     assert horizon < band < budget
 
 
-def test_the_defaults_match_what_was_measured():
-    """Ceiling ships at 500 — 480 soccer games, a 376s sweep. Owner's call with
-    the trade-off table in hand; see test_the_ceiling_is_not_a_smooth_knob."""
+def test_the_module_default_is_no_filtering_at_all():
+    """The regression this guards. The ceiling shipped as a global default of
+    500 and immediately gutted basketball, whose board sits at 500-900 markets:
+    23 of 45 games skipped, ladders 200 -> 28, games_without_ladder 2 -> 30, and
+    the basketball consistency flags vanished off the tab.
+
+    A filter that silently removes games must be opted into per sport, by a
+    caller who has measured THAT sport. A caller that says nothing gets nothing
+    filtered."""
     assert CB._LADDER_MIN_MARKETS == 0
-    assert CB._LADDER_MAX_MARKETS == 500
+    assert CB._LADDER_MAX_MARKETS == 0
     from src import runtime_config as rc
-    assert rc.LIMITS["anomaly_max_markets"][0]() == 500.0
-    assert rc.LIMITS["anomaly_max_markets"][1] == 0.0, "0 must stay allowed (= off)"
+    assert rc.LIMITS["anomaly_max_markets"][0]() == 500.0, (
+        "the CONFIG default is still 500 — that is soccer's number, applied by "
+        "the caller to the sports in ANOMALY_MAX_MARKETS_SPORTS")
+
+
+def test_only_soccer_opts_into_the_ceiling():
+    from src import app as A
+    assert A.ANOMALY_MAX_MARKETS_SPORTS == ("soccer",)
+    for sport in ("basketball", "tennis", "americanfootball"):
+        assert sport not in A.ANOMALY_MAX_MARKETS_SPORTS, (
+            f"{sport} finishes its sweep inside the budget — a ceiling there "
+            "can only remove coverage it already had")
+
+
+def test_the_basketball_scan_states_its_band_explicitly():
+    """Inheriting a default is exactly how this scan lost half its board."""
+    import inspect
+    from src import app as A
+    src = inspect.getsource(A._compute_anomalies)
+    assert "max_markets=" in src and "ANOMALY_MAX_MARKETS_SPORTS" in src
+    sig = inspect.signature(CB.fetch_crystalbet_basketball_anomaly_ladders)
+    assert "max_markets" in sig.parameters and "min_markets" in sig.parameters
+
+
+def test_the_extra_loop_only_bands_opted_in_sports():
+    import inspect
+    from src import app as A
+    src = inspect.getsource(A._anomaly_extra_loop)
+    assert "if sport in ANOMALY_MAX_MARKETS_SPORTS else 0" in src
 
 
 def test_the_ceiling_is_not_a_smooth_knob():
@@ -357,3 +391,14 @@ def test_the_scan_reports_live_progress():
     import inspect
     assert "_extra_anom_progress" in inspect.getsource(A._anomaly_extra_loop)
     assert '"progress": dict(_extra_anom_progress)' in inspect.getsource(A)
+
+
+def test_a_sport_that_did_not_opt_in_is_never_filtered(monkeypatch):
+    """Basketball's board sits at 500-900 markets. Under the global default it
+    lost 23 of 45 games; with the ceiling off it must keep every one, whatever
+    the soccer number happens to be."""
+    games = [_G(0, 520), _G(1, 780), _G(2, 6000)]
+    _, expanded = _run(monkeypatch, games, min_markets=0, max_markets=0)
+    assert expanded == ["E0", "E1", "E2"]
+    st = CB._last_ladder_scan["soccer"]
+    assert st["skipped_big"] == 0 and st["skipped_small"] == 0

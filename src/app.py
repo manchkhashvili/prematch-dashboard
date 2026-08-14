@@ -524,6 +524,24 @@ ANOMALY_EXTRA_HORIZON_H_BY_SPORT = {
 # so a truncated pass is the useful prefix, and the games past the cut keep
 # their list-view Odds rather than vanishing from the snapshot.
 ANOMALY_EXTRA_MAX_SEC = float(os.environ.get("ANOMALY_EXTRA_MAX_SEC", "240"))
+
+# Which sports the ladder-scan market-count ceiling applies to. OPT-IN, because
+# the ceiling silently removes games and every board has a different shape:
+#
+#   soccer            1825 games, 2232 s sweep, 44 % of it in one band at 700-900
+#   basketball          66 games,   69 s        board sits at 500-900
+#   tennis             165 games,  116 s        nothing above 500
+#   americanfootball   170 games,  120 s        nothing above 500
+#
+# Only soccer cannot finish a sweep inside the 240 s budget, so only soccer wants
+# a ceiling. Shipping one globally at 500 skipped 23 of basketball's 45 games and
+# took its consistency flags off the tab — the ceiling is a soccer-shaped fix and
+# is now applied only where it was measured. `limits.anomaly_max_markets` sets
+# the number for the sports listed here; everything else passes 0 (off).
+ANOMALY_MAX_MARKETS_SPORTS = tuple(
+    s.strip() for s in os.environ.get("ANOMALY_MAX_MARKETS_SPORTS", "soccer").split(",")
+    if s.strip()
+)
 _ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS",
                                     "soccer,tennis,americanfootball")
 # CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
@@ -1316,6 +1334,14 @@ async def _compute_anomalies() -> bool:
             cb_odds = await fetch_crystalbet_basketball_anomaly_ladders(
                 headed=not CB_HEADLESS,
                 should_continue=lambda: runtime_config.active("scans", "anomaly"),
+                # Explicit, not inherited. Basketball is 66 games and a 69 s
+                # sweep — it finishes inside any budget, so a market-count
+                # ceiling can only take away coverage it already had. Passing
+                # the value rather than relying on a default is the point:
+                # inheriting one is how this scan lost half its board.
+                min_markets=int(runtime_config.num("limits", "anomaly_min_markets", 0)),
+                max_markets=(int(runtime_config.num("limits", "anomaly_max_markets", 0))
+                             if "basketball" in ANOMALY_MAX_MARKETS_SPORTS else 0),
             )
     except Exception as e:
         log.exception("anomaly scan: CB full-detail scrape failed")
@@ -1654,8 +1680,9 @@ async def _anomaly_extra_loop():
                     # further rather than just cutting it off sooner.
                     min_markets=int(runtime_config.num(
                         "limits", "anomaly_min_markets", 0)),
-                    max_markets=int(runtime_config.num(
-                        "limits", "anomaly_max_markets", 500)),
+                    max_markets=(int(runtime_config.num(
+                        "limits", "anomaly_max_markets", 500))
+                        if sport in ANOMALY_MAX_MARKETS_SPORTS else 0),
                     on_progress=_progress)
                 # Budget truncation is expected and publishable (the pass is the
                 # soonest-kickoff prefix, and the tail kept its list-view Odds).

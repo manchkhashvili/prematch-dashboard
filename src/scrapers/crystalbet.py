@@ -806,10 +806,25 @@ _LADDER_CACHE_NS = "{}:ladder"
 # coverage. Raise this to 900 if the Anomalies tab looks thin on htft_combo /
 # htft_fair; that is the one number that changes the shape.
 #
-# It touches nothing outside soccer either way — basketball's biggest game is
-# under 1000 markets and tennis/AF have nothing above 500 — so a global ceiling
-# is a soccer-only filter in practice, with no per-sport override to keep in
-# sync.
+# THE CEILING IS OFF BY DEFAULT AND MUST BE OPTED INTO PER SPORT. It shipped as
+# a global default once and immediately broke basketball: at 1000 it really did
+# touch only soccer, but basketball's board sits at 500-900 markets, so dropping
+# the number to 500 silently skipped 23 of its 45 games — ladders 200 -> 28,
+# games_without_ladder 2 -> 30, and the basketball consistency flags the owner
+# watches disappeared. The per-sport measurement existed and I did not re-run it
+# against the new number.
+#
+# So: a sport gets a ceiling only when someone has measured that sport's
+# distribution and asked for one. `_LADDER_MAX_MARKETS = 0` means a caller that
+# says nothing gets no filtering, which is the only safe default for something
+# that silently removes data. Soccer's ceiling is set by the caller from
+# `limits.anomaly_max_markets`; every other sport passes 0.
+#
+# For the record, why the other three do not want one: basketball is 66 games
+# and a 69 s sweep, tennis 165 games / 116 s, american football 170 / 120 s —
+# all of them finish inside the 240 s budget already, so a ceiling can only
+# remove coverage they were getting for free. Soccer is the outlier at 1825
+# games and 2232 s.
 #
 # THE FLOOR IS OFF BY DEFAULT, and that is a correction rather than an omission.
 # It was justified on ladder rungs alone — but consistency checks need no ladder,
@@ -831,7 +846,7 @@ _LADDER_CACHE_NS = "{}:ladder"
 # 0 on either bound disables that side. The band applies ONLY to the ladder
 # scan; the dashboard price path expands on its own horizon and is untouched.
 _LADDER_MIN_MARKETS = 0
-_LADDER_MAX_MARKETS = 500
+_LADDER_MAX_MARKETS = 0
 # Tighter than the dashboard's 6 h. A ladder anomaly is an ALT-LINE claim, and
 # an unmoved main does not prove an unmoved rung — it only makes it likely. Two
 # hours is ~8 scan passes: long enough for coverage to build, short enough that
@@ -1662,6 +1677,7 @@ async def fetch_crystalbet_anomaly_ladders(
 
 async def fetch_crystalbet_basketball_anomaly_ladders(
     *, headed: bool = False, should_continue: Any = None,
+    min_markets: int | None = None, max_markets: int | None = None,
 ) -> list[Odds]:
     """Full-detail basketball scrape for the hourly anomaly scanner.
 
@@ -1679,6 +1695,7 @@ async def fetch_crystalbet_basketball_anomaly_ladders(
         classify_override=basketball.classify_market_title_permissive,
         bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
         should_continue=should_continue,
+        min_markets=min_markets, max_markets=max_markets,
     )
 
 
