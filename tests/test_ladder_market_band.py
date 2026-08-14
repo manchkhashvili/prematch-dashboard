@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -117,18 +118,28 @@ class _G:
         self.market_count = n
 
 
-def _run(monkeypatch, games, **kw):
+def _run(monkeypatch, games, *, reset=True, expand_cost=0.0, **kw):
+    """Drive the ladder branch against fakes.
+
+    `reset` wipes the ladder caches AND the sweep cursor, so a test starts from
+    a cold scan. Multi-pass tests pass reset=False for the later passes — they
+    are testing exactly the state that carries between them.
+    """
     from src.scrapers.sports import soccer as _soccer
     from src.scrapers import change_cache
-    for ns in ("soccer", "soccer:ladder"):
-        change_cache.reset_cache(ns)
-        CB._sport_detail_odds_caches.pop(ns, None)
+    if reset:
+        for ns in ("soccer", "soccer:ladder"):
+            change_cache.reset_cache(ns)
+            CB._sport_detail_odds_caches.pop(ns, None)
+        CB._ladder_sweep_seen.clear()
     expanded: list[str] = []
 
     async def fake_refresh(*a, **k):
         return object(), "<html/>"
 
     async def fake_expand(g, *a, **k):
+        if expand_cost:
+            await asyncio.sleep(expand_cost)
         expanded.append(g.event_id)
         return [f"ladder-{g.event_id}"]
 
@@ -402,3 +413,80 @@ def test_a_sport_that_did_not_opt_in_is_never_filtered(monkeypatch):
     assert expanded == ["E0", "E1", "E2"]
     st = CB._last_ladder_scan["soccer"]
     assert st["skipped_big"] == 0 and st["skipped_small"] == 0
+
+
+# ── the sweep advances instead of re-doing the same prefix ───────────────────
+
+def test_successive_passes_cover_different_games(monkeypatch):
+    """The flaw the owner hit as "it doesn't work at all" for soccer HT/FT.
+
+    Live numbers: 951 soccer games in horizon, a 300s budget buying 23
+    expansions (11.1s/game under full load), and `cached` sitting at 0 because
+    a soccer game's list-view hash moves within one scan interval far more
+    often than not. Sorted the same way every pass, that is the same 23 games
+    forever and the other 928 are never looked at.
+    """
+    from src.scrapers import change_cache
+    CB._ladder_sweep_seen.clear()
+    games = [_G(i, 100 + i) for i in range(30)]
+
+    first_pass = [True]
+
+    def one_pass():
+        # every game's mains moved, so the ladder cache cannot help
+        for g in games:
+            g.loadinfo = f"v{time.time_ns()}"
+        _, expanded = _run(monkeypatch, games, reset=first_pass[0],
+                           min_markets=0, max_markets=500,
+                           max_expand_sec=0.05, expand_cost=0.02)
+        first_pass[0] = False
+        return expanded
+
+    first = one_pass()
+    second = one_pass()
+    third = one_pass()
+    assert first and second and third
+    assert set(first).isdisjoint(second), (
+        f"pass 2 repeated pass 1: {first} vs {second}")
+    assert set(second).isdisjoint(third), (
+        f"pass 3 repeated pass 2: {second} vs {third}")
+    CB._ladder_sweep_seen.clear()
+
+
+def test_the_sweep_restarts_once_the_board_is_covered(monkeypatch):
+    """Otherwise the scan goes quiet forever after one lap."""
+    CB._ladder_sweep_seen.clear()
+    games = [_G(i, 100 + i) for i in range(4)]
+    seen_all = set()
+    for n in range(6):
+        for g in games:
+            g.loadinfo = f"v{time.time_ns()}"
+        _, exp = _run(monkeypatch, games, reset=(n == 0),
+                      min_markets=0, max_markets=500,
+                      max_expand_sec=0.03, expand_cost=0.02)
+        seen_all |= set(exp)
+    assert seen_all == {g.event_id for g in games}, (
+        "every game must be reached within a few passes")
+    CB._ladder_sweep_seen.clear()
+
+
+def test_cache_hits_also_count_as_covered(monkeypatch):
+    """A game served from the ladder cache has been accounted for this sweep —
+    not marking it would make the cursor stick on cheap cached games."""
+    CB._ladder_sweep_seen.clear()
+    games = [_G(i, 100 + i) for i in range(6)]
+    _run(monkeypatch, games, min_markets=0, max_markets=500)   # warm
+    _, expanded = _run(monkeypatch, games, reset=False,
+                       min_markets=0, max_markets=500)
+    assert expanded == [], "unmoved board: all cache hits"
+    assert len(CB._ladder_sweep_seen["soccer"]) == 6
+    CB._ladder_sweep_seen.clear()
+
+
+def test_the_sweep_position_is_reported(monkeypatch):
+    CB._ladder_sweep_seen.clear()
+    games = [_G(i, 100 + i) for i in range(10)]
+    _run(monkeypatch, games, min_markets=0, max_markets=500)
+    st = CB._last_ladder_scan["soccer"]
+    assert st["sweep_seen"] == 10 and st["sweep_total"] == 10
+    CB._ladder_sweep_seen.clear()

@@ -5757,3 +5757,55 @@ list_fallback / past_budget / wait / list / total. A 56-minute cycle should
 never again be something you can only find in ticks.db afterwards.
 
 11 new tests; 1376 green.
+
+### The one that actually broke soccer HT/FT: a fixed prefix
+
+Owner: *"IDK man it used to work, and now we provided some fixes and
+improvements and it doesn't work at all its important to see ht/ft anomalies of
+soccer"*. Justified. The live board said it in one line:
+
+    soccer  horizon=951  expanded=23  cached=0  expand_sec=256.2   (11.1 s/game)
+
+Three things compounding, and the third is mine:
+
+1. **11.1 s/game under full load** against 0.85 s isolated — the GIL-bound
+   thread, already measured at ~20x contention;
+2. **`cached: 0`.** The ladder change-cache never hits for soccer: a game's
+   list-view hash moves within one scan interval far more often than not, so
+   every pass re-expands from scratch;
+3. **the pass is a fixed PREFIX.** Games are sorted the same way every time
+   (cheapest-first since this morning; soonest-kickoff before that), so a
+   budget-truncated pass expands the same first 23 games, forever. The other
+   928 were never looked at once.
+
+So the budget and the band were both working exactly as designed, and the scan
+still covered 2.4 % of the board on repeat. That is "doesn't work at all", and
+correctly reported as such.
+
+**Fix: a per-sport sweep cursor.** `_ladder_sweep_seen[sport]` holds the event
+ids already covered in the current sweep; unseen games sort FIRST, cheapest-
+first within them. Cache hits count as covered too, or the cursor sticks on the
+cheap games it can serve for free. When everything in horizon has been seen the
+set clears and a new sweep begins. `extra.cost` gains `sweep_seen` /
+`sweep_total`.
+
+Measured on a soccer-only instance, ladder scan every 60 s:
+
+    pass 1: 283 expanded,   0 cached, 0 fallback ->  5185 Odds (expand 240s, truncated)
+    pass 2: 123 expanded, 255 cached, 7 fallback ->  7545 Odds (expand 134s, COMPLETE)
+    sweep: seen 380 of 385
+    consistency: 40 x cb/soccer htft_combo
+
+Two passes to cover the board instead of never, and the flags arrive gradually
+inside a pass — 15 -> 24 -> 30 -> 37 -> 41 at 175/200/225/250/275 of 383.
+
+### Correction to an earlier claim in this log
+
+`_append_scan_history` is called only from `_compute_anomalies`, which is the
+BASKETBALL scan. `output/history/consistency_history.csv` therefore contains no
+soccer at all — every one of today's 37 HT/FT rows is basketball. I used that
+file to reason about soccer HT/FT and should not have; it cannot answer the
+question either way, which also means "it used to work" is unfalsifiable from
+what we store. Making the extra scan write history is the obvious next job.
+
+4 new tests; 1380 green.

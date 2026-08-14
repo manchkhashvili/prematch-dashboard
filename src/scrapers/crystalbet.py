@@ -505,6 +505,22 @@ _REINIT_EVERY_N_CYCLES = 50  # ~4 hours at the default 5-min cadence
 # tab used to have no visible price until the board silently wedged.
 _last_ladder_scan: dict[str, dict] = {}
 _last_price_cycle: dict[str, dict] = {}
+# Event ids already expanded in the CURRENT ladder sweep, per sport. Without
+# this a budget-truncated pass is a fixed PREFIX: the games are sorted the same
+# way every time, so every pass expands the same first N and the rest of the
+# board is never seen at all.
+#
+# Measured on the owner's live box 2026-08-14: soccer had 951 games in horizon,
+# a 300 s budget bought 23 expansions (11.1 s/game under full load), and
+# `cached` was 0 — the ladder change-cache never hits for soccer because a
+# game's list-view hash moves within one scan interval far more often than not.
+# So: 23 games, the same 23, forever. That is why soccer HT/FT flags looked
+# like they had stopped working entirely.
+#
+# Unseen games sort first, so each pass takes the next slice and the board is
+# covered in ceil(N / per-pass) passes. When everything in horizon has been
+# seen the set clears and a new sweep starts.
+_ladder_sweep_seen: dict[str, set[str]] = {}
 
 
 def _get_sport_lock(sport_id: int) -> asyncio.Lock:
@@ -1358,7 +1374,19 @@ async def _fetch_for_sport(
             # Games with no badge sort LAST: unknown cost, and CB omits the
             # badge when every extra market is locked, so there is usually
             # nothing to expand there anyway.
-            games.sort(key=lambda g: (g.market_count if g.market_count is not None
+            #
+            # ...and UNSEEN-THIS-SWEEP sorts before all of that, so successive
+            # passes advance through the board instead of re-expanding the same
+            # prefix (see _ladder_sweep_seen). Cheapest-first still orders
+            # within the unseen set, which is what keeps a pass productive.
+            seen = _ladder_sweep_seen.setdefault(sport_name, set())
+            in_scope = {g.event_id for g in games}
+            if seen and in_scope and in_scope <= seen:
+                log.info("CB %s ladder sweep complete (%d games covered) — "
+                         "starting a new one", sport_name, len(seen))
+                seen.clear()
+            games.sort(key=lambda g: (g.event_id in seen,
+                                      g.market_count if g.market_count is not None
                                       else 10 ** 9,
                                       g.start_time or fetched_at))
 
@@ -1469,6 +1497,7 @@ async def _fetch_for_sport(
                     cached = _cached_ladder(game)
                     if cached:
                         all_odds.extend(cached)
+                        seen.add(game.event_id)
                         n_cached += 1
                         continue
                 try:
@@ -1480,6 +1509,7 @@ async def _fetch_for_sport(
                         lcache.mark_loaded(game.event_id, game.loadinfo)
                         ldetail[game.event_id] = detail_odds
                         all_odds.extend(detail_odds)
+                        seen.add(game.event_id)
                         n_ok += 1
                     else:
                         lcache.mark_list_only(game.event_id, game.loadinfo)
@@ -1505,6 +1535,8 @@ async def _fetch_for_sport(
                 "band": [lo_mk or None, hi_mk or None],
                 "skipped_small": n_small,
                 "skipped_big": n_big,
+                "sweep_seen": len(seen),
+                "sweep_total": len(games),
                 "expanded": n_ok,
                 "cached": n_cached,
                 "fallback": n_fail,
