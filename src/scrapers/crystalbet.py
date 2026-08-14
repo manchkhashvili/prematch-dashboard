@@ -523,6 +523,46 @@ _last_price_cycle: dict[str, dict] = {}
 _ladder_sweep_seen: dict[str, set[str]] = {}
 
 
+def _yield_rank(game: Any) -> int:
+    """Order a truncated ladder pass by what it can actually FIND.
+
+    Straight cheapest-first was a mistake of mine. It maximises games per pass,
+    which is what "push flags gradually" seemed to ask for — but the cheapest
+    games are precisely the ones with nothing to check. From the live band
+    census, counting games that carry an HT/FT grid and the ladder rungs a
+    monotonicity check can use:
+
+        markets     htft    rungs   rungs/sec   rank
+        300-900      6/6       29        38.8     0   <- best value
+        900-2000     6/6       29        19.9     1
+        50-300       2/6       10        14.3     2
+        2000+        6/6       43        13.8     3
+        0-50         0/6        0         0.0     4   <- nothing to find
+
+    So a budget that stopped after N games was spending itself on the 0-50 and
+    50-300 bands and expanding almost nothing with an HT/FT grid in it. Measured
+    on the owner's own 12 h / 500-market slice: 70 games in scope, 50 of them
+    carrying a grid, and 13 htft_combo flags waiting in there — none of which a
+    cheapest-first prefix would reach first.
+
+    Ranks are only a TIE-BREAK ordering; nothing is skipped, and the sweep
+    cursor still guarantees every game is reached. Cheapest-first still applies
+    WITHIN a rank, which keeps a pass productive.
+    """
+    n = game.market_count
+    if n is None:
+        return 2            # unknown cost, unknown yield — with the middle
+    if n <= 50:
+        return 4
+    if n <= 300:
+        return 2
+    if n <= 900:
+        return 0
+    if n <= 2000:
+        return 1
+    return 3
+
+
 def _get_sport_lock(sport_id: int) -> asyncio.Lock:
     """Return (creating if needed) the per-sport refresh lock."""
     if sport_id not in _sport_locks:
@@ -1453,7 +1493,7 @@ async def _fetch_for_sport(
                 log.info("CB %s ladder sweep complete (%d games covered) — "
                          "starting a new one", sport_name, len(seen))
                 seen.clear()
-            games.sort(key=lambda g: (g.event_id in seen,
+            games.sort(key=lambda g: (g.event_id in seen, _yield_rank(g),
                                       g.market_count if g.market_count is not None
                                       else 10 ** 9,
                                       g.start_time or fetched_at))

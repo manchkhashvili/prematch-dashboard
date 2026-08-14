@@ -5867,3 +5867,43 @@ heredoc script broke spawn (no `__main__` file) and the run continued with
 correct results. The pool is shut down with the app.
 
 13 new tests; 1391 green.
+
+### Cheapest-first was expanding the games with nothing to check
+
+Owner, after a restart on 12 h / 500: *"consider it didn't fire any soccer in
+last 1-2hours of run"*. Before hunting another pipeline bug, I checked whether
+the configured slice is flaggable AT ALL — expanding exactly the set their
+config selects and running the real checks on it:
+
+    CB soccer board:            1972 games
+    within 12h:                  220
+    ...and <= 500 markets:        70   <- what the scan sees
+    market counts: min 27, p50 153, max 364
+    games carrying an HT/FT grid: 50/70
+    -> 13 htft_combo flags, 8 ladder anomalies (top severity 19.1)
+
+So the flags are there. And the reason a truncated pass never found them is
+mine: **cheapest-first**. From the band census, 0-50 markets carries an HT/FT
+grid in 0/6 games and 300-900 in 6/6 — so ordering ascending by market count
+spends the entire budget on the games that cannot produce an htft flag. I chose
+that ordering to maximise games per pass when the owner asked for gradual
+delivery, and it optimises the one number that does not matter.
+
+Now ranked by measured yield, cheapest-first only as a tie-break inside a rank:
+
+    markets     htft    rungs   rungs/sec   rank
+    300-900      6/6       29        38.8     0
+    900-2000     6/6       29        19.9     1
+    50-300       2/6       10        14.3     2
+    2000+        6/6       43        13.8     3
+    0-50         0/6        0         0.0     4
+
+Ranking is ORDERING, never filtering — the band filters, the sweep cursor still
+reaches everything, and "low numbers to high" still holds where it costs
+nothing.
+
+Worth noting for the config: a 500 ceiling keeps 70 of the 220 games inside 12 h,
+and the productive 300-900 band is where HT/FT lives, so 500 cuts most of it.
+The 13 flags found above came from the 300-364 sliver that survives.
+
+4 new tests; 1395 green.
