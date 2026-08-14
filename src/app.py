@@ -2233,6 +2233,12 @@ async def lifespan(app: FastAPI):
             await close_crystalbet()
         except Exception as e:
             log.warning("CB browser close on shutdown raised: %s", e)
+        # Stop the CB parse workers, or the process lingers waiting on them.
+        try:
+            from src.scrapers import cb_parse_pool
+            cb_parse_pool.shutdown()
+        except Exception as e:
+            log.warning("CB parse pool shutdown raised: %s", e)
         # Persist each sport's cache. Best-effort — save_all never raises.
         cache_persistence.save_all(SPORT_NAMES)
         log.info("background pollers stopped")

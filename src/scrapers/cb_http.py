@@ -320,6 +320,31 @@ class CbHttpSession:
             )
         return panel
 
+    def expand_detail_raw(self, game_id: str) -> str:
+        """ExpandDetail → the concatenated updatePanel segments, RAW.
+
+        Identical wire work to expand_detail_html; it just skips the html5lib
+        normalise so the caller can do that in another process.
+        """
+        body = {**self.fields, SM: f"{UPDATE_PANELS_HOLDER}|{UPDATE_GAMES}",
+                "__EVENTTARGET": UPDATE_GAMES,
+                "__EVENTARGUMENT": f"ExpandDetail:{game_id}",
+                "__ASYNCPOST": "true"}
+        delta = self._post(body)
+        self._harvest_panels(delta)
+        blob = all_panels_html(delta)
+        try:
+            collapse = {**self.fields, SM: f"{UPDATE_PANELS_HOLDER}|{UPDATE_GAMES}",
+                        "__EVENTTARGET": UPDATE_GAMES,
+                        "__EVENTARGUMENT": f"CollapseDetail:{game_id}",
+                        "__ASYNCPOST": "true"}
+            cdelta = self._post(collapse)
+            self._harvest_panels(cdelta)
+        except Exception as e:
+            log.debug("CB http: CollapseDetail %s failed (harmless): %s",
+                      game_id, e)
+        return blob
+
     def expand_detail_html(self, game_id: str) -> str:
         """ExpandDetail → all updatePanel segments (detail table rides in the
         RepeaterChampionat panel). Collapses afterward, best-effort, so the
@@ -376,6 +401,34 @@ def reset_session(sport_id: int) -> None:
         sess.close()
 
 
+async def fetch_list_raw(sport_id: int) -> str:
+    """Async: the list panel, RAW — unnormalised string.
+
+    Twin of fetch_list_html for the process-pool path, including the same
+    English-flip check (georgian_chars works on raw markup just as well). The
+    soccer panel is ~13.6 MB and its html5lib normalise is the single largest
+    GIL block in the process — several seconds, every cycle, per sport.
+    """
+    sess = _get_session(sport_id)
+
+    def run():
+        _ensure_warm_sync(sess)
+        panel = sess._list_panel()
+        if georgian_chars(panel) > _GEORGIAN_OK_MAX:
+            log.warning(
+                "CB http: sport_id=%d list came back Georgian (%d glyphs) — "
+                "re-warming to re-apply the English flip",
+                sport_id, georgian_chars(panel))
+            sess.warm()
+            panel = sess._list_panel()
+            if georgian_chars(panel) > _GEORGIAN_OK_MAX:
+                log.error("CB http: sport_id=%d still Georgian after re-warm",
+                          sport_id)
+        return panel
+
+    return await asyncio.to_thread(run)
+
+
 async def fetch_list_html(sport_id: int):
     """Async: warmed-session SelectAllChampionats list snapshot.
 
@@ -404,6 +457,30 @@ async def expand_detail_html(sport_id: int, game_id: str):
                 "fetch_list_html must run first in this cycle"
             )
         return sess.expand_detail_html(game_id)
+
+    return await asyncio.to_thread(run)
+
+
+async def expand_detail_raw(sport_id: int, game_id: str) -> str:
+    """Async: ExpandDetail, returning the RAW concatenated panel HTML —
+    unnormalised, still a string.
+
+    Exists so the html5lib normalise can happen somewhere other than this
+    process. html5lib is pure Python, so `asyncio.to_thread` does not help: the
+    GIL means a parse still stalls the event loop, measured at ~20x contention
+    on a loaded box. A string crosses a process boundary; a BeautifulSoup tree
+    does not, so the split has to be here — transport returns bytes, the worker
+    owns normalise+parse and hands back Odds. See src/scrapers/cb_parse_pool.py.
+    """
+    sess = _get_session(sport_id)
+
+    def run():
+        if sess.s is None:
+            raise RuntimeError(
+                f"CB http: session for sport_id={sport_id} not warmed — "
+                "fetch_list_html must run first in this cycle"
+            )
+        return sess.expand_detail_raw(game_id)
 
     return await asyncio.to_thread(run)
 

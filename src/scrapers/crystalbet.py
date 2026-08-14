@@ -79,7 +79,7 @@ if __package__ in (None, ""):
 from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league
-from src.scrapers import cb_detail, cb_http, change_cache
+from src.scrapers import cb_detail, cb_http, cb_parse_pool, change_cache
 from src.scrapers.sports import americanfootball, basketball, soccer, tennis
 
 # Re-export basketball list-view parsers so existing imports still resolve.
@@ -1131,6 +1131,22 @@ async def _expand_and_parse_one(
     return odds
 
 
+def _classify_mode(sport: Any, classify: Any) -> str:
+    """Name the classifier for the worker — functions do not pickle.
+
+    Only two are ever passed: a sport's strict classifier (the dashboard price
+    path) or its permissive one (the ladder scans). Anything else would be a
+    silent behaviour change, so it refuses rather than guessing.
+    """
+    if classify is None or classify is sport.classify_market_title:
+        return "strict"
+    if classify is getattr(sport, "classify_market_title_permissive", None):
+        return "permissive"
+    raise ValueError(
+        f"CB parse pool cannot name classifier {classify!r} for "
+        f"{sport.SPORT_NAME}; pass a sport classifier or set CB_PARSE_PROCS=0")
+
+
 async def _expand_and_parse_one_http(
     game: _GameOnList, fetched_at: datetime, sport: Any,
     classify: Any = None, ladder_mode: bool = False,
@@ -1145,6 +1161,26 @@ async def _expand_and_parse_one_http(
     signal, mirroring the Playwright wait_for_selector timeout) so the caller
     marks expand_failed rather than list-only.
     """
+    # Parse in a worker process when the pool is enabled: html5lib is pure
+    # Python, so parsing here stalls every other loop in the interpreter (12x
+    # contention measured on a loaded board). The transport hands back the RAW
+    # delta because a BeautifulSoup tree cannot cross a process boundary — the
+    # worker owns normalise+parse and returns Odds. See cb_parse_pool.
+    if cb_parse_pool.PARSE_PROCS > 0:
+        raw = await cb_http.expand_detail_raw(sport.SPORT_ID, game.event_id)
+        return await cb_parse_pool.parse_detail(
+            raw,
+            event_id=game.event_id,
+            home=game.home, away=game.away,
+            league=game.league,
+            start_time=game.start_time,
+            fetched_at=fetched_at,
+            sport_name=sport.SPORT_NAME,
+            classify_mode=_classify_mode(sport, classify),
+            scope_to_event=True,
+            per_section=ladder_mode,
+        )
+
     blob = await cb_http.expand_detail_html(sport.SPORT_ID, game.event_id)
     # The transport yields a soup, but keep tolerating a string (Playwright
     # path, saved fixtures, test stubs) — normalise before querying. The old
@@ -1184,6 +1220,39 @@ async def _expand_game(
     return await _expand_and_parse_one(
         game, fetched_at, sport, page, classify=classify, ladder_mode=ladder_mode,
     )
+
+
+async def _list_games_for_sport(
+    sport_id: int, sport: Any, fetched_at: datetime, *, headed: bool,
+    use_http: bool | None = None,
+) -> tuple[Any, list[_GameOnList]]:
+    """Fetch the list view and extract its games, parsing in a worker process
+    when the pool is on.
+
+    This is the heavier of the two parses by far — the soccer panel is ~13.6 MB
+    and its html5lib normalise is seconds of solid GIL, once per cycle per
+    sport. Doing it in-process is what makes `/api/status` spike to 35 s while a
+    sweep runs.
+
+    Falls back to the in-process path for the Playwright transport (its
+    `page.content()` is already a string we did not fetch ourselves) and
+    whenever the pool is disabled.
+    """
+    http = _USE_HTTP_TRANSPORT if use_http is None else use_http
+    if http and cb_parse_pool.PARSE_PROCS > 0:
+        try:
+            raw = await cb_http.fetch_list_raw(sport_id)
+        except Exception as e:
+            log.warning("CB http raw list fetch failed for %s (%s); re-warming "
+                        "and retrying once", sport.SPORT_NAME, e)
+            cb_http.reset_session(sport_id)
+            raw = await cb_http.fetch_list_raw(sport_id)
+        games = await cb_parse_pool.parse_list(raw, sport.SPORT_NAME, fetched_at)
+        return None, games
+
+    page, list_html = await _refresh_list_html_for_sport(
+        sport_id, sport.SPORT_NAME, headed=headed, use_http=use_http)
+    return page, _extract_games_from_list_html(list_html, fetched_at, sport=sport)
 
 
 async def _refresh_list_html_for_sport(
@@ -1259,13 +1328,12 @@ async def _fetch_for_sport(
     t_call = time.monotonic()
     async with sport_lock:
         t_locked = time.monotonic()
-        # ── 1. List view refresh (transport-dispatched, retry-once inside) ──
-        page, list_html = await _refresh_list_html_for_sport(
-            sport_id, sport_name, headed=headed, use_http=use_http,
+        # ── 1+2. List view refresh AND per-game extraction. Combined because
+        # with the parse pool on, both happen in the worker: a soup cannot come
+        # back across a process boundary, only the extracted games can.
+        page, games = await _list_games_for_sport(
+            sport_id, sport, fetched_at, headed=headed, use_http=use_http,
         )
-
-        # ── 2. Per-game extraction from list HTML ──
-        games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
         t_listed = time.monotonic()
         # Global data horizon (src/horizon.py). Applied HERE — after the one
         # list postback that has to happen anyway, before anything per-game —
@@ -1863,10 +1931,9 @@ async def fetch_crystalbet_games(
     wb_detail = _get_sport_detail_cache(ns)
     sport_lock = _get_sport_lock(sport_id)
     async with sport_lock:
-        page, list_html = await _refresh_list_html_for_sport(
-            sport_id, sport.SPORT_NAME, headed=headed, use_http=_ANOMALY_USE_HTTP,
+        page, games = await _list_games_for_sport(
+            sport_id, sport, fetched_at, headed=headed, use_http=_ANOMALY_USE_HTTP,
         )
-        games = _extract_games_from_list_html(list_html, fetched_at, sport=sport)
         targets = [g for g in games if g.event_id in wanted]
         log.info("CB %s %s re-scan: %d/%d target games present",
                  sport_name, label, len(targets), len(wanted))

@@ -5809,3 +5809,61 @@ question either way, which also means "it used to work" is unfalsifiable from
 what we store. Making the extra scan write history is the obvious next job.
 
 4 new tests; 1380 green.
+
+### The contention, fixed: CB parsing moves to worker processes
+
+Owner: *"ok changing config and you do the other"* — they tuned the knobs, I
+took the contention.
+
+**lxml first, because it would have been simpler. It does not work.** On saved
+fixtures it looked perfect: identical Odds on every sample, 3.1-4.7x faster. On
+LIVE pages it matched **0 of 15** soccer games and **0 of 10** basketball —
+lxml over-collects on CB's unclosed `<td>`s (one game: 59 markets against 108).
+The trap is that the saved samples are `page.content()` captures, i.e. already
+browser-repaired, so they cannot test raw panel markup at all. `cb_http`'s
+docstring was right, and this is now measured rather than asserted.
+
+**So: processes.** html5lib is pure Python, so threads are useless — 4 pages on
+4 threads measured 0.88x, slower than one. `asyncio.to_thread`, which the
+transport already used, moves work off the loop's stack but not off its thread
+of execution.
+
+The measurement that matters, soccer list panel, 16 MB:
+
+    pool OFF: parsed in 9.48 s, event loop got   1 tick  -> stalled 9477 ms
+    pool ON : parsed in 9.06 s, event loop got 177 ticks -> max stall 21 ms
+
+Same wall time; the difference is that with the pool off **nothing else in the
+process runs for nine and a half seconds**. Every cycle, per sport. That is the
+whole 12x contention factor.
+
+Design: a BeautifulSoup tree cannot cross a process boundary, so the split is
+bytes-in / Odds-out. `cb_http` grew `expand_detail_raw` and `fetch_list_raw`
+(unnormalised strings, same English-flip check); `cb_parse_pool` owns
+normalise+parse in the worker and returns `Odds` / `_GameOnList` dataclasses.
+The classifier is passed by NAME, since functions do not pickle, and
+`_classify_mode` refuses anything that is not a known sport classifier rather
+than guessing.
+
+Verified live, pool vs in-process, before trusting it:
+  * detail — 21/21 games, 1274 Odds identical, both classifiers, two sports;
+  * list — soccer 1980, basketball 89, tennis 111 games, all identical.
+
+End to end under a load mirroring the owner's box (all books, all scans, three
+sports full):
+
+                        games/pass   s/game   soccer flags
+    owner's box (no pool)       24    10.1s              0
+    same load + pool           248    0.97s             40
+
+**10.4x more games per ladder pass**, and 21 anomalies + 40 htft flags on the
+first pass where there had been none at all.
+
+Operational notes: the pool defaults to 3 workers, `CB_PARSE_PROCS=0` disables
+it, and it is **off under pytest** — a worker spawns a fresh interpreter and
+re-imports the scraper stack, which turned a 4 s suite into a timeout. Any pool
+failure degrades to in-process parsing; that path was exercised for real when a
+heredoc script broke spawn (no `__main__` file) and the run continued with
+correct results. The pool is shut down with the app.
+
+13 new tests; 1391 green.
