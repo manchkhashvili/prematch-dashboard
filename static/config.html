@@ -178,6 +178,7 @@ const LIM_DESC = {
   cb_expand_within_hours: "CB expansion: full ladders within (hours) — 0 = unlimited. Biggest CPU lever.",
   anomaly_min_markets: "Ladder scan: skip games with FEWER markets than this. DEFAULT 0 (off) — a floor also cuts HT/FT, which small games do carry, for ~3% of the cost.",
   anomaly_max_markets: "Ladder scan: skip games with MORE markets than this (0 = off). Soccer only in practice — no other sport has a game this big. NOT a smooth knob: 811 soccer games (44% of the board) sit in one band at 700–900, all carrying HT/FT. 500 → 480 games / 376s / 7% of HT/FT kept · 900 → 1293 games / 951s / 63% · 1000 → 1318 / 1021s / 65% · 2000 → 1546 / 1353s / 81%. Raise to 900 if htft_combo / htft_fair look thin.",
+  cb_expand_max_sec: "CB price cycle: cap the expansion phase at this many seconds (0 = unlimited). The cycle holds the sport lock throughout — a measured cb/soccer cycle ran 3365s (56 min) with no soccer prices, no ladder scan and no re-verify for the whole of it. Unreached games keep cached/list odds and the next cycle resumes past them.",
   setanta_detail_hours: "Setanta: full ladders within (hours), main markets beyond",
   crocobet_detail_hours: "Crocobet: full ladders within (hours), board inline beyond",
 };

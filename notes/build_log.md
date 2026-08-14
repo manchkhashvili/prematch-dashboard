@@ -5688,3 +5688,72 @@ nothing for soccer until that lands. `extra.progress` now makes it legible
 rather than looking like a dead scan.
 
 1365 green.
+
+### Watching the live app: the price cycle was the thing stopping soccer
+
+Owner: *"can you actually watch app for a while to detect whats going on"*.
+Polled `/api/status` + `/api/anomalies/status` every 60 s for ~20 min and cross-
+read `ticks.db`.
+
+    cb/soccer   0 completed cycles in 45 min of uptime
+    everything else (5 books x 3 sports)   3-7 cycles each
+
+The slot had `error: ''` and `n: 0` — not a failure, a fetch that had not
+returned. It landed at 12:24:16 after **3365 s, 56 minutes**, 1674 events. The
+watcher caught the step: soccer flat at 0 rows for sixteen consecutive ticks,
+then 16 431 in one.
+
+Not new, and not from this session — the last 400 cb/soccer cycles in the
+owner's own ticks.db:
+
+    p50 90 s | p90 643 s | max 3895 s
+    40 % over 2 min, 11 % over 10 min, 1.8 % over 30 min
+    56 % of ALL cb/soccer wall time sits inside cycles longer than 10 min
+
+The variance is cache-driven: a warm change cache makes most games a hit and the
+cycle takes 90 s; after a restart they are misses and it runs for an hour. What
+today's work changed is only that it became *diagnosable* — `extra.cost`,
+`extra.progress` and the `at`/`skipped_busy` fields on `opp_reverify` pinned it
+in one pass instead of a guess.
+
+### The fix: the same budget the ladder scan already had
+
+`limits.cb_expand_max_sec`, default **300 s**, 0 = unlimited. Truncation is safe
+in this branch specifically because the fallback already exists: an unreached
+game serves its cached detail (if still fresh) or its list-view Odds, so the
+board stays complete with fewer alt-lines for a cycle. Every successful
+expansion is marked in the change cache, so the next cycle finds those games are
+hits and spends its budget further down — progress accumulates rather than
+restarting.
+
+Applied to every sport, unlike the market-count band, and the distinction is the
+point: this is a **time bound, not a data filter**, so it can only bind on the
+tail. Basketball's median cycle is 27 s and tennis's 109 s — neither reaches
+300 s, so only pathological cycles are cut.
+
+Measured on a soccer-only instance with the budget on:
+
+    cycle 1: 313 expanded,  62 cached,  415 list-fallback,  474 past-budget
+             -> 15 823 Odds in 325 s (wait 0 s, list 25 s)
+    cycle 2: 140 expanded, 215 cached,  884 list-fallback, 1069 past-budget
+             -> 15 408 Odds in 514 s (wait 191 s, list 19 s)
+
+**325 s against 3365 s**, and the board is complete both times — 1731 games
+represented either way. `cached-detail` climbing 62 -> 215 is the accumulation
+working. Cycle 2's `wait 191 s` is the ladder scan holding the lock for its own
+bounded slice, which is the two of them sharing rather than one starving the
+other.
+
+And the thing that had never happened: **soccer flags**.
+
+    CB soccer ladder band [-..500]: 378 games (0 too small, 792 too big)
+    extra anomaly scan soccer:  25/378 — 0 anomalies, 0 flags
+    extra anomaly scan soccer:  50/378 — 0 anomalies, 3 flags
+    extra anomaly scan soccer: 125/378 — 0 anomalies, 5 flags
+    final: 19 ladder anomalies, 33 consistency flags (all cb/soccer htft_combo)
+
+`/api/status` gains `cb_cycles` — per-sport games / expanded / cached /
+list_fallback / past_budget / wait / list / total. A 56-minute cycle should
+never again be something you can only find in ticks.db afterwards.
+
+11 new tests; 1376 green.

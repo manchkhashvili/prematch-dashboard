@@ -77,6 +77,7 @@ from src.scrapers.crystalbet import (
     fetch_crystalbet_soccer_prematch,
     fetch_crystalbet_tennis_prematch,
     last_ladder_scan_stats as _cb_last_ladder_scan_stats,
+    last_price_cycle_stats as _cb_last_price_cycle_stats,
     get_detail_status_map,
     get_last_expanded_map,
     parse_html as parse_cb_html,
@@ -1234,6 +1235,14 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
                     headed=not CB_HEADLESS,
                     should_continue=lambda: runtime_config.active("books", "crystalbet"),
                     expand_within_hours=(_h if _h > 0 else None),
+                    # Bound the expansion phase. Without it a cb/soccer cycle
+                    # measured 3365s — 56 minutes holding the sport lock, during
+                    # which soccer had no prices, no ladder scan and no
+                    # re-verify. Truncation is safe: unreached games keep cached
+                    # detail or list-view Odds and the next cycle resumes past
+                    # them, because everything expanded is marked in the cache.
+                    max_expand_sec=runtime_config.num(
+                        "limits", "cb_expand_max_sec", 300.0),
                 )
                 src_label = "live"
             dt = time.monotonic() - t0
@@ -2440,6 +2449,7 @@ async def api_status() -> dict:
         # How the targeted re-pull is doing: rows_after / rows_before is the
         # share of re-checked edges that survived on a fresh price.
         "opp_reverify": opportunity_reverify_stats(),
+        "cb_cycles": _cb_last_price_cycle_stats(),
         # Top-level so any page can show a paused banner without parsing config.
         "paused": runtime_config.is_paused(),
         "config": {

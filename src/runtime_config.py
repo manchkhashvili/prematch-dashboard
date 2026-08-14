@@ -114,6 +114,14 @@ LIMITS: dict[str, tuple] = {
     # 0 disables that side. See docs/performance.md.
     "anomaly_min_markets": (lambda: _env_float("ANOMALY_MIN_MARKETS", 0.0), 0.0, 100000.0),
     "anomaly_max_markets": (lambda: _env_float("ANOMALY_MAX_MARKETS", 500.0), 0.0, 100000.0),
+    # Wall-clock budget on a CB PRICE cycle's expansion phase (2026-08-14).
+    # Measured live: one cb/soccer cycle ran 3365s (56 min) holding the sport
+    # lock the whole time — no CB soccer on the Arbs tab, no soccer ladder scan,
+    # no re-verify. History says p50 90s / p90 643s / max 3895s, and 56% of all
+    # cb/soccer wall time sits inside cycles over 10 min. Games past the budget
+    # keep their cached detail or list-view Odds, and expansions already done
+    # are cached, so the next cycle resumes further down. 0 = unlimited.
+    "cb_expand_max_sec": (lambda: _env_float("CB_EXPAND_MAX_SEC", 300.0), 0.0, 7200.0),
     "setanta_detail_hours":    (lambda: _env_float("SETANTA_DETAIL_HOURS", 24.0), 1.0, 240.0),
     "crocobet_detail_hours":   (lambda: _env_float("CROCOBET_DETAIL_HOURS", 24.0), 1.0, 240.0),
 }

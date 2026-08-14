@@ -504,6 +504,7 @@ _REINIT_EVERY_N_CYCLES = 50  # ~4 hours at the default 5-min cadence
 # horizon is REPORTABLE instead of invisible. Raising the horizon in the Config
 # tab used to have no visible price until the board silently wedged.
 _last_ladder_scan: dict[str, dict] = {}
+_last_price_cycle: dict[str, dict] = {}
 
 
 def _get_sport_lock(sport_id: int) -> asyncio.Lock:
@@ -526,6 +527,13 @@ def sport_busy(sport_name: str) -> bool:
         return False
     lock = _sport_locks.get(sport.SPORT_ID)
     return bool(lock and lock.locked())
+
+
+def last_price_cycle_stats() -> dict[str, dict]:
+    """Per-sport shape of the most recent PRICE cycle. Same reasoning as
+    last_ladder_scan_stats: a cycle that silently ran for 56 minutes was only
+    diagnosable from ticks.db after the fact."""
+    return {k: dict(v) for k, v in _last_price_cycle.items()}
 
 
 def last_ladder_scan_stats() -> dict[str, dict]:
@@ -1532,6 +1540,42 @@ async def _fetch_for_sport(
         n_list_fallback = 0
         n_expand_failed = 0
         n_beyond_horizon = 0
+        n_over_budget = 0
+
+        # Wall-clock budget on the PRICE path's expansion, measured 2026-08-14.
+        # The ladder scan got one earlier the same day; this branch did not, and
+        # it is the one that actually stops the board. Observed live: a single
+        # cb/soccer cycle ran **3365 s — 56 minutes** (1674 events), and it
+        # holds the sport lock for every second of it. From this box's own
+        # ticks.db, over the last 400 cb/soccer cycles:
+        #
+        #     p50 90 s | p90 643 s | max 3895 s
+        #     40 % over 2 min, 11 % over 10 min, 1.8 % over 30 min
+        #     56 % of ALL cb/soccer wall time sits inside cycles over 10 min
+        #
+        # During one of those the Arbs tab has no CB soccer at all, the soccer
+        # ladder scan cannot get the lock (so no soccer flags), and the
+        # opportunity re-verify skips the sport. The variance is cache-driven:
+        # a warm change cache makes most games a hit and the cycle takes 90 s;
+        # after a restart, or when a lot has moved, they are misses at seconds
+        # each and it runs for an hour.
+        #
+        # Truncating is safe HERE in a way it would not be in a fresh-data path:
+        # a game we do not reach falls back to its cached detail (if still
+        # fresh) or its list-view Odds, which is the fallback this loop already
+        # uses — so the board stays complete, it just carries fewer alt-lines
+        # this cycle. And because every successful expansion is marked in the
+        # change cache, the next cycle finds those games are hits and spends its
+        # budget further down the list: progress ACCUMULATES rather than
+        # restarting. 0 = unlimited, the pre-2026-08-14 behaviour.
+        #
+        # Unlike the market-count band this is safe to apply to every sport,
+        # because it is a time bound rather than a data filter: it can only bind
+        # on the tail. Basketball's median cycle is 27 s and tennis's 109 s, so
+        # neither ever reaches a 300 s budget — only the pathological cycles are
+        # cut, which is the entire point.
+        expand_until = (time.monotonic() + max_expand_sec
+                        if max_expand_sec and max_expand_sec > 0 else None)
 
         for i, game in enumerate(games, 1):
             # Cooperative abort. A full soccer expansion is ~15 min, so without
@@ -1542,6 +1586,26 @@ async def _fetch_for_sport(
                     and not should_continue()):
                 log.info("CB %s expansion ABORTED at %d/%d games (switched off)",
                          sport_name, i, len(games))
+                break
+            if expand_until is not None and time.monotonic() >= expand_until:
+                # Budget spent. Everything left keeps its cached detail or its
+                # list-view Odds — no game disappears from the board.
+                for rest in games[i - 1:]:
+                    cached = detail_odds_cache.get(rest.event_id)
+                    entry = cache.entries.get(rest.event_id)
+                    if _is_cached_detail_fresh_enough(cached, entry):
+                        all_odds.extend(cached)
+                        n_cached_detail += 1
+                    else:
+                        all_odds.extend(rest.list_odds)
+                        n_list_fallback += 1
+                    n_over_budget += 1
+                log.info(
+                    "CB %s expansion BUDGET SPENT at %d/%d games (%.0fs) — "
+                    "%d remaining served from cache or list view; the next "
+                    "cycle resumes where this one stopped",
+                    sport_name, i - 1, len(games), max_expand_sec, n_over_budget,
+                )
                 break
             if i % _PROGRESS_LOG_EVERY == 0:
                 log.info(
@@ -1612,10 +1676,24 @@ async def _fetch_for_sport(
 
         log.info(
             "CB %s cycle complete: %d expanded, %d cached-detail, "
-            "%d list-fallback, %d expand-failed → %d Odds total",
+            "%d list-fallback, %d expand-failed, %d past-budget → %d Odds "
+            "total in %.0fs (wait %.0fs, list %.0fs)",
             sport_name, n_expanded, n_cached_detail, n_list_fallback,
-            n_expand_failed, len(all_odds),
+            n_expand_failed, n_over_budget, len(all_odds),
+            time.monotonic() - t_call, t_locked - t_call, t_listed - t_locked,
         )
+        _last_price_cycle[sport_name] = {
+            "at": fetched_at.isoformat(),
+            "games": len(games),
+            "expanded": n_expanded,
+            "cached": n_cached_detail,
+            "list_fallback": n_list_fallback,
+            "past_budget": n_over_budget,
+            "budget_sec": max_expand_sec or None,
+            "wait_sec": round(t_locked - t_call, 1),
+            "list_sec": round(t_listed - t_locked, 1),
+            "sec": round(time.monotonic() - t_call, 1),
+        }
 
     return all_odds
 
@@ -1623,6 +1701,7 @@ async def _fetch_for_sport(
 async def fetch_crystalbet_basketball_prematch(
     *, headed: bool = False, force_detail: bool = False,
     should_continue: Any = None, expand_within_hours: float | None = None,
+    max_expand_sec: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch basketball with full detail-page expansion.
 
@@ -1633,7 +1712,8 @@ async def fetch_crystalbet_basketball_prematch(
     """
     return await _fetch_for_sport(basketball, headed=headed, force_detail=force_detail,
                                   should_continue=should_continue,
-                                  expand_within_hours=expand_within_hours)
+                                  expand_within_hours=expand_within_hours,
+                                  max_expand_sec=max_expand_sec)
 
 
 # sport → (module, permissive classifier or None→strict) for the anomaly scan.
@@ -1787,28 +1867,33 @@ async def fetch_crystalbet_basketball_games(
 async def fetch_crystalbet_soccer_prematch(
     *, headed: bool = False, should_continue: Any = None,
     expand_within_hours: float | None = None,
+    max_expand_sec: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch soccer with full detail-page expansion."""
     return await _fetch_for_sport(soccer, headed=headed,
                                  should_continue=should_continue,
-                                 expand_within_hours=expand_within_hours)
+                                 expand_within_hours=expand_within_hours,
+                                 max_expand_sec=max_expand_sec)
 
 
 async def fetch_crystalbet_tennis_prematch(
     *, headed: bool = False, should_continue: Any = None,
     expand_within_hours: float | None = None,
+    max_expand_sec: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch tennis. Designed for list-only mode (SPORTS=tennis:list);
     full mode would also work (basketball-style detail expansion) but tennis
     has 500+ matches per cycle which is too heavy without server resources."""
     return await _fetch_for_sport(tennis, headed=headed,
                                  should_continue=should_continue,
-                                 expand_within_hours=expand_within_hours)
+                                 expand_within_hours=expand_within_hours,
+                                 max_expand_sec=max_expand_sec)
 
 
 async def fetch_crystalbet_americanfootball_prematch(
     *, headed: bool = False, should_continue: Any = None,
     expand_within_hours: float | None = None,
+    max_expand_sec: float | None = None,
 ) -> list[Odds]:
     """Scrape CB prematch American football with full detail-page expansion.
 
@@ -1818,7 +1903,8 @@ async def fetch_crystalbet_americanfootball_prematch(
     """
     return await _fetch_for_sport(americanfootball, headed=headed,
                                   should_continue=should_continue,
-                                  expand_within_hours=expand_within_hours)
+                                  expand_within_hours=expand_within_hours,
+                                  max_expand_sec=max_expand_sec)
 
 
 # ── Per-sport accessors (with sport_name params for app.py / cache_persistence) ──
