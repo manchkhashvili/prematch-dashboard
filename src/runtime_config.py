@@ -122,6 +122,11 @@ LIMITS: dict[str, tuple] = {
     # keep their cached detail or list-view Odds, and expansions already done
     # are cached, so the next cycle resumes further down. 0 = unlimited.
     "cb_expand_max_sec": (lambda: _env_float("CB_EXPAND_MAX_SEC", 300.0), 0.0, 7200.0),
+    # Short TTL on the expensive read endpoints. /api/opportunities is ~25s of
+    # matching and alerts.js polls it from EVERY open dashboard page every 30s,
+    # so without this two tabs starve the whole app (measured: /api/config 8-17s
+    # with the UI open, 0.004s closed; CPU 97% -> 0.6%). 0 disables.
+    "api_cache_sec": (lambda: _env_float("API_CACHE_SEC", 0.0 if "pytest" in __import__("sys").modules else 10.0), 0.0, 300.0),
     "setanta_detail_hours":    (lambda: _env_float("SETANTA_DETAIL_HOURS", 24.0), 1.0, 240.0),
     "crocobet_detail_hours":   (lambda: _env_float("CROCOBET_DETAIL_HOURS", 24.0), 1.0, 240.0),
 }

@@ -5907,3 +5907,84 @@ and the productive 300-900 band is where HT/FT lives, so 500 cuts most of it.
 The 13 flags found above came from the 300-364 sliver that survives.
 
 4 new tests; 1395 green.
+
+## 2026-08-15 — it was the dashboard watching itself
+
+Owner, after a day of restarts: *"bro it doesnt make sense whats going on rn,
+when it was working how we cant detect what went wrong"*. Fair, and the answer
+was not in the app.
+
+### The A/B I should have run first
+
+Pre-session commit vs HEAD, same board, back to back:
+
+    BEFORE (09b236f)   155.9 s   151 events   18 htft_combo flags
+    HEAD               160.2 s   151 events   18 htft_combo flags
+
+Identical. Every scan change today — budget, band, sweep cursor, yield ordering,
+parse pool — was correct and none of it cost a single flag. Ten minutes of
+`git worktree` would have established that at the START and saved five or six
+restarts. That is the lesson of the day.
+
+### What was actually wrong
+
+`/api/opportunities` costs ~25 s of pure Python: `match_events` is 2.6 s per
+book/sport pair and `_compute_opportunities_now` does every enabled soft book x
+every sport. `static/alerts.js` runs on EVERY dashboard page and polls it every
+30 s — **per tab, independently**. Several tabs is an effective 10-second poll of
+a 25-second computation, and the loop never gets out from under it.
+
+Same process, nothing changed but closing the browser tabs:
+
+                       UI open      UI closed
+    /api/config         8-17 s       0.004 s
+    /api/anomalies         66 s      0.035 s
+    app CPU               97 %         0.6 %
+
+That is ~2000x on loop latency. The soccer ladder scan was never slow — 23-37 s
+per game against 1.1 s standalone — it was starved by the dashboard watching it.
+And it explains "it used to work": nothing broke, the matcher simply grew past
+the poll interval as the board grew.
+
+I made it worse while measuring: my own watcher hit `/api/anomalies` (the same
+matching) every two minutes for hours.
+
+### Two hypotheses tested and discarded on the way
+
+  * **memory pressure** — a 16 MB list parse costs ~27 MB of tree, ~190 MB for
+    three workers. Not the swap.
+  * **the other books blocking the loop** — measured with a heartbeat: xbet's
+    54 s fetch let the loop tick 1050 times, worst stall 55 ms. They are
+    network-bound and curl_cffi releases the GIL, so `to_thread` genuinely
+    works for them. Only CB's html5lib parse is CPU-bound, which is why the
+    pool helped there and nowhere else. I had already written the book-pool
+    change when the benchmark refuted it; it was reverted rather than shipped
+    on a theory (liderbet was 25 % SLOWER in a pool, from pickling 33k Odds).
+
+### The fix
+
+`limits.api_cache_sec` — a 10 s TTL on the expensive read endpoints, so N
+pollers and N tabs share one computation. 0 disables; off under pytest, because
+a cache makes "mutate, re-query, assert" non-deterministic and several existing
+tests do exactly that. Bounded to 64 keys, since keys carry query params.
+
+Verified with 4 simulated tabs polling like alerts.js:
+
+    /api/config   p50 0.007 s   p90 0.460 s   MAX 5.5 s
+
+against 8-17 s constant before. The dashboard is safe to leave open, which is
+the actual requirement — "keep the tabs closed" is not a fix.
+
+### And it works
+
+On the owner's box, minutes after the tabs closed, with a pass in flight:
+
+    IN-FLIGHT progress : 125/147 games
+    SOCCER FLAGS       : 24  (htft_combo)   0 -> 4 -> 20 -> 24 over four minutes
+    soccer anomalies   : 15
+
+Top severities 16.25 / 8.09 / 6.95, all in obscure competitions — Queensland
+U23, El Salvador reserves, Solomon Islands — exactly the profile the 7421-row
+history predicted. The gradual publish is visible in that climb.
+
+8 new tests; 1403 green.

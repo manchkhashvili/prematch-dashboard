@@ -41,6 +41,7 @@ import asyncio
 import csv
 import logging
 import os
+import sys
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -347,15 +348,80 @@ _gate_state: dict[str, bool] = {}
 _paused_result_cache: dict[tuple, Any] = {}
 
 
+# Short-lived result cache for the expensive read endpoints (2026-08-15).
+#
+# WHY, measured on the owner's box. `/api/opportunities` costs ~25 s of pure
+# Python: match_events is 2.6 s per book/sport pair and _compute_opportunities_now
+# does every enabled soft book x every sport. `static/alerts.js` runs on EVERY
+# dashboard page and polls it every 30 s, and each open tab polls independently.
+# Two or three tabs is a 10-second effective poll of a 25-second computation:
+# the loop never gets out from under it.
+#
+# Measured with the dashboard open vs closed, same process, nothing else changed:
+#
+#                    UI open      UI closed
+#     /api/config      8-17 s      0.004 s
+#     /api/anomalies      66 s     0.035 s
+#     app CPU            97 %        0.6 %
+#
+# That is why the soccer ladder scan was getting 23-37 s per game against 1.1 s
+# standalone: it was not slow, it was starved by the dashboard watching it.
+#
+# The cache makes N pollers share one computation. TTL is deliberately short —
+# the underlying odds only change when a book polls (60-600 s), so a few seconds
+# costs no freshness a human could perceive, and it collapses a polling storm
+# into one pass.
+def _default_api_cache_sec() -> float:
+    """10 s in production, 0 under pytest.
+
+    A cache makes "mutate state, re-query, assert" non-deterministic, and
+    several existing tests do exactly that — correctly, since it is how the
+    endpoints are meant to behave. Off by default under pytest; the cache's own
+    tests set the TTL explicitly. Same reasoning as CB_PARSE_PROCS.
+    """
+    raw = os.environ.get("API_CACHE_SEC")
+    if raw is not None:
+        try:
+            return float(raw)
+        except ValueError:
+            return 0.0
+    if "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules:
+        return 0.0
+    return 10.0
+
+
+API_CACHE_SEC = _default_api_cache_sec()
+_ttl_cache: dict[tuple, tuple[float, Any]] = {}
+
+
 def _paused_memo(key: tuple, compute):
-    """Compute `key` once per pause; recompute normally when running."""
-    if not runtime_config.is_paused():
-        if _paused_result_cache:
-            _paused_result_cache.clear()
-        return compute()
-    if key not in _paused_result_cache:
-        _paused_result_cache[key] = compute()
-    return _paused_result_cache[key]
+    """Cache `key` — for the whole pause when paused, else for API_CACHE_SEC.
+
+    Named for its original job (compute once per pause) and kept because every
+    expensive endpoint already routes through it, which makes this the one place
+    that fixes them all at once.
+    """
+    if runtime_config.is_paused():
+        if key not in _paused_result_cache:
+            _paused_result_cache[key] = compute()
+        return _paused_result_cache[key]
+    if _paused_result_cache:
+        _paused_result_cache.clear()
+    ttl = runtime_config.num("limits", "api_cache_sec", API_CACHE_SEC)
+    if ttl > 0:
+        hit = _ttl_cache.get(key)
+        now = time.monotonic()
+        if hit is not None and now - hit[0] < ttl:
+            return hit[1]
+        val = compute()
+        _ttl_cache[key] = (now, val)
+        # Bound the dict: keys carry query params, so a fuzzer or a curious
+        # user could otherwise grow it without limit.
+        if len(_ttl_cache) > 64:
+            for k in sorted(_ttl_cache, key=lambda k: _ttl_cache[k][0])[:32]:
+                _ttl_cache.pop(k, None)
+        return val
+    return compute()
 
 
 async def _paused_idle(what: str) -> bool:
