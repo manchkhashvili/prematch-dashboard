@@ -5476,3 +5476,77 @@ that path today. Better a visible crash than a silent downgrade to the strict
 classifier, which would quietly write strict rows under a ladder key.
 
 3 more tests, 28 in `tests/test_scan_starvation.py`; 1317 green.
+
+---
+
+## 2026-08-14 — a refactor not done, a switch per sport, and the "+N" filter
+
+### The narrow-view refactor: measured, then abandoned
+
+Owner approved narrowing the CB view to one championship at a time, for both the
+ladder scan and the price path — my proposal, from the perf doc's rule that an
+`ExpandDetail` re-renders the whole loaded panel. I probed it live before writing
+any of it, and the premise was **false for this codebase**:
+
+    list panel   13.6 MB   8.3s   -> 1729 games in view
+    10 sequential expands: 0.35 MB each, median 0.47s, max 2.31s
+
+Flat at 0.35 MB across ten consecutive expands with the entire board loaded. The
+rule was written for the Playwright era; `cb_http.expand_detail_html` already
+posts `CollapseDetail` after every expand, so the server-side view never grows.
+The optimisation was already in the code.
+
+And the mechanism I had found did not do what I thought. `LoadOddsPortion`
+against 14 real championship ids, after `CloseAllChampionats`, returned **0
+games every time** — given the `:1`/`:2` suffix it is market-column pagination,
+not view selection.
+
+The useful residue: a clean standalone expand is **0.47s** where the app measures
+**9.7s** — a **20.7× contention factor**. It is the single GIL-bound thread, not
+the transport. Narrowing would have bought nothing.
+
+Cost of finding out: two probe scripts. Cost of not finding out: a transport
+rewrite on a working path, for zero gain.
+
+### Per-sport master switch
+
+`sports.<name>` in the Config tab, orthogonal to `books.*` because no combination
+of the existing switches could stop one sport: book toggles are all-sports,
+Pinnacle has no toggle at all (it is the reference), `scans.*` is all-or-nothing,
+and `SPORTS=` is boot-only. Off stops the fetch, parse, tick write and every scan
+for that sport and CLEARS its odds — same contract as a book toggle, so nothing
+downstream prices off a frozen snapshot. Pause remains the opposite.
+
+Wired into all four price loops and all four scan loops, plus a guard in
+`_compute_opportunities_now` for the tick between the toggle and the first loop
+noticing. `RUNTIME_CONFIG_PATH` was added so a test instance can never write the
+developer's live config.
+
+### The "+N" market-count band
+
+Owner: *"skip big games in anomalies that have like 300+ positions ... anyway its
+obscure games that have some anomalies and nothing is in big ones"*. Right on
+both counts, and the filter is free — CB renders the count on the very div that
+triggers the expansion, so it is known before paying for one.
+
+Full numbers in `docs/performance.md`. The short version: `+N ≤ 300` expands in
+0.27s / 0.03 MB against 2.74s / 2.39 MB for `+N ≥ 2000` (**10.1× time, 83.9×
+bytes**), and 7421 historical anomalies say the top 10 leagues are 75% of them
+and all minor — genuine top-tier fixtures are **9 rows, 0.12%**.
+
+The floor was not in the owner's idea and is worth as much: below ~50 markets a
+game has **no ladder at all**, so 99 soccer games were being expanded for zero
+usable rungs. Soccer's full sweep drops 2201s → 1287s (−42%); against the 240s
+budget that is ~203 games per pass → ~281, all of which can yield a rung.
+
+A game with no badge is KEPT — an unreadable count must not silently drop a
+fixture. The band is a ladder-scan filter only; the price path keeps every game.
+
+### Operational note
+
+I killed the owner's running dashboard with a careless `pkill -f "main.py"` while
+cleaning up a smoke instance. No data loss (`quick_check: ok` on both SQLite
+files, live `runtime_config.json` untouched), but the process died and had to be
+restarted by hand. Smoke instances get killed by PID from `lsof -t` now.
+
+35 new tests (18 sport-toggle, 17 band); 1352 green.

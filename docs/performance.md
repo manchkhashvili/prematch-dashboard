@@ -299,3 +299,83 @@ written to disk. A restart therefore costs one cold pass per sport — which is
 the honest behaviour: the 2 h freshness bound would drop most of a restored
 cache anyway, and a restored ladder that looked fresh would be the exact failure
 this whole entry is about.
+
+---
+
+## The "+N" badge: the cheapest filter in the scraper
+
+Owner's idea, 2026-08-14: *"can we somehow skip big games in anomalies that have
+like 300+ positions on expanded versions? anyway its obscure games that have some
+anomalies and nothing is in big ones"*. Both halves check out.
+
+CB renders the market count on the **same div that triggers the expansion**:
+
+```html
+<div class="x_loop_game_active_add"
+     onclick='DoGamesPostBack("ExpandDetail:2996090402")'>+4489</div>
+```
+
+So the cost of an expand is knowable **before** paying for it, from HTML we
+already fetch and parse. Live soccer board: 1831 of 1877 games carry a badge;
+min 2, p25 60, median 777, p75 839, p90 3407, max 6661.
+
+### Cost per band, measured
+
+Expanding a sample from each band and counting the **ladder rungs a check can
+actually use** (lined spread/total rows):
+
+| band | games | sec/game | MB | rungs | rungs/sec |
+|---|---|---|---|---|---|
+| 0–50 | 99 | 0.70 | 0.03 | **0** | **0.0** |
+| 50–300 | 292 | 0.70 | 0.07 | 10 | 14.3 |
+| **300–900** | **931** | **0.75** | **0.36** | **29** | **38.8** |
+| 900–2000 | 236 | 1.46 | 0.62 | 29 | 19.9 |
+| 2000+ | 271 | 3.12 | 2.07 | 43 | 13.8 |
+
+Two findings, and the **floor was not part of the original idea**:
+
+- below ~50 markets a game has no alt-line ladder at all — 99 games returning
+  zero usable rungs between them, which is pure spend;
+- above 2000 an expand costs **4.2×** the sweet-spot band for **1.5×** the rungs.
+
+Head-to-head on the extremes: `+N ≤ 300` expands in 0.27s / 0.03 MB, `+N ≥ 2000`
+in 2.74s / 2.39 MB — **10.1× the time, 83.9× the bytes**.
+
+### Yield: the big games are also the ones that are never wrong
+
+From 7421 historical ladder anomalies across 67 leagues, the top 10 leagues are
+**75%** of all of them, and every one is a minor competition — New Zealand NBL
+(2462), Brazil LDB U22 (865), Paulista FPB U20 (552), Lebanon, Rwanda, Argentina
+La Liga Federal, Indonesia IBL, Vietnam VBA, Mali Women, Iraq. Genuine top-tier
+fixtures account for **9 rows, 0.12%**. Consistency flags agree: 3.3% by a
+generous league-name match, and most of those are a minor Argentine league whose
+name contains "La Liga".
+
+Big games are the most expensive to expand and the least likely to be wrong.
+That is what makes a **band** better than a bigger budget.
+
+### Effect
+
+`anomaly_min_markets` / `anomaly_max_markets` (defaults 50 / 2000, `0` disables
+either side, live on the Config tab). Applied after the horizon and before the
+budget — it is the filter that makes the budget go further rather than cutting
+it off sooner. A game with **no badge is kept**: an unreadable count must not
+silently drop a fixture.
+
+Full-sweep cost per sport, from the measured per-band figures:
+
+| sport | games | too small | too big | kept | before | after |
+|---|---|---|---|---|---|---|
+| soccer | 1877 | 99 | 271 | 1507 | 2201s | **1287s (−42%)** |
+| tennis | 187 | 47 | 0 | 140 | 131s | 98s (−25%) |
+| americanfootball | 170 | 63 | 0 | 107 | 120s | 75s (−37%) |
+| basketball | 65 | 9 | 0 | 56 | 64s | 58s |
+
+Only soccer has anything above the ceiling — those are the Brazilian and
+Argentine fixtures at 6000+ markets. Everywhere else the **floor** does the work.
+Against the 240s budget, soccer goes from ~203 games per pass to ~281, and the
+281 are all games that can actually yield a rung.
+
+The band applies to the ladder scan **only**. The dashboard price path expands on
+`cb_expand_within_hours` and keeps every game — dropping a big fixture there
+would remove it from the Arbs tab.

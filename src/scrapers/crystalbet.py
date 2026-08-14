@@ -757,6 +757,37 @@ _PROGRESS_LOG_EVERY = 25
 # what moved, so coverage accumulates across passes instead of resetting to the
 # nearest N every time.
 _LADDER_CACHE_NS = "{}:ladder"
+# Market-count band for the ladder scan (owner's idea, 2026-08-14: "can we
+# somehow skip big games in anomalies that have like 300+ positions ... anyway
+# its obscure games that have some anomalies and nothing is in big ones").
+#
+# Measured on the live soccer board (1829 games with a "+N" badge), expanding a
+# sample from each band and counting the LADDER RUNGS a check can actually use
+# (lined spread/total rows):
+#
+#     band        games   sec/game     MB   rungs   rungs/sec
+#     0-50           99       0.70   0.03       0         0.0
+#     50-300        292       0.70   0.07      10        14.3
+#     300-900       931       0.75   0.36      29        38.8   <- sweet spot
+#     900-2000      236       1.46   0.62      29        19.9
+#     2000+         271       3.12   2.07      43        13.8
+#
+# Two separate findings, and the floor was not in the original idea:
+#   * below ~50 markets a game has NO ladder at all — 99 games returning zero
+#     usable rungs, which is pure spend;
+#   * above 2000 an expand costs 4.2x the 300-900 band for 1.5x the rungs.
+#
+# And the yield argument, from 7421 historical ladder anomalies across 67
+# leagues: the top 10 leagues are 75% of all of them and every one is a minor
+# competition (New Zealand NBL, Brazil LDB U22, Lebanon, Rwanda, Vietnam VBA...).
+# Genuine top-tier fixtures account for 9 rows — 0.12%. Big games are the most
+# expensive to expand and the least likely to be wrong, which is the whole
+# reason a band beats a budget here.
+#
+# 0 on either bound disables that side. The band applies ONLY to the ladder
+# scan; the dashboard price path expands on its own horizon and is untouched.
+_LADDER_MIN_MARKETS = 50
+_LADDER_MAX_MARKETS = 2000
 # Tighter than the dashboard's 6 h. A ladder anomaly is an ALT-LINE claim, and
 # an unmoved main does not prove an unmoved rung — it only makes it likely. Two
 # hours is ~8 scan passes: long enough for coverage to build, short enough that
@@ -813,6 +844,30 @@ class _GameOnList:
     start_time: Optional[datetime]
     loadinfo: str   # raw JSON string — empty if Format B
     list_odds: list[Odds]   # rows parsed from the list view (fallback)
+    # CB's own "+N" badge: how many markets an ExpandDetail would return. It
+    # rides on the very div that triggers the expansion, so it is known BEFORE
+    # paying for one — which is what makes it useful as a filter rather than a
+    # statistic. None when CB didn't render the badge (all markets locked).
+    market_count: Optional[int] = None
+
+
+_PLUS_N_RE = re.compile(r"\+\s*(\d+)")
+
+
+def _market_count(container: Any) -> Optional[int]:
+    """CB's "+N" badge for one game — the market count an expand would return.
+
+        <div class="x_loop_game_active_add"
+             onclick='DoGamesPostBack("ExpandDetail:2996090402")'>+4489</div>
+
+    Measured live on the soccer board 2026-08-14: min 2, median 777, max 6661.
+    It predicts expansion cost almost exactly — see _LADDER_MARKET_BAND.
+    """
+    div = container.select_one("div.x_loop_game_active_add")
+    if div is None:
+        return None
+    m = _PLUS_N_RE.search(div.get_text() or "")
+    return int(m.group(1)) if m else None
 
 
 def _extract_games_from_list_html(
@@ -890,6 +945,7 @@ def _extract_games_from_list_html(
                 event_id=event_id, home=home, away=away,
                 league=league_text, start_time=start_time,
                 loadinfo=loadinfo, list_odds=list_odds,
+                market_count=_market_count(container),
             ))
     return games
 
@@ -1092,6 +1148,7 @@ async def _fetch_for_sport(
     use_http: bool | None = None, start_within_hours: float | None = None,
     should_continue: Any = None, expand_within_hours: float | None = None,
     max_expand_sec: float | None = None,
+    min_markets: int | None = None, max_markets: int | None = None,
 ) -> list[Odds]:
     """Generic per-sport fetch — drives one sport's full cycle.
 
@@ -1181,6 +1238,8 @@ async def _fetch_for_sport(
         # the cached ladder, then to list-view Odds, when an expansion fails.
         if bypass_cache:
             t_scan0 = time.monotonic()
+            lo_mk = _LADDER_MIN_MARKETS if min_markets is None else int(min_markets)
+            hi_mk = _LADDER_MAX_MARKETS if max_markets is None else int(max_markets)
             # Ladder-scan cache, in its own namespace (see _LADDER_CACHE_NS).
             # Pruned against the WHOLE board rather than the in-horizon subset,
             # so a game does not lose its cached ladder every time the horizon
@@ -1215,6 +1274,30 @@ async def _fetch_for_sport(
                 log.info("CB %s anomaly scan horizon %.0fh: %d/%d games",
                          sport_name, start_within_hours, len(in_h), len(games))
                 games = in_h
+
+            # Market-count band (see _LADDER_MIN_MARKETS). Applied AFTER the
+            # horizon and before the budget, because it is the filter that makes
+            # the budget go further: it removes the games that cannot yield a
+            # ladder and the ones that cost 4x to expand for a 0.12% share of
+            # historical anomalies. A game with no "+N" badge is KEPT — an
+            # unknown count must not silently drop a fixture.
+            n_small = n_big = 0
+            if lo_mk > 0 or hi_mk > 0:
+                kept = []
+                for g in games:
+                    n = g.market_count
+                    if n is not None and lo_mk > 0 and n < lo_mk:
+                        n_small += 1
+                    elif n is not None and hi_mk > 0 and n > hi_mk:
+                        n_big += 1
+                    else:
+                        kept.append(g)
+                if n_small or n_big:
+                    log.info("CB %s ladder band [%s..%s] markets: %d games "
+                             "(skipped %d too small, %d too big of %d)",
+                             sport_name, lo_mk or "-", hi_mk or "-",
+                             len(kept), n_small, n_big, len(games))
+                games = kept
             all_odds: list[Odds] = []
             n_ok = n_fail = n_cached = 0
             stopped_at: int | None = None
@@ -1308,6 +1391,9 @@ async def _fetch_for_sport(
             _last_ladder_scan[sport_name] = {
                 "at": fetched_at.isoformat(),
                 "in_horizon": len(games),
+                "band": [lo_mk or None, hi_mk or None],
+                "skipped_small": n_small,
+                "skipped_big": n_big,
                 "expanded": n_ok,
                 "cached": n_cached,
                 "fallback": n_fail,
@@ -1463,6 +1549,7 @@ async def fetch_crystalbet_anomaly_ladders(
     sport_name: str, *, headed: bool = False,
     start_within_hours: float | None = None, should_continue: Any = None,
     max_expand_sec: float | None = None,
+    min_markets: int | None = None, max_markets: int | None = None,
 ) -> list[Odds]:
     """Full-detail anomaly scrape for ANY supported sport (2026-07-11 —
     the scan was basketball-only before). Same semantics as the basketball
@@ -1479,6 +1566,7 @@ async def fetch_crystalbet_anomaly_ladders(
         classify_override=clf, bypass_cache=True, use_http=_ANOMALY_USE_HTTP,
         start_within_hours=start_within_hours, should_continue=should_continue,
         max_expand_sec=max_expand_sec,
+        min_markets=min_markets, max_markets=max_markets,
     )
 
 

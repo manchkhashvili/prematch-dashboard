@@ -375,6 +375,42 @@ async def _paused_idle(what: str) -> bool:
     return True
 
 
+async def _sport_gated(sport: str, what: str) -> bool:
+    """Per-sport master switch (2026-08-14). True when this sport is OFF, in
+    which case the caller `continue`s — no fetch, no parse, no tick write.
+
+    Orthogonal to the book gate on purpose. `books.crystalbet` is "stop paying
+    for this book everywhere"; `sports.soccer` is "stop paying for this sport
+    everywhere" — including Pinnacle, which has no book toggle at all, and the
+    ladder scans, which no book toggle reaches. Before this, the only way to
+    stop a sport was SPORTS= and a restart.
+
+    Turning a sport off CLEARS its per-source odds, matching what a book
+    toggle does and for the same reason: the Arbs/Cross-book tabs must not keep
+    pricing off a frozen snapshot of a sport you have switched off. Pause is
+    the opposite and deliberately keeps everything (see _paused_idle).
+    """
+    on = runtime_config.sport_on(sport)
+    if _gate_state.get(what) != on:
+        log.info("%s: %s (config)", what, "ON" if on else "OFF — idling")
+        _gate_state[what] = on
+        if not on:
+            async with _state_lock:
+                for src in list(_state.get(sport, {})):
+                    _state[sport][src] = _empty_source_state()
+                for key in [k for k in _book_anomalies if k[1] == sport]:
+                    _book_anomalies.pop(key, None)
+                for key in [k for k in _book_consistency if k[1] == sport]:
+                    _book_consistency.pop(key, None)
+                _extra_anomalies.pop(sport, None)
+                _extra_anom_consistency.pop(sport, None)
+                _extra_anom_odds.pop(sport, None)
+                _extra_anom_at.pop(sport, None)
+    if not on:
+        await asyncio.sleep(_IDLE_POLL_SEC)
+    return not on
+
+
 async def _gated(section: str, key: str, what: str) -> bool:
     """Runtime on/off gate for a poll loop, called at the top of each iteration.
 
@@ -730,6 +766,8 @@ async def _pinnacle_loop_for_sport(cfg: SportConfig):
         # heaviest poller running.
         if await _paused_idle(f"pinnacle {sport}"):
             continue
+        if await _sport_gated(sport, f"pinnacle {sport}"):
+            continue
         try:
             t0 = time.monotonic()
             odds = await cfg.pin_fetcher()
@@ -795,6 +833,8 @@ async def _xbet_loop_for_sport(cfg: SportConfig):
     while True:
         if not await _gated("books", "xbet", f"xbet {cfg.sport_name}"):
             continue
+        if await _sport_gated(sport, f"xbet {sport}"):
+            continue
         try:
             t0 = time.monotonic()
             odds = await cfg.xbet_fetcher()
@@ -845,6 +885,9 @@ async def _extra_book_loop_for_sport(book: str, sport: str):
         # forget, so nothing downstream prices off a frozen snapshot".
         if await _paused_idle(f"{book} {sport}"):
             was_on = None       # force a fresh ON/OFF log line on resume
+            continue
+        if await _sport_gated(sport, f"{book} {sport}"):
+            was_on = None
             continue
         # Runtime gate (Config tab). Checked BEFORE any work, so an off book
         # costs one dict lookup per idle tick and nothing else — no fetch, no
@@ -1146,6 +1189,8 @@ async def _crystalbet_loop_for_sport(cfg: SportConfig):
     while True:
         if not await _gated("books", "crystalbet", f"crystalbet {cfg.sport_name}"):
             continue
+        if await _sport_gated(sport, f"crystalbet {sport}"):
+            continue
         try:
             t0 = time.monotonic()
             if CB_USE_SAVED:
@@ -1256,6 +1301,8 @@ async def _compute_anomalies() -> bool:
     global _recent_anomalies, _anomaly_cb_odds
     global _recent_consistency, _anomaly_coverage, _anomaly_watchlist
     global _anomalies_computed_at, _anomalies_cb_fetched_at, _anomalies_error
+    if not runtime_config.sport_active("basketball"):
+        return False              # per-sport master switch
     try:
         if CB_USE_SAVED:
             from src.scrapers.crystalbet import dry_run_parse_saved
@@ -1551,6 +1598,8 @@ async def _anomaly_extra_loop():
         if not await _gated("scans", "anomaly_extra", "anomaly extra scan"):
             continue
         for sport in sports:
+            if not runtime_config.sport_active(sport):
+                continue          # per-sport master switch
             try:
                 odds = await fetch_crystalbet_anomaly_ladders(
                     sport, headed=not CB_HEADLESS,
@@ -1568,7 +1617,13 @@ async def _anomaly_extra_loop():
                     should_continue=lambda: runtime_config.active(
                         "scans", "anomaly_extra"),
                     max_expand_sec=runtime_config.num(
-                        "limits", "anomaly_extra_max_sec", ANOMALY_EXTRA_MAX_SEC))
+                        "limits", "anomaly_extra_max_sec", ANOMALY_EXTRA_MAX_SEC),
+                    # Market-count band — the filter that makes the budget go
+                    # further rather than just cutting it off sooner.
+                    min_markets=int(runtime_config.num(
+                        "limits", "anomaly_min_markets", 50)),
+                    max_markets=int(runtime_config.num(
+                        "limits", "anomaly_max_markets", 2000)))
                 # Budget truncation is expected and publishable (the pass is the
                 # soonest-kickoff prefix, and the tail kept its list-view Odds).
                 # Being switched OFF mid-sweep is not: keep the last snapshot
@@ -1621,7 +1676,7 @@ async def _anomaly_watch_loop():
         await _sleep_gated(runtime_config.secs("anomaly_watch_sec", ANOMALY_WATCH_SEC),
                            "scans", "anomaly_watch")
         watch = set(_anomaly_watchlist)
-        if not watch:
+        if not watch or not runtime_config.sport_active("basketball"):
             continue
         try:
             if CB_USE_SAVED:
@@ -1734,6 +1789,8 @@ async def _opportunity_reverify_loop():
             for sport, ids in by_sport.items():
                 if sport not in SPORT_NAMES:
                     continue
+                if not runtime_config.sport_active(sport):
+                    continue      # per-sport master switch
                 # Do not QUEUE behind a running CB sweep. Everything CB
                 # serialises on a per-sport lock, so awaiting a busy sport is an
                 # unbounded wait — measured 2026-08-13, a ladder sweep held the
@@ -2140,11 +2197,28 @@ async def api_config_get() -> dict:
             if slot["fetched_at"] and (newest is None or slot["fetched_at"] > newest):
                 newest = slot["fetched_at"]
         live[book] = {"rows": rows, "age_sec": _age_sec(newest)}
+    # Same "did it really stop" evidence, per sport: rows across every source
+    # and the newest fetch among them.
+    sport_live: dict[str, Any] = {}
+    for sport in SPORT_NAMES:
+        rows, newest = 0, None
+        for slot in _state[sport].values():
+            if not isinstance(slot, dict) or "count" not in slot:
+                continue
+            rows += slot["count"]
+            if slot["fetched_at"] and (newest is None or slot["fetched_at"] > newest):
+                newest = slot["fetched_at"]
+        sport_live[sport] = {"rows": rows, "age_sec": _age_sec(newest)}
     return {
         "config": cfg,
         "live": live,
+        "sport_live": sport_live,
         "meta": {
             "books": list(runtime_config.BOOKS),
+            # Only the sports this process actually runs — SPORTS= decides what
+            # exists, the toggle decides whether it works. Offering a switch for
+            # a sport that was never started would be a dead control.
+            "sports": [s for s in runtime_config.SPORTS if s in SPORT_NAMES],
             "scans": list(runtime_config.SCANS),
             "cadence_bounds": {k: [v[1], v[2]] for k, v in runtime_config.CADENCES.items()},
             "limit_bounds": {k: [v[1], v[2]] for k, v in runtime_config.LIMITS.items()},
@@ -2632,6 +2706,12 @@ def _compute_opportunities_now(min_edge, kind, book, ref) -> list[dict]:
         books = [book] if book in books else []
     all_opps: list[dict] = []
     for sport in SPORT_NAMES:
+        # Per-sport master switch. Belt-and-braces: _sport_gated already empties
+        # the sport's slots on the way off, so this loop would find nothing
+        # anyway — but a switched-off sport must not be able to emit a row even
+        # for the one tick between the toggle and the first loop noticing.
+        if not runtime_config.sport_on(sport):
+            continue
         pin_odds = _state[sport].get(ref, {}).get("odds")
         if not pin_odds:
             continue

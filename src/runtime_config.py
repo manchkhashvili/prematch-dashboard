@@ -31,7 +31,10 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "runtime_config.json"
+CONFIG_PATH = Path(
+    os.environ.get("RUNTIME_CONFIG_PATH")
+    or Path(__file__).resolve().parent.parent / "data" / "runtime_config.json"
+)
 
 _lock = threading.Lock()
 _cfg: dict[str, Any] = {}
@@ -63,6 +66,13 @@ def _env_float(name: str, default: float) -> float:
 # `kind` drives the UI widget and the validator.
 BOOKS = ("crystalbet", "liderbet", "betlive", "crocobet", "setanta", "xbet")
 SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_scan")
+# Per-sport master switch (2026-08-14). Orthogonal to `books`: a book toggle is
+# "stop paying for this book, on every sport", a sport toggle is "stop paying
+# for this sport, at every book" — including the reference feeds and the scans,
+# which no book toggle reaches. Switching a sport off is the only way to stop
+# ALL of its work without a restart; SPORTS= still decides what exists at boot,
+# and a sport not enabled there simply never appears here.
+SPORTS = ("basketball", "soccer", "tennis", "americanfootball")
 
 # Cadence knobs: key -> (default_factory, min_sec, max_sec)
 CADENCES: dict[str, tuple] = {
@@ -92,6 +102,13 @@ LIMITS: dict[str, tuple] = {
     # and only the expensive html5lib expansion is skipped. 0 = unlimited,
     # which is the pre-2026-07-26 behaviour and stays the default.
     "cb_expand_within_hours": (lambda: _env_float("CB_EXPAND_WITHIN_HOURS", 0.0), 0.0, 240.0),
+    # Ladder-scan market-count band (2026-08-14). The "+N" badge CB renders on
+    # every game predicts expansion cost almost exactly, and it is known before
+    # paying for one. Below the floor a game has no ladder to check at all;
+    # above the ceiling an expand costs 4.2x for 1.5x the rungs and 0.12% of
+    # historical anomalies. 0 disables that side. See docs/performance.md.
+    "anomaly_min_markets": (lambda: _env_float("ANOMALY_MIN_MARKETS", 50.0), 0.0, 100000.0),
+    "anomaly_max_markets": (lambda: _env_float("ANOMALY_MAX_MARKETS", 2000.0), 0.0, 100000.0),
     "setanta_detail_hours":    (lambda: _env_float("SETANTA_DETAIL_HOURS", 24.0), 1.0, 240.0),
     "crocobet_detail_hours":   (lambda: _env_float("CROCOBET_DETAIL_HOURS", 24.0), 1.0, 240.0),
 }
@@ -110,6 +127,10 @@ def _defaults() -> dict[str, Any]:
             "setanta":    _env_on("SETANTA"),
             "xbet":       _env_on("XBET"),
         },
+        # Default ON for every sport: the switch is a way to stop work you are
+        # already doing, not a second gate you must remember to open. What runs
+        # at boot is still decided by SPORTS=.
+        "sports": {s: True for s in SPORTS},
         "scans": {
             "anomaly":         _env_on("ANOMALY_SCAN"),
             "anomaly_extra":   _env_on("ANOMALY_SCAN"),   # rode ANOMALY_SCAN before
@@ -132,7 +153,7 @@ def _defaults() -> dict[str, Any]:
 def _merge(base: dict, saved: dict) -> dict:
     """Saved values win, but only for keys we still know about."""
     out = json.loads(json.dumps(base))
-    for section in ("books", "scans", "cadence", "limits"):
+    for section in ("books", "sports", "scans", "cadence", "limits"):
         for k, v in (saved.get(section) or {}).items():
             if k in out[section]:
                 out[section][k] = v
@@ -193,6 +214,17 @@ def book_on(book: str) -> bool:
     return is_on("books", book)
 
 
+def sport_on(sport: str) -> bool:
+    """Is this sport switched on? Unknown sports are ON — a sport the store has
+    never heard of must not be silently disabled by a typo in SPORTS=."""
+    return bool(load().get("sports", {}).get(sport, True))
+
+
+def sport_active(sport: str) -> bool:
+    """Should work run for this sport right now? Sport switch AND not paused."""
+    return sport_on(sport) and not is_paused()
+
+
 def num(section: str, key: str, default: float = 0.0) -> float:
     v = load().get(section, {}).get(key)
     return float(v) if isinstance(v, (int, float)) else default
@@ -216,14 +248,14 @@ def update(patch: dict[str, Any]) -> dict[str, Any]:
                     raise ValueError("paused must be true/false")
                 cfg["paused"] = values
                 continue
-            if section not in ("books", "scans", "cadence", "limits"):
+            if section not in ("books", "sports", "scans", "cadence", "limits"):
                 raise ValueError(f"unknown config section {section!r}")
             if not isinstance(values, dict):
                 raise ValueError(f"section {section!r} must be an object")
             for key, val in values.items():
                 if key not in cfg[section]:
                     raise ValueError(f"unknown config key {section}.{key}")
-                if section in ("books", "scans"):
+                if section in ("books", "sports", "scans"):
                     if not isinstance(val, bool):
                         raise ValueError(f"{section}.{key} must be true/false")
                     cfg[section][key] = val

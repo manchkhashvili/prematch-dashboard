@@ -288,13 +288,17 @@ def _drive_ladder_scan(monkeypatch, games, *, max_expand_sec=None,
 
 
 class _FakeGame:
-    def __init__(self, i, *, loadinfo="v1"):
+    def __init__(self, i, *, loadinfo="v1", market_count=800):
         from datetime import datetime, timedelta, timezone
         self.event_id = f"E{i}"
         self.home, self.away = f"H{i}", f"A{i}"
         self.start_time = datetime.now(tz=timezone.utc) + timedelta(hours=1 + i)
         self.list_odds = [f"list-{self.event_id}"]
         self.loadinfo = loadinfo
+        # Mid-band by default (the live soccer median is 777), so these tests
+        # exercise the budget/cache behaviour rather than the market-count band
+        # — that has its own file, tests/test_ladder_market_band.py.
+        self.market_count = market_count
 
 
 @pytest.fixture(autouse=True)

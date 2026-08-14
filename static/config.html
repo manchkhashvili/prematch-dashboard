@@ -100,6 +100,20 @@
     </div>
 
     <div class="cfg-section">
+      <h2>Sports</h2>
+      <p class="hint">
+        A master switch per sport, across <em>every</em> book — including
+        Pinnacle, which has no book toggle, and the ladder scans, which no book
+        toggle reaches. Off stops the fetch, the parse, the tick write and the
+        scans for that sport, and clears its odds so nothing downstream prices
+        off a frozen snapshot. Takes effect within
+        <span id="idle-sec-3">5</span>s. <code>SPORTS=</code> still decides which
+        sports this process runs at all; only those appear here.
+      </p>
+      <div id="sports"></div>
+    </div>
+
+    <div class="cfg-section">
       <h2>Scans</h2>
       <p class="hint">
         The anomaly scans are the expensive ones: a cold CrystalBet full-detail
@@ -162,10 +176,22 @@ const LIM_DESC = {
   max_start_days: "GLOBAL data horizon (days) — no book pulls, parses or emits an event starting later than this. 0 = no cap. Caps every per-book horizon below.",
   anomaly_extra_horizon_h: "CB anomaly scan: only games starting within (hours)",
   cb_expand_within_hours: "CB expansion: full ladders within (hours) — 0 = unlimited. Biggest CPU lever.",
+  anomaly_min_markets: "Ladder scan: skip games with FEWER markets than this (0 = off). Below ~50 a game has no alt-line ladder to check — measured 0 usable rungs across 99 games.",
+  anomaly_max_markets: "Ladder scan: skip games with MORE markets than this (0 = off). Above ~2000 an expand costs 4.2x for 1.5x the rungs, and big fixtures are 0.12% of historical anomalies.",
   setanta_detail_hours: "Setanta: full ladders within (hours), main markets beyond",
   crocobet_detail_hours: "Crocobet: full ladders within (hours), board inline beyond",
 };
 const BOOK_SLOT = { crystalbet: "cb" };  // state slot name differs for CB
+const SPORT_LABEL = {
+  basketball: "Basketball", soccer: "Soccer",
+  tennis: "Tennis", americanfootball: "American football",
+};
+const SPORT_DESC = {
+  basketball: "CB ladder scan runs the whole board here (~30 games).",
+  soccer: "By far the heaviest — ~1700 games in view, a 13.6 MB list panel per cycle.",
+  tennis: "~170 games in the scan horizon; expands at ~1.9s each.",
+  americanfootball: "Weekly slots, so the 7-day horizon usually leaves ~20 games.",
+};
 
 let META = {}, CFG = {};
 
@@ -233,6 +259,10 @@ function render() {
     const slot = BOOK_SLOT[k] || k;
     b.appendChild(toggleRow("books", k, k, BOOK_DESC[k], (window.LIVE || {})[slot]));
   }
+  const sp = document.getElementById("sports"); sp.innerHTML = "";
+  for (const k of (META.sports || []))
+    sp.appendChild(toggleRow("sports", k, SPORT_LABEL[k] || k, SPORT_DESC[k],
+                             (window.SPORT_LIVE || {})[k]));
   const s = document.getElementById("scans"); s.innerHTML = "";
   for (const k of META.scans) s.appendChild(toggleRow("scans", k, k, SCAN_DESC[k], null));
   const c = document.getElementById("cadence"); c.innerHTML = "";
@@ -244,6 +274,8 @@ function render() {
   document.getElementById("idle-sec").textContent = META.idle_poll_sec;
   const idle2 = document.getElementById("idle-sec-2");
   if (idle2) idle2.textContent = META.idle_poll_sec;
+  const idle3 = document.getElementById("idle-sec-3");
+  if (idle3) idle3.textContent = META.idle_poll_sec;
   renderPause();
 }
 
@@ -262,6 +294,7 @@ async function load() {
   const r = await fetch("/api/config");
   const d = await r.json();
   CFG = d.config; META = d.meta; window.LIVE = d.live;
+  window.SPORT_LIVE = d.sport_live || {};
   render();
 }
 
