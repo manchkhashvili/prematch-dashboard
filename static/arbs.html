@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Arbs / +EV — Prematch Dashboard</title>
-  <link rel="stylesheet" href="/style.css?v=20260810a" />
+  <link rel="stylesheet" href="/style.css?v=20260816a" />
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
   <!-- Phase 3.12: cross-page alert poller. Defer = fine; first poll runs 2s after load. -->
-  <script src="/alerts.js?v=20260810a" defer></script>
+  <script src="/alerts.js?v=20260816a" defer></script>
   <script src="/chart.js?v=20260613" defer></script>
   <script src="/marks.js?v=20260728"></script>
 </head>
@@ -64,22 +64,51 @@
     <span class="row-count" id="row-count">…</span>
   </div>
 
-  <!-- Advanced alert config (2026-08-12). Replaces the single "Alert >= N%"
-       box: an edge percentage alone says nothing about whether a row is
-       BETTABLE. Everything here is a GATE — a row must clear every criterion
-       you fill in, and a blank box is ignored. That is the opposite of the
-       Anomalies panel (which fires if ANY criterion is met), because there you
-       are casting a net and here you are narrowing one.
+  <!-- Advanced alert config (2026-08-12; layered 2026-08-16). Replaces the
+       single "Alert >= N%" box: an edge percentage alone says nothing about
+       whether a row is BETTABLE. Everything here is a GATE — a row must clear
+       every criterion you fill in, and a blank box is ignored.
+       Layers then put an OR around that: a row alerts if it clears ANY layer,
+       which is what lets one bar apply to short prices and a stricter one to
+       long prices. So it is AND within a layer, OR across them — where the
+       Anomalies panel is OR across its criteria, because there you are casting
+       a net and here you are narrowing one.
        Settings persist in localStorage and are read by the shared alerts.js,
        so the chime follows you across pages. -->
   <details class="alert-config" id="alert-config">
     <summary>Alert settings <span class="hint" id="alert-cfg-summary"></span></summary>
+
+    <!-- Layers (2026-08-16). One gate-set could not express "10%+ at odds 1-3
+         but 15%+ at odds 4-5", because within a layer every gate is ANDed — the
+         two rules contradict each other. So the panel now holds a LIST of
+         gate-sets and a row alerts if it clears ANY of them: AND inside a
+         layer, OR across layers. Each layer is the full editor below; the chips
+         pick which one you are editing. -->
+    <div class="layer-bar">
+      <span class="layer-lead" title="A row alerts if it clears ANY layer. Within a layer it must clear every filled box.">Layers</span>
+      <div class="cfg-chips" id="layer-tabs"></div>
+      <button type="button" class="layer-btn" id="layer-add"
+              title="Add an empty layer — e.g. a second band with a higher edge bar for longer prices.">+ add</button>
+    </div>
+    <div class="layer-head">
+      <label title="Park a layer without losing its settings. An inactive layer never fires.">
+        <input type="checkbox" id="layer-on" /> active
+      </label>
+      <input type="text" id="layer-name" maxlength="28" placeholder="name this layer" />
+      <button type="button" class="layer-btn" id="layer-dup"
+              title="Copy this layer's settings into a new one — the fast way to build a second odds band.">duplicate</button>
+      <button type="button" class="layer-btn" id="layer-del"
+              title="Delete this layer. The last remaining layer cannot be deleted.">delete</button>
+      <span class="cfg-note" id="layer-hint"></span>
+    </div>
+
     <div class="cfg-body">
 
       <fieldset id="arb-alert-thresholds">
         <legend>Size of the edge</legend>
         <p class="cfg-note">
-          A row must clear <b>every</b> filled box. Blank = ignore that one.
+          A row must clear <b>every</b> filled box <i>in this layer</i>. Blank =
+          ignore that one. Clearing any <i>other</i> layer alerts too.
         </p>
         <div class="cfg-row">
           <label for="alert-threshold" title="The Edge% column: book price vs Pinnacle's no-vig fair price.">Edge ≥</label>
@@ -214,7 +243,7 @@ document.querySelectorAll("#book-filter .chip").forEach(chip => {
 });
 minEdgeInput.addEventListener("change", fetchAndRender);
 
-// ── Advanced alert config (2026-08-12) ─────────────────────────────────────
+// ── Advanced alert config (2026-08-12; layered 2026-08-16) ─────────────────
 // Was a single "Alert ≥ N%" box. An edge percentage on its own says nothing
 // about whether a row is worth acting on: the biggest percentages sit on the
 // longest prices, which is exactly where Pinnacle's fair number is least
@@ -222,11 +251,22 @@ minEdgeInput.addEventListener("change", fetchAndRender);
 // GATE the row must clear, blank means "ignore this one", and the chip groups
 // default to "everything" so a newly added sport or book never goes quiet.
 //
+// LAYERS. One gate-set cannot express "10 %+ at odds 1–3 but 15 %+ at odds 4–5":
+// inside a gate-set every criterion is ANDed, and those two rules contradict
+// each other (no row is both ≤3 and ≥4). So the panel holds a LIST of gate-sets
+// and a row alerts if it clears ANY of them — AND within a layer, OR across
+// layers. Everything below edits the CURRENTLY SELECTED layer.
+//
 // These key names are the entire contract with alerts.js — a typo on either
 // side fails silently (panel looks saved, chime never fires), so
 // tests/test_arb_alerts_wiring.py pins them in both directions.
-const A_ON        = "alert_enabled";        // pre-existing keys kept, so an
-const A_EDGE      = "alert_threshold";      // existing setting survives
+const A_ON        = "alert_enabled";        // master switch, all layers
+const A_LAYERS    = "arb_alert_layers";     // JSON array of gate-sets
+// The pre-layers flat keys. Still read, exactly once, to migrate an existing
+// configuration into layer 1 — see loadLayers(). alerts.js keeps reading them
+// too, as its fallback for a browser that has not opened this page since the
+// upgrade, so neither side can strand a setting the other still honours.
+const A_EDGE      = "alert_threshold";
 const A_PP        = "arb_alert_pp";
 const A_STEP      = "arb_alert_step";
 const A_ODDS_MIN  = "arb_alert_odds_min";
@@ -242,6 +282,10 @@ const A_SPORTS    = "arb_alert_sports";
 const A_BOOKS     = "arb_alert_books";
 const A_MARKETS   = "arb_alert_markets";
 const A_PERIODS   = "arb_alert_periods";
+// Which layer the editor is pointed at. UI-only — alerts.js has no use for it,
+// and it is deliberately NOT named arb_alert_* so the orphan-key test does not
+// demand the poller read it.
+const A_SEL       = "arbs_alert_layer_sel";
 
 function lsGet(k, dflt) {
   try { const v = localStorage.getItem(k); return v === null ? dflt : v; }
@@ -249,71 +293,206 @@ function lsGet(k, dflt) {
 }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-const numEls = {
-  [A_EDGE]:      document.getElementById("alert-threshold"),
-  [A_PP]:        document.getElementById("alert-pp"),
-  [A_STEP]:      document.getElementById("alert-step"),
-  [A_ODDS_MIN]:  document.getElementById("alert-odds-min"),
-  [A_ODDS_MAX]:  document.getElementById("alert-odds-max"),
-  [A_KELLY_MIN]: document.getElementById("alert-kelly-min"),
-  [A_KELLY_MAX]: document.getElementById("alert-kelly-max"),
-  [A_PINMAX]:    document.getElementById("alert-pinmax"),
-  [A_LEAD_MIN]:  document.getElementById("alert-lead-min"),
-  [A_LEAD_MAX]:  document.getElementById("alert-lead-max"),
+// A gate-set is these ten numbers (null = off) plus six selections
+// (null = all). The field names are the wire format alerts.js parses.
+const NUM_GATES = {
+  edge:     ["alert-threshold", A_EDGE],
+  pp:       ["alert-pp",        A_PP],
+  step:     ["alert-step",      A_STEP],
+  oddsMin:  ["alert-odds-min",  A_ODDS_MIN],
+  oddsMax:  ["alert-odds-max",  A_ODDS_MAX],
+  kellyMin: ["alert-kelly-min", A_KELLY_MIN],
+  kellyMax: ["alert-kelly-max", A_KELLY_MAX],
+  pinMax:   ["alert-pinmax",    A_PINMAX],
+  leadMin:  ["alert-lead-min",  A_LEAD_MIN],
+  leadMaxH: ["alert-lead-max",  A_LEAD_MAX],
 };
-
-// Chip groups: {storageKey: [gridId, options]}. `null` stored (or absent) means
-// "all" — deliberately NOT an empty list, so we can tell "never configured"
-// from "user unselected everything" and treat the latter as all too. Options
-// are a seed list; anything the live feed shows gets merged in (see
-// mergeSeenOptions) so a sport added to the backend appears here without an
-// edit to this file.
-const CHIP_GROUPS = {
-  [A_KINDS]:   ["alert-kinds",   ["+EV", "ARB"]],
-  [A_CONF]:    ["alert-conf",    ["strong", "medium", "weak"]],
-  [A_SPORTS]:  ["alert-sports",  ["basketball", "soccer", "tennis", "americanfootball"]],
-  [A_BOOKS]:   ["alert-books",   ["cb", "liderbet", "betlive", "crocobet", "setanta"]],
-  [A_MARKETS]: ["alert-markets", ["moneyline", "spread", "total", "team_total"]],
-  [A_PERIODS]: ["alert-periods", ["FT", "H1", "Q1", "Q2", "Q3", "Q4"]],
+// Chip groups: field -> [gridId, legacyKey, seedOptions]. Options are a seed;
+// anything the live feed shows gets merged in (see mergeSeenOptions) so a sport
+// added to the backend appears here without an edit to this file.
+const SET_GATES = {
+  kinds:   ["alert-kinds",   A_KINDS,   ["+EV", "ARB"]],
+  conf:    ["alert-conf",    A_CONF,    ["strong", "medium", "weak"]],
+  sports:  ["alert-sports",  A_SPORTS,  ["basketball", "soccer", "tennis", "americanfootball"]],
+  books:   ["alert-books",   A_BOOKS,   ["cb", "liderbet", "betlive", "crocobet", "setanta"]],
+  markets: ["alert-markets", A_MARKETS, ["moneyline", "spread", "total", "team_total"]],
+  periods: ["alert-periods", A_PERIODS, ["FT", "H1", "Q1", "Q2", "Q3", "Q4"]],
 };
-// Options discovered from the feed, merged into the seed lists above.
 const chipOptions = {};
-for (const [key, [, seed]] of Object.entries(CHIP_GROUPS)) chipOptions[key] = [...seed];
+for (const [f, [, , seed]] of Object.entries(SET_GATES)) chipOptions[f] = [...seed];
 
-function loadChipSel(key) {
-  const raw = lsGet(key, null);
-  if (raw === null || raw === "") return null;          // null = all
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) && arr.length ? new Set(arr) : null;
-  } catch (e) { return null; }
-}
-function saveChipSel(key, set) {
-  // An empty selection is stored as "" (= all), so unticking the last chip
-  // widens the alert rather than silencing it entirely — silencing is what the
-  // master switch is for.
-  lsSet(key, (!set || set.size === 0) ? "" : JSON.stringify([...set]));
+function emptyGates() {
+  const g = {};
+  for (const f of Object.keys(NUM_GATES)) g[f] = null;
+  for (const f of Object.keys(SET_GATES)) g[f] = null;
+  return g;
 }
 
-function renderChipGroup(key) {
-  const [gridId] = CHIP_GROUPS[key];
-  const grid = document.getElementById(gridId);
-  const sel = loadChipSel(key);
+// Read the pre-layers flat keys into one gate-set. Runs once, on the first load
+// after the upgrade, so an existing alert configuration keeps working untouched
+// instead of silently reverting to "fires on everything".
+function legacyGates() {
+  const g = emptyGates();
+  for (const [f, [, key]] of Object.entries(NUM_GATES)) {
+    const raw = lsGet(key, "");
+    const n = Number(String(raw).trim());
+    g[f] = (String(raw).trim() === "" || isNaN(n)) ? null : n;
+  }
+  for (const [f, [, key]] of Object.entries(SET_GATES)) {
+    const raw = lsGet(key, null);
+    if (raw === null || raw === "") { g[f] = null; continue; }
+    try {
+      const arr = JSON.parse(raw);
+      g[f] = (Array.isArray(arr) && arr.length) ? arr : null;
+    } catch (e) { g[f] = null; }
+  }
+  return g;
+}
+
+let layers = null;      // in-memory cache; loadLayers() fills it
+
+function loadLayers() {
+  if (layers) return layers;
+  const raw = lsGet(A_LAYERS, null);
+  if (raw) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length) {
+        layers = arr.map((l, i) => ({
+          name: String(l.name || `Layer ${i + 1}`),
+          on: l.on !== false,
+          g: Object.assign(emptyGates(), l.g || {}),
+        }));
+        return layers;
+      }
+    } catch (e) { /* fall through to migration */ }
+  }
+  layers = [{ name: "Layer 1", on: true, g: legacyGates() }];
+  saveLayers();
+  return layers;
+}
+function saveLayers() { lsSet(A_LAYERS, JSON.stringify(layers)); }
+
+function selIdx() {
+  const n = parseInt(lsGet(A_SEL, "0"), 10);
+  const max = loadLayers().length - 1;
+  return (isNaN(n) || n < 0 || n > max) ? 0 : n;
+}
+function setSelIdx(i) { lsSet(A_SEL, String(i)); }
+function curLayer() { return loadLayers()[selIdx()]; }
+
+// ── layer bar ──────────────────────────────────────────────────────────────
+
+function layerSummary(L) {
+  const g = L.g, bits = [];
+  if (g.edge !== null) bits.push(`edge ≥ ${g.edge}%`);
+  if (g.pp !== null) bits.push(`≥ ${g.pp}pp`);
+  if (g.oddsMin !== null || g.oddsMax !== null) {
+    bits.push(`odds ${g.oddsMin === null ? "…" : g.oddsMin}–${g.oddsMax === null ? "…" : g.oddsMax}`);
+  }
+  if (g.kellyMin !== null || g.kellyMax !== null) {
+    bits.push(`kelly ${g.kellyMin === null ? "…" : g.kellyMin}–${g.kellyMax === null ? "…" : g.kellyMax}`);
+  }
+  if (g.pinMax !== null) bits.push(`pin ≥ ${g.pinMax}`);
+  if (g.leadMin !== null || g.leadMaxH !== null) {
+    bits.push(`kickoff ${g.leadMin === null ? "0" : g.leadMin}min–${g.leadMaxH === null ? "…" : g.leadMaxH}h`);
+  }
+  const narrowed = Object.keys(SET_GATES).filter(f => Array.isArray(g[f]) && g[f].length);
+  if (narrowed.length) bits.push(`filtered: ${narrowed.join(", ")}`);
+  return bits.length ? bits.join(" · ") : "no criteria (fires on everything)";
+}
+
+/* Odds bands can leave a HOLE, and the hole is silent.
+ *
+ * Configure "1–3" and "4–5" and a 40 % edge at 3.50 falls between them and never
+ * chimes — the panel looks fully configured and the row is simply never heard.
+ * That is the same silent-failure shape this whole file is careful about, so say
+ * it out loud rather than letting it be discovered by missing a bet.
+ *
+ * Only meaningful when EVERY active layer bounds the odds: one unbounded layer
+ * covers the whole range and there is no hole.
+ */
+function oddsGaps() {
+  const live = loadLayers().filter(L => L.on);
+  if (live.length < 2) return [];
+  const spans = [];
+  for (const L of live) {
+    const lo = L.g.oddsMin, hi = L.g.oddsMax;
+    if (lo === null && hi === null) return [];      // covers everything
+    spans.push([lo === null ? 1 : lo, hi === null ? Infinity : hi]);
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  const gaps = [];
+  let reach = spans[0][1];
+  for (const [lo, hi] of spans.slice(1)) {
+    if (lo > reach) gaps.push([reach, lo]);
+    reach = Math.max(reach, hi);
+  }
+  return gaps;
+}
+
+function renderLayerBar() {
+  const all = loadLayers();
+  const sel = selIdx();
+  const tabs = document.getElementById("layer-tabs");
+  tabs.innerHTML = "";
+  all.forEach((L, i) => {
+    const el = document.createElement("span");
+    el.className = "chip" + (i === sel ? " sel" : "") + (L.on ? "" : " parked");
+    el.textContent = L.name;
+    el.title = (L.on ? "" : "(inactive) ") + layerSummary(L);
+    el.addEventListener("click", () => { setSelIdx(i); restoreAlertCfg(); });
+    tabs.appendChild(el);
+  });
+  const L = curLayer();
+  document.getElementById("layer-on").checked = L.on;
+  document.getElementById("layer-name").value = L.name;
+  document.getElementById("layer-del").disabled = all.length <= 1;
+  const hint = document.getElementById("layer-hint");
+  const gaps = oddsGaps();
+  if (gaps.length) {
+    hint.textContent = "⚠ nothing alerts at odds "
+      + gaps.map(([a, b]) => `${a}–${b}`).join(", ")
+      + " — no layer covers that band";
+    hint.classList.add("warn-note");
+  } else {
+    hint.textContent =
+      all.length > 1 ? `a row alerts if it clears any of ${all.length} layers` : "";
+    hint.classList.remove("warn-note");
+  }
+}
+
+// ── chip groups (scoped to the selected layer) ──────────────────────────────
+
+function chipSel(field) {
+  const v = curLayer().g[field];
+  return (Array.isArray(v) && v.length) ? new Set(v) : null;   // null = all
+}
+function saveChipSel(field, set) {
+  // Everything selected is the same as "all", stored as null so an option added
+  // later is included automatically rather than silently excluded.
+  curLayer().g[field] =
+    (!set || set.size === 0 || set.size === chipOptions[field].length) ? null : [...set];
+  saveLayers();
+}
+
+function renderChipGroup(field) {
+  const grid = document.getElementById(SET_GATES[field][0]);
+  const sel = chipSel(field);
   grid.innerHTML = "";
-  for (const opt of chipOptions[key]) {
+  for (const opt of chipOptions[field]) {
     const el = document.createElement("span");
     el.className = "chip" + (sel === null || sel.has(opt) ? " on" : "");
     el.textContent = opt;
     el.dataset.value = opt;
     el.addEventListener("click", () => {
-      const cur = loadChipSel(key);
+      const cur = chipSel(field);
       // Turning one chip off while "all" is implied means "all except this".
-      const next = cur === null ? new Set(chipOptions[key]) : new Set(cur);
+      const next = cur === null ? new Set(chipOptions[field]) : new Set(cur);
       if (next.has(opt)) next.delete(opt); else next.add(opt);
-      // Everything selected is the same as "all" — store it as such so a later
-      // addition to the option list is included automatically.
-      saveChipSel(key, next.size === chipOptions[key].length ? null : next);
-      renderChipGroup(key);
+      saveChipSel(field, next);
+      renderChipGroup(field);
+      renderLayerBar();
       paintAlertCfg();
     });
     grid.appendChild(el);
@@ -324,67 +503,117 @@ function renderChipGroup(key) {
 // can never offer a narrower world than the table shows.
 function mergeSeenOptions(rows) {
   const seen = {
-    [A_KINDS]:   new Set(rows.map(o => o.kind).filter(Boolean)),
-    [A_SPORTS]:  new Set(rows.map(o => o.sport).filter(Boolean)),
-    [A_BOOKS]:   new Set(rows.map(o => o.book).filter(Boolean)),
-    [A_MARKETS]: new Set(rows.map(o => o.market_type).filter(Boolean)),
-    [A_PERIODS]: new Set(rows.map(o => o.period).filter(Boolean)),
+    kinds:   new Set(rows.map(o => o.kind).filter(Boolean)),
+    sports:  new Set(rows.map(o => o.sport).filter(Boolean)),
+    books:   new Set(rows.map(o => o.book).filter(Boolean)),
+    markets: new Set(rows.map(o => o.market_type).filter(Boolean)),
+    periods: new Set(rows.map(o => o.period).filter(Boolean)),
   };
   let changed = false;
-  for (const [key, vals] of Object.entries(seen)) {
+  for (const [field, vals] of Object.entries(seen)) {
     for (const v of vals) {
-      if (!chipOptions[key].includes(v)) { chipOptions[key].push(v); changed = true; }
+      if (!chipOptions[field].includes(v)) { chipOptions[field].push(v); changed = true; }
     }
   }
-  if (changed) for (const key of Object.keys(CHIP_GROUPS)) renderChipGroup(key);
+  if (changed) for (const field of Object.keys(SET_GATES)) renderChipGroup(field);
 }
+
+// ── load / save the selected layer ─────────────────────────────────────────
 
 function restoreAlertCfg() {
   alertEnabled.checked = lsGet(A_ON, "0") === "1";
-  for (const [key, el] of Object.entries(numEls)) {
-    if (el) el.value = lsGet(key, "");
+  const g = curLayer().g;
+  for (const [f, [id]] of Object.entries(NUM_GATES)) {
+    const el = document.getElementById(id);
+    if (el) el.value = g[f] === null ? "" : g[f];
   }
-  for (const key of Object.keys(CHIP_GROUPS)) renderChipGroup(key);
+  for (const field of Object.keys(SET_GATES)) renderChipGroup(field);
+  renderLayerBar();
   paintAlertCfg();
 }
 
 function syncAlertCfg() {
   lsSet(A_ON, alertEnabled.checked ? "1" : "0");
-  for (const [key, el] of Object.entries(numEls)) {
-    if (el) lsSet(key, el.value.trim());
+  const L = curLayer();
+  for (const [f, [id]] of Object.entries(NUM_GATES)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const raw = el.value.trim();
+    const n = Number(raw);
+    L.g[f] = (raw === "" || isNaN(n)) ? null : n;
   }
+  L.on = document.getElementById("layer-on").checked;
+  L.name = document.getElementById("layer-name").value.trim() || `Layer ${selIdx() + 1}`;
+  saveLayers();
+  renderLayerBar();
   paintAlertCfg();
 }
 
 // Summarise in the closed state so the settings are legible without opening —
 // the panel is long, and "is my alert actually going to fire?" should be
-// answerable at a glance.
+// answerable at a glance. With layers the summary lists them, since which one
+// matched is the first thing you want to know when the chime goes off.
 function paintAlertCfg() {
-  document.getElementById("arb-alert-thresholds").classList.toggle("off", !alertEnabled.checked);
-  document.getElementById("arb-alert-ranges").classList.toggle("off", !alertEnabled.checked);
-  document.getElementById("arb-alert-scope").classList.toggle("off", !alertEnabled.checked);
+  for (const id of ["arb-alert-thresholds", "arb-alert-ranges", "arb-alert-scope"]) {
+    document.getElementById(id).classList.toggle("off", !alertEnabled.checked);
+  }
   const el = document.getElementById("alert-cfg-summary");
   if (!alertEnabled.checked) { el.textContent = "— off"; return; }
-  const v = k => (numEls[k] && numEls[k].value.trim()) || "";
-  const bits = [];
-  if (v(A_EDGE)) bits.push(`edge ≥ ${v(A_EDGE)}%`);
-  if (v(A_PP)) bits.push(`≥ ${v(A_PP)}pp`);
-  if (v(A_ODDS_MIN) || v(A_ODDS_MAX)) bits.push(`odds ${v(A_ODDS_MIN) || "…"}–${v(A_ODDS_MAX) || "…"}`);
-  if (v(A_KELLY_MIN) || v(A_KELLY_MAX)) bits.push(`kelly ${v(A_KELLY_MIN) || "…"}–${v(A_KELLY_MAX) || "…"}`);
-  if (v(A_PINMAX)) bits.push(`pin limit ≥ ${v(A_PINMAX)}`);
-  if (v(A_LEAD_MIN) || v(A_LEAD_MAX)) bits.push(`kickoff ${v(A_LEAD_MIN) || "0"}min–${v(A_LEAD_MAX) || "…"}h`);
-  const narrowed = Object.keys(CHIP_GROUPS)
-    .filter(k => loadChipSel(k) !== null)
-    .map(k => CHIP_GROUPS[k][0].replace("alert-", ""));
-  if (narrowed.length) bits.push(`filtered: ${narrowed.join(", ")}`);
-  el.textContent = bits.length ? "— " + bits.join(" · ") : "— on, no criteria (fires on everything)";
+  const live = loadLayers().filter(L => L.on);
+  if (!live.length) { el.textContent = "— on, but every layer is inactive"; return; }
+  el.textContent = "— " + live.map(L => `${L.name}: ${layerSummary(L)}`).join("  |  ");
 }
 
+// ── layer add / duplicate / delete ─────────────────────────────────────────
+
+document.getElementById("layer-add").addEventListener("click", () => {
+  const all = loadLayers();
+  all.push({ name: `Layer ${all.length + 1}`, on: true, g: emptyGates() });
+  saveLayers();
+  setSelIdx(all.length - 1);
+  restoreAlertCfg();
+});
+document.getElementById("layer-dup").addEventListener("click", () => {
+  const all = loadLayers();
+  const src = curLayer();
+  all.splice(selIdx() + 1, 0, {
+    name: `${src.name} copy`.slice(0, 28), on: src.on,
+    g: JSON.parse(JSON.stringify(src.g)),
+  });
+  saveLayers();
+  setSelIdx(selIdx() + 1);
+  restoreAlertCfg();
+});
+document.getElementById("layer-del").addEventListener("click", () => {
+  const all = loadLayers();
+  if (all.length <= 1) return;       // never leave zero layers — that is what
+  all.splice(selIdx(), 1);           // the master switch is for
+  saveLayers();
+  setSelIdx(Math.min(selIdx(), all.length - 1));
+  restoreAlertCfg();
+});
+document.getElementById("layer-on").addEventListener("change", syncAlertCfg);
+document.getElementById("layer-name").addEventListener("change", syncAlertCfg);
+
 alertEnabled.addEventListener("change", syncAlertCfg);
-for (const el of Object.values(numEls)) {
+for (const [, [id]] of Object.entries(NUM_GATES)) {
+  const el = document.getElementById(id);
   if (el) el.addEventListener("change", syncAlertCfg);
 }
 restoreAlertCfg();
+
+// Remember whether the panel is open (2026-08-16). <details> defaults to closed
+// and browsers do not persist that, so every reload hid the entire config —
+// including, on the release that added them, the layer chips, which made a
+// shipped feature look like it had not shipped. Once you open it, it stays open.
+(function rememberPanelOpen() {
+  const d = document.getElementById("alert-config");
+  const KEY = "arbs_alert_panel_open";
+  try { d.open = localStorage.getItem(KEY) === "1"; } catch (e) {}
+  d.addEventListener("toggle", () => {
+    try { localStorage.setItem(KEY, d.open ? "1" : "0"); } catch (e) {}
+  });
+})();
 
 // Phase 3.12: sound + poll logic moved to shared static/alerts.js, which
 // runs on every dashboard page (matches, arbs, bets, calc, unmatched) so

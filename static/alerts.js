@@ -46,6 +46,9 @@
   // (narrowing one). A blank box is ignored; an empty chip selection means
   // "all", so a sport or book added to the backend later keeps alerting instead
   // of silently dropping out.
+  // Layers: a JSON list of gate-sets, ORed. Present since 2026-08-16; when
+  // absent the flat keys below are read as a single layer instead.
+  const A_LAYERS    = "arb_alert_layers";
   const A_PP        = "arb_alert_pp";              // min edge in probability points
   const A_STEP      = "arb_alert_step";            // re-alert only after +N pp
   const A_ODDS_MIN  = "arb_alert_odds_min";
@@ -397,6 +400,93 @@
     };
   }
 
+  /* ── Alert LAYERS (2026-08-16) ──────────────────────────────────────────
+   *
+   * A single gate-set cannot express "10 %+ at odds 1–3 but 15 %+ at odds 4–5":
+   * within a gate-set every criterion is ANDed, and those two rules contradict
+   * each other. So the panel stores a LIST of gate-sets and a row alerts if it
+   * clears ANY of them — AND within a layer, OR across layers.
+   *
+   * Stored shape: [{name, on, g:{edge, pp, step, oddsMin, …, kinds:[…] | null}}]
+   * with null meaning "off" for a number and "all" for a selection, matching
+   * what readOppGates() produces.
+   */
+  function normaliseGates(g) {
+    const n = v => {
+      if (v === null || v === undefined || String(v).trim() === "") return null;
+      const x = Number(v);
+      return isNaN(x) ? null : x;
+    };
+    const s = v => (Array.isArray(v) && v.length) ? new Set(v) : null;
+    return {
+      edge: n(g.edge), pp: n(g.pp), step: n(g.step),
+      oddsMin: n(g.oddsMin), oddsMax: n(g.oddsMax),
+      kellyMin: n(g.kellyMin), kellyMax: n(g.kellyMax),
+      pinMax: n(g.pinMax), leadMin: n(g.leadMin), leadMaxH: n(g.leadMaxH),
+      kinds: s(g.kinds), conf: s(g.conf), sports: s(g.sports),
+      books: s(g.books), markets: s(g.markets), periods: s(g.periods),
+    };
+  }
+
+  // Active layers, newest format first. Falls back to the pre-layers flat keys
+  // as a SINGLE layer — that is what runs in a browser which has not opened
+  // arbs.html since the upgrade, so an existing configuration is never silently
+  // downgraded to "fires on everything".
+  function readLayers() {
+    let raw = null;
+    try { raw = localStorage.getItem(A_LAYERS); } catch (e) {}
+    if (raw) {
+      try {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length) {
+          return arr
+            .filter(l => l && l.on !== false)
+            .map((l, i) => ({ name: String(l.name || `Layer ${i + 1}`),
+                              g: normaliseGates(l.g || {}) }));
+        }
+      } catch (e) { /* fall through */ }
+    }
+    return [{ name: "Layer 1", g: readOppGates() }];
+  }
+
+  // /api/opportunities defaults to min_edge=1, so a layer asking about edges
+  // BELOW 1 % has to widen the query or the rows it wants never reach us — the
+  // panel would look configured and simply never fire. With layers the floor is
+  // the most generous one any active layer needs.
+  function oppQueryFloor(layers) {
+    let lowest = null;
+    for (const L of layers) {
+      if (L.g.edge === null) return 1;      // no edge gate → 1 is already as wide as we go
+      lowest = (lowest === null) ? L.g.edge : Math.min(lowest, L.g.edge);
+    }
+    if (lowest === null) return 1;
+    return lowest < 1 ? Math.max(0, lowest) : 1;
+  }
+
+  // Which layers does this row clear? Confidence lives here rather than in
+  // passesGates because it owns the "unset means exclude weak" default, and it
+  // is per-layer: a longshot band may want weak rows excluded while a
+  // short-price band does not care.
+  function matchingLayers(o, layers) {
+    const conf = o.confidence || "medium";
+    return layers.filter(L => {
+      const confOk = L.g.conf ? L.g.conf.has(conf) : conf !== "weak";
+      return confOk && passesGates(o, L.g);
+    });
+  }
+
+  // How much better must an already-alerted edge get before it speaks again?
+  // The MINIMUM across the layers that matched: under OR semantics, if any
+  // layer wants to hear about a +2pp improvement, you hear about it.
+  function effectiveStep(matched) {
+    let best = null;
+    for (const L of matched) {
+      const s = L.g.step === null ? DEFAULT_RE_ALERT_PP : L.g.step;
+      best = (best === null) ? s : Math.min(best, s);
+    }
+    return best === null ? DEFAULT_RE_ALERT_PP : best;
+  }
+
   // Edge in PROBABILITY POINTS rather than percent. edge_pct flatters long
   // prices — a 10.0 against an 8.0 fair reads "+25%" but is only 2.5pp, while a
   // 2.0 against a 1.9 fair reads "+5.3%" and is worth MORE at 2.6pp. Without
@@ -463,10 +553,10 @@
     // seen-set silently the first time so toggling alerts on later doesn't
     // bip on opps that were already on screen.)
     const enabled = (localStorage.getItem(ENABLED_KEY) === "1");
-    const gates = readOppGates();
-    // Re-alert step: how much better an already-seen edge must get before it
-    // speaks again. Blank → the 5pp this was hardcoded at before the panel.
-    const reAlertPp = gates.step === null ? DEFAULT_RE_ALERT_PP : gates.step;
+    // One or many gate-sets; a row alerts if it clears ANY of them. The
+    // re-alert step is per-layer now, so it is resolved per row below rather
+    // than once here.
+    const layers = readLayers();
 
     let opps;
     try {
@@ -478,8 +568,7 @@
       // or the row it is asking about never reaches us. That is easy to miss —
       // the panel would look configured and simply never fire, which is the
       // failure mode this whole file is careful about.
-      const floor = (gates.edge !== null && gates.edge < 1)
-        ? Math.max(0, gates.edge) : 1;
+      const floor = oppQueryFloor(layers);
       const r = await fetch("/api/opportunities?min_edge=" + floor);
       if (!r.ok) return;
       opps = await r.json();
@@ -491,9 +580,14 @@
     const currentKeys = new Set();
     let newAtThreshold = 0;
 
+    const firedBy = new Set();      // layer names, for the console line
     for (const o of opps) {
       const k = alertKey(o);
       currentKeys.add(k);
+      // Which layers this row clears decides BOTH whether it may sound and how
+      // much improvement re-arms it, so resolve them before the seen-set check.
+      const matched = matchingLayers(o, layers);
+      const reAlertPp = effectiveStep(matched);
       const prevEdge = seenKeys.get(k);
       const isNew = (prevEdge === undefined) || (o.edge_pct - prevEdge >= reAlertPp);
       if (isNew) seenKeys.set(k, o.edge_pct);
@@ -507,14 +601,13 @@
       // was least reliable). That rule is now the DEFAULT of the confidence
       // chip group rather than a hard-coded law, so it can be inspected and
       // overridden; with no confidence selection saved we keep the old
-      // behaviour exactly.
-      const conf = o.confidence || "medium";
-      const confOk = gates.conf ? gates.conf.has(conf) : conf !== "weak";
-      // Rows still enter seenKeys even when gated out, so one that later starts
-      // passing at the same edge doesn't fire retroactively.
-      if (isNew && !isFirstEverPoll && enabled && !isMuted && confOk
-          && passesGates(o, gates)) {
+      // behaviour exactly. It is applied per-layer inside matchingLayers().
+      //
+      // Rows still enter seenKeys even when no layer matches, so one that later
+      // starts passing at the same edge doesn't fire retroactively.
+      if (isNew && !isFirstEverPoll && enabled && !isMuted && matched.length) {
         newAtThreshold++;
+        firedBy.add(matched[0].name);
       }
     }
 
@@ -554,8 +647,10 @@
       if (claimSound("opps")) playPing();
       // Console hint for the dev console-watcher case.
       try {
-        console.log(`[alert] ${newAtThreshold} new opportunity(ies) passing the `
-                    + `configured gates`);
+        // Name the layer(s) — with several bands configured, "which rule fired"
+        // is the first thing you want to know when the chime goes off.
+        console.log(`[alert] ${newAtThreshold} new opportunity(ies) via `
+                    + `${[...firedBy].join(", ") || "?"}`);
       } catch (e) {}
     }
   }
@@ -813,6 +908,9 @@
   // fine. tests/test_anomaly_alerts_logic.py drives these under node.
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { ladderPasses, consPasses, evaluateFeed, cfgNum,
-                       ladderKey, consKey, RE_ALERT_FACTOR };
+                       ladderKey, consKey, RE_ALERT_FACTOR,
+                       readLayers, normaliseGates, matchingLayers,
+                       effectiveStep, oppQueryFloor, passesGates,
+                       readOppGates, DEFAULT_RE_ALERT_PP };
   }
 })();

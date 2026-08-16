@@ -399,3 +399,106 @@ covered in about four.
 The band applies to the ladder scan **only**. The dashboard price path expands on
 `cb_expand_within_hours` and keeps every game — dropping a big fixture there
 would remove it from the Arbs tab.
+
+---
+
+## Parsing off the event loop: threads don't work, processes do
+
+CB's detail parse is `BeautifulSoup(html, "html5lib")` + `cb_detail`. html5lib is
+**pure Python**, so the GIL serialises it:
+
+| | 4 pages |
+|---|---|
+| 1 thread | 3.56s |
+| 4 threads | **4.03s** (0.88×, *slower*) |
+| 1 process | 8.35s / 8 pages |
+| 6 processes | 3.38s / 8 pages (2.47×) |
+
+`asyncio.to_thread` — which the transport already used — moves work off the
+loop's *stack* but not off its *thread of execution*. The event-loop impact is
+the real prize, not the throughput:
+
+| soccer list panel, 16 MB | parse | loop ticks | max stall |
+|---|---|---|---|
+| in-process | 9.48s | **1** | **9,477 ms** |
+| pool (3 workers) | 9.06s | 177 | **21 ms** |
+
+Same wall time; with the pool off, *nothing else in the process runs* for nine
+and a half seconds, every cycle, per sport.
+
+**Design constraint:** a BeautifulSoup tree cannot cross a process boundary, so
+the split has to be bytes-in / Odds-out. `cb_http` grew `expand_detail_raw` and
+`fetch_list_raw` (unnormalised strings, same English-flip check); the worker owns
+normalise + parse and returns `Odds` / `_GameOnList` dataclasses. The classifier
+travels as a **name**, since functions don't pickle, and `_classify_mode` refuses
+an unknown one rather than guessing which markets get parsed.
+
+`CB_PARSE_PROCS=3`, `0` disables, **off under pytest** (a worker spawns a fresh
+interpreter and re-imports the scraper stack — left on, a 4 s suite timed out).
+Any pool failure degrades to in-process parsing.
+
+### Negative result: lxml is not a substitute
+
+It would have been simpler and it does not work.
+
+| | saved fixtures | **live pages** |
+|---|---|---|
+| lxml vs html5lib | identical Odds, 3.1–4.7× faster | **0/15 soccer, 0/10 basketball match** |
+
+lxml over-collects on CB's unclosed `<td>`s — one game returned 59 markets under
+html5lib and 108 under lxml. **The saved fixtures are a trap**: they're
+`page.content()` captures, i.e. already browser-repaired, so they cannot test raw
+panel markup at all. Any future parser swap must be verified against *live*
+deltas.
+
+### Negative result: the other books were never the problem
+
+Heartbeating the loop during a book fetch:
+
+| book | fetch | loop ticks | max stall |
+|---|---|---|---|
+| xbet | 53.7s | **1050** | 55 ms |
+| liderbet | 57.9s | 1047 | 309 ms |
+
+They're **network-bound**, and curl_cffi releases the GIL during I/O — so
+`to_thread` genuinely works for them. Moving them into a pool made liderbet 25%
+*slower* (57.9s → 72.4s) from pickling 33k Odds back. Only CB's parse is
+CPU-bound. The rule: `to_thread` is fine for I/O-bound work and useless for
+CPU-bound work, and you have to measure which one you have.
+
+---
+
+## The dashboard was starving the scanner
+
+The finding that explained a full day of symptoms, and the one that was invisible
+from inside the app.
+
+`/api/opportunities` costs **~25 s** of pure Python — `match_events` is 2.6 s per
+book/sport pair and `_compute_opportunities_now` runs every enabled soft book ×
+every sport. `static/alerts.js` runs on **every dashboard page** and polls it
+every 30 s, **per tab, independently**. Two or three tabs is an effective
+10-second poll of a 25-second computation, and the loop never surfaces.
+
+Same process, nothing changed but closing the browser tabs:
+
+| | UI open | UI closed |
+|---|---|---|
+| `/api/config` (a dict read) | 8–17 s | **0.004 s** |
+| `/api/anomalies` | 66 s | **0.035 s** |
+| app CPU | 97% | **0.6%** |
+
+~2000× on loop latency. The soccer ladder scan was never slow — 23–37 s per game
+against 1.1 s standalone — it was **starved by the dashboard watching it**. This
+also explains "it used to work": nothing broke, the matcher grew past the poll
+interval as the board grew.
+
+**Fix:** `limits.api_cache_sec` — a 10 s TTL on the expensive read endpoints so
+N pollers and N tabs share one computation. Verified with 4 simulated tabs
+polling like `alerts.js`: `/api/config` p50 **0.007 s**, p90 0.460 s, against
+8–17 s constant before. Bounded to 64 keys (keys carry query params); `0`
+disables; off under pytest, because a cache makes "mutate, re-query, assert"
+non-deterministic and several existing tests do exactly that.
+
+**Monitoring is load.** My own watcher polled `/api/anomalies` — the same
+matching — every two minutes for hours while "measuring". Any probe against a
+single-threaded app is part of the experiment.

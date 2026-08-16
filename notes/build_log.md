@@ -5988,3 +5988,100 @@ U23, El Salvador reserves, Solomon Islands — exactly the profile the 7421-row
 history predicted. The gradual publish is visible in that climb.
 
 8 new tests; 1403 green.
+
+─────────────────────────────────────────────────────────────────────────────
+2026-08-16 — Layered opportunity alerts
+─────────────────────────────────────────────────────────────────────────────
+
+Owner: "10%+ for 1-3 odds, 15%+ for 4-5 etc, so option to add layers of alerts".
+
+## Why one gate-set could not do it
+
+The Arbs alert panel (2026-08-12) ANDs every filled criterion. So "edge ≥ 10 AND
+odds 1–3" and "edge ≥ 15 AND odds 4–5" cannot coexist in it — as one gate-set
+they demand a row be both ≤3 and ≥4, which nothing is. The request is for an OR
+at a level above the gates.
+
+Shape: **AND within a layer, OR across layers.** A layer is the full existing
+gate-set (all 16 criteria), so nothing about the per-criterion semantics changed
+— they were already right, they just needed to be instantiable more than once.
+
+## Storage and the migration
+
+`arb_alert_layers` = `[{name, on, g:{edge, pp, step, oddsMin, …, books:[…]|null}}]`,
+null meaning "off" for a number and "all" for a selection — the same convention
+`readOppGates()` already produced, so `passesGates()` was reused untouched.
+
+The pre-layers flat keys (`alert_threshold`, `arb_alert_odds_min`, …) are still
+read, in BOTH files, as a single layer:
+  * arbs.html migrates them into `Layer 1` once and writes it back;
+  * alerts.js falls back to them when `arb_alert_layers` is absent — which is
+    what runs in a browser that has not opened the Arbs tab since the upgrade.
+Without that second path an existing configuration would silently widen to
+"fires on everything" until the user happened to visit the page. Both directions
+are tested.
+
+## Three things that needed thought, not just plumbing
+
+**1. The query floor.** `/api/opportunities` pre-filters at `min_edge`, and the
+old code widened the request when the single edge gate was below 1 %. With
+layers the floor has to be the most generous ACTIVE layer, or a low-edge band is
+silently starved of the rows it asks about — configured and dead, the failure
+mode this file keeps producing. Now `oppQueryFloor()`, with a table test
+covering order-independence and the case where an unbounded layer wins.
+
+**2. The re-alert step is per layer.** Under OR semantics the step belongs to
+whichever layer matched, and when several match the MINIMUM wins: if any
+matching layer wants to hear about a +1pp improvement, you hear about it.
+
+**3. Odds bands leave holes, and a hole is silent.** This fell out of the
+end-to-end demo rather than review: with bands 1–3 and 4–5, a **40 % edge at
+3.50 never chimes**. The panel looks fully configured. So `oddsGaps()` warns
+(`⚠ nothing alerts at odds 3–4`) whenever every active layer bounds the odds and
+they do not join up — a parked layer deliberately does not count as cover.
+
+## Testing
+
+The static wiring guards had to be re-pointed, not deleted: the controls are now
+read through the `NUM_GATES`/`SET_GATES` tables rather than one
+`getElementById` per box, so membership of those tables IS the wiring. Same
+strength, new structure.
+
+Two behavioural suites, both driving the real shipped source under node:
+  * `test_arb_alert_layers.py` — the requested two-band example as an
+    11-row parametrised table (including that 12 % at odds 4.5 must NOT fire on
+    the short band's 10 % bar, and that 3.5 falls in the gap), plus migration,
+    corrupt storage, the query floor, per-layer step, per-layer confidence
+    default, and the ARB Kelly exemption.
+  * `test_arb_alert_panel_runs.py` — the panel's init path actually RUNS. It
+    lives in arbs.html's single inline `<script>`, so a throw there kills
+    everything after it including the opportunity table's own render; parsing
+    proves nothing about that. No jsdom here and not worth a dependency, so a
+    ~40-line DOM stub executes the extracted block: migration, chip rendering,
+    add/duplicate/delete, and that `duplicate` deep-copies (a shallow copy would
+    make the two bands edit each other — the bug that would quietly make a
+    second band impossible).
+
+The node harness moved to `tests/jsrun.py` and both JS suites now share it;
+alerts.js touches several browser globals at load and two hand-maintained stubs
+would drift, with the second one to break looking like a real failure.
+
+Ten mutations checked, all caught: ORing turned into first-layer-only, inactive
+layers firing, missing gate fields defaulting to 0, the floor taking the first
+layer instead of the lowest, `effectiveStep` taking max instead of min, the
+legacy migration dropped, `duplicate` aliasing its source, `syncAlertCfg`
+writing to layer 0, a blank box saved as 0, and the gap warning ignoring parked
+layers. One mutation did NOT change behaviour — removing the "unbounded layer
+covers everything" early-out in `oddsGaps()`, since the `null → [1, Infinity]`
+mapping already handles it. Kept as a readability fast-path, not claimed as
+load-bearing.
+
+Demonstrated end-to-end against the real decision chain before writing docs:
+
+    row                    odds   edge   fires via
+    Lakers/Celtics ML      1.85  11.0%   short 1-3
+    Arsenal/Chelsea O2.5   2.10   8.5%   — silent
+    Boca AH-1.5            4.40  12.0%   — silent   (12% clears the SHORT bar,
+                                                     but 4.40 is not in that band)
+    Palmeiras AH-2         4.60  18.0%   mid 4-5
+    Gap: 3-4 band          3.50  40.0%   — silent   (→ the gap warning)

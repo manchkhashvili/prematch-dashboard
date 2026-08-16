@@ -4,10 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Anomalies — Prematch Dashboard</title>
-  <link rel="stylesheet" href="/style.css?v=20260810a" />
+  <link rel="stylesheet" href="/style.css?v=20260816a" />
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
-  <script src="/alerts.js?v=20260810a" defer></script>
+  <script src="/alerts.js?v=20260816a" defer></script>
   <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
@@ -438,6 +438,21 @@ for (const el of [ladOn, ladPct, ladDelta, ladStep, consOn, consDef]) {
   el.addEventListener("change", syncAlertCfg);
 }
 document.getElementById("cons-kind-grid").addEventListener("change", syncAlertCfg);
+
+// Remember whether the panel is open (2026-08-16) — see the same block in
+// arbs.html. <details> defaults to closed and browsers do not persist that, so
+// every reload hid the whole config and made the settings hard to find at all.
+(function rememberPanelOpen() {
+  const d = document.getElementById("alert-config");
+  // Deliberately NOT named anom_*alert* — that pattern is reserved for the
+  // panel↔poller contract, and the orphan-key test rightly demands alerts.js
+  // read anything matching it. This is UI state the poller has no use for.
+  const KEY = "anom_panel_open";
+  try { d.open = localStorage.getItem(KEY) === "1"; } catch (e) {}
+  d.addEventListener("toggle", () => {
+    try { localStorage.setItem(KEY, d.open ? "1" : "0"); } catch (e) {}
+  });
+})();
 
 // Build a /bets.html prefill for a consistency flag.
 //

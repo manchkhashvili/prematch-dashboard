@@ -106,9 +106,10 @@ Everything that used to need a restart is switchable at `/config.html`:
 |---|---|
 | Everything | **Pause / Resume** — idles every poll loop (all books, Pinnacle, every scan) while leaving the server up, so you can resume from the page instead of killing the terminal. See below. |
 | Books | `crystalbet`, `liderbet`, `betlive`, `crocobet`, `setanta`, `xbet` (Pinnacle is the reference — always on) |
+| Sports | `basketball`, `soccer`, `tennis`, `americanfootball` — a **master switch per sport across every book**, including Pinnacle (which has no book toggle) and the scans (which no book toggle reaches). Off stops the fetch, parse, tick write and scans for that sport and clears its odds. `SPORTS=` still decides which sports the process runs at all; only those appear. |
 | Scans | `anomaly`, `anomaly_extra`, `anomaly_watch`, `betlive_anomaly`, `soft_scan` |
 | Cadence | per-loop poll intervals, clamped server-side to a safe range |
-| Limits | CB anomaly horizon, Setanta / Crocobet full-ladder horizons |
+| Limits | data horizon, CB expansion + anomaly horizons and their wall-clock budgets, the ladder market-count band, per-book detail horizons, and the API cache TTL |
 
 API: `GET /api/config`, `POST /api/config` (partial, e.g.
 `{"books":{"setanta":false}}` or `{"paused":true}`), `POST /api/config/reset`.
@@ -134,6 +135,13 @@ back to the env-seeded defaults.
 | `OPP_REVERIFY_MAX_GAMES`   | 25            | Cap on the re-verify shortlist (edge-sorted, so the biggest claims are kept). |
 | `OPP_REVERIFY_MIN_EDGE`    | 3.0           | Only re-pull games whose edge is worth acting on. |
 | `ANOMALY_EXTRA_MAX_SEC`    | 240           | Budget for the ladder scan's **expansion phase** per sport per pass (timed by the scraper — the lock wait and league-tree refresh in front of it are unbounded and are reported separately). The scan holds the CB **per-sport lock**, so this is what stops a wide `anomaly_extra_horizon_h` from wedging the sport's price poll and re-verify loop (measured: 47 min, see `docs/performance.md`). Games are expanded soonest-kickoff first; the rest keep their cached ladder or list-view Odds. Live as `limits.anomaly_extra_max_sec`. |
+| `CB_EXPAND_MAX_SEC`        | 300           | Budget for a CB **price** cycle's expansion phase. The cycle holds the per-sport lock throughout, and one measured 3365 s (56 min) with no CB soccer on the board for any of it. Unreached games keep cached detail or list-view Odds and the next cycle resumes past them (every expansion is marked in the change cache). `0` = unlimited. Live as `limits.cb_expand_max_sec`. |
+| `ANOMALY_MIN_MARKETS`      | 0 (off)       | Ladder scan: skip games with FEWER markets than this, read from CB's own `+N` badge. Default off — the 50–300 band carries an HT/FT grid in a third of games, so a floor cuts `htft_combo`/`htft_fair` for ~3% of the cost. |
+| `ANOMALY_MAX_MARKETS`      | 500           | Ladder scan ceiling, same badge. **Not a smooth knob**: 44% of the soccer board sits in one band at 700–900 markets, all carrying HT/FT, so any ceiling below 700 drops them together. 500 → 480 games / 7% of HT/FT kept; 900 → 1293 / 63%. See `docs/performance.md`. |
+| `ANOMALY_MAX_MARKETS_SPORTS` | soccer      | Which sports the ceiling applies to. **Opt-in**, because a filter that silently removes games must be measured per sport first — a global 500 once skipped 23 of basketball's 45 games (its board sits at 500–900) and took its consistency flags off the tab. |
+| `CB_PARSE_PROCS`           | 3             | Worker processes for CB's html5lib parse. It is pure Python, so threads cannot help (4 pages on 4 threads measured *slower* than one); only processes reach the idle cores. Off under pytest. `0` disables → parse in-process. See `docs/performance.md`. |
+| `API_CACHE_SEC`            | 10            | TTL on the expensive read endpoints. `/api/opportunities` is ~25 s of matching and `alerts.js` polls it from **every open dashboard page**, so without this a couple of tabs starve the whole app. `0` disables; off under pytest. Live as `limits.api_cache_sec`. |
+| `RUNTIME_CONFIG_PATH`      | `data/runtime_config.json` | Override the config file. Exists so a test instance can never write your live settings. |
 | `PINNACLE_POLL_SEC`        | 60            | Pinnacle poll cadence per sport. |
 | `CRYSTALBET_POLL_SEC`      | 60            | CrystalBet poll cadence per sport (was 180 in the Playwright era; a browser-free list cycle is ~1-2s). |
 | `CB_TRANSPORT`             | http          | CB byte-mover: `http` (browser-free ASP.NET postbacks via curl_cffi — ~10× faster detail, no Chromium) or `playwright` (browser, escape hatch if CB changes the postback protocol). Same data either way — parity-verified 2026-06-12 and re-verified 2026-07-28 (soccer 1017/1017 games + 311/311 markets, basketball 515/515, zero structural diffs): `scripts/cb_parity_check.py`. Note the browser path resolves DNS itself and so bypasses the `dns_pin` fix in `cb_http.py`. |
@@ -262,9 +270,40 @@ worth **0.79** probability points and a Kelly stake of **2.5**, while a
 **+5.30 % on odds 2.00** is worth **2.63pp** and a Kelly of **40**.
 
 Every criterion is a **gate**: a row must clear *all* the ones you fill in, and
-a blank box is ignored. (Deliberately the opposite of the anomaly alerts below,
-which fire if *any* criterion is met — there you are casting a net, here you
-are narrowing one.)
+a blank box is ignored.
+
+#### Layers
+
+One gate-set cannot say *"10 %+ at odds 1–3 but 15 %+ at odds 4–5"* — inside a
+gate-set every criterion is ANDed, and those two rules contradict each other
+(no row is both ≤3 and ≥4). So the panel holds a **list** of gate-sets and a row
+alerts if it clears **any** of them: **AND within a layer, OR across layers.**
+
+The `Layers` chips pick which layer the editor below is editing; `+ add` makes a
+new one, `duplicate` copies the current one (the fast way to build a second
+band), and `active` parks a layer without losing its settings. The closed
+summary lists every active layer, and the console line names whichever one
+fired.
+
+```
+short 1-3   edge ≥ 10%, odds 1–3
+long  4-5   edge ≥ 15%, odds 4–5
+```
+
+- **Mind the gaps.** Bands `1–3` and `4–5` leave `3–4` uncovered, and an
+  uncovered band is *silent* — a 40 % edge at 3.50 would never chime. The panel
+  warns (`⚠ nothing alerts at odds 3–4`) whenever every active layer bounds the
+  odds and they don't join up.
+- **Re-alert is per layer**, and the most eager matching layer wins: if any
+  layer that matched wants to hear about a +1pp improvement, you hear about it.
+- **Your existing settings are migrated**, once, into `Layer 1` — the pre-layers
+  keys are still read as a single layer by any browser that hasn't opened the
+  Arbs tab since the upgrade, so nothing silently reverts to "fires on
+  everything".
+
+(The gate-within-a-layer logic is deliberately the opposite of the anomaly
+alerts below, which fire if *any* criterion is met — there you are casting a
+net, here you are narrowing one, then ORing the narrow nets together.)
 
 | Criterion | What it reads | Why you'd use it |
 |---|---|---|
@@ -519,8 +558,41 @@ service. Sample HTML for parser tests lives in `data/raw/`.
 
 ## Further reading
 
+**Start here**
+
 - `ARCHITECTURE.md` — component-level walkthrough of scrapers, matcher, edge
   math, and the bet-tracker storage model.
 - `notes/build_log.md` — dated journal entries documenting every non-trivial
-  decision since Phase 1. Read this if you want context on *why* something
-  is the way it is.
+  decision since Phase 1, including the measurements behind each one and the
+  things that were tried and rejected. Read this for *why* something is the way
+  it is. (6000+ lines; it is a journal, not a reference.)
+
+**Per-book protocol references** — wire formats, market-code tables, the traps
+each book sets, and which mappings were price-verified against Pinnacle:
+
+| Doc | Book |
+|---|---|
+| `docs/crystalbet.md` | CrystalBet — ASP.NET postbacks, the `ExpandDetail` protocol |
+| `docs/pinnacle.md` | Pinnacle — the guest API, devigging, limits |
+| `docs/liderbet.md` | Lider-Bet — `matchData` tiers, the `mt:16:1079` handicap trap |
+| `docs/betlive.md` | Betlive — Cloudflare, `getLeagueEvents` vs `getPrematchEvent` |
+| `docs/setanta.md` | Setanta — SignalR / MessagePack, market-type codes |
+| `docs/americanfootball.md` | American football across all seven books |
+
+**Cross-cutting**
+
+- `docs/market-mapping-principles.md` — the house rule: map on stable numeric
+  codes, never localized names; only price-verified mappings ship.
+- `docs/anomalies-catalog.md` — every consistency and ladder check, what it
+  detects, its thresholds, and how often each has actually fired.
+- `docs/performance.md` — **the cost model.** Where CB's time goes, the
+  per-sport lock and what it starves, the ladder scan's budgets and the market-
+  count band, parsing in worker processes, and the day the dashboard was found
+  to be starving its own scanner. Includes negative results (lxml, pooling
+  I/O-bound fetches) so they are not re-derived.
+- `docs/debugging-lessons.md` — **read this before debugging a "it used to
+  work" problem.** The method, not the specifics: A/B against the pre-change
+  commit first, enumerate who is *calling* the service, `to_thread` fixes I/O
+  and never CPU, fixtures can't test raw inputs, and the cheap instruments that
+  did the work.
+- `docs/findings-2026-07.md` — earlier board-wide measurements.

@@ -91,9 +91,12 @@ def test_no_orphan_arb_alert_keys_in_either_file():
 
 @pytest.mark.parametrize("el_id", CONTROL_IDS)
 def test_number_control_exists_and_is_read(el_id):
+    """Since layers (2026-08-16) the controls are read through the NUM_GATES
+    table rather than one getElementById per box, so membership of that table IS
+    being wired: it drives both restore and save."""
     assert f'id="{el_id}"' in PAGE_T, f"no element with id={el_id}"
-    assert f'getElementById("{el_id}")' in PAGE_T, (
-        f"{el_id} is rendered but never read — the control does nothing")
+    assert f'"{el_id}"' in _block(PAGE_T, "const NUM_GATES = {"), (
+        f"{el_id} is rendered but not in NUM_GATES — the control does nothing")
 
 
 @pytest.mark.parametrize("el_id", CHIP_GRIDS)
@@ -110,16 +113,16 @@ def test_controls_persist_on_change():
 
 def test_every_number_control_is_in_the_save_map():
     """A control the save map forgets looks live and silently resets on reload."""
-    block = _block(PAGE_T, "const numEls = {")
+    block = _block(PAGE_T, "const NUM_GATES = {")
     for el_id in CONTROL_IDS:
-        assert f'getElementById("{el_id}")' in block, (
-            f"{el_id} is not in numEls — it will never be saved or restored")
+        assert f'"{el_id}"' in block, (
+            f"{el_id} is not in NUM_GATES — it will never be saved or restored")
 
 
 def test_every_chip_group_is_declared_with_seed_options():
-    block = _block(PAGE_T, "const CHIP_GROUPS = {")
+    block = _block(PAGE_T, "const SET_GATES = {")
     for el_id in CHIP_GRIDS:
-        assert f'"{el_id}"' in block, f"{el_id} missing from CHIP_GROUPS"
+        assert f'"{el_id}"' in block, f"{el_id} missing from SET_GATES"
 
 
 # ── the gates themselves ─────────────────────────────────────────────────────
@@ -149,7 +152,7 @@ def test_empty_chip_selection_means_all_not_none():
     backend later keeps alerting instead of quietly dropping out."""
     body = _block(ALERTS_T, "function cfgSet(key)")
     assert "return null" in body
-    save = _block(PAGE_T, "function saveChipSel(key, set)")
+    save = _block(PAGE_T, "function saveChipSel(field, set)")
     assert "size === 0" in save
 
 
@@ -207,15 +210,20 @@ def test_re_alert_step_is_configurable_but_defaults_to_the_old_constant():
 
 def test_query_floor_widens_for_a_sub_one_percent_edge_gate():
     """The server pre-filters at min_edge, so an edge gate below 1 % would ask
-    about rows that never arrive — panel configured, alert silently dead."""
-    body = _block(ALERTS_T, "async function poll()")
-    assert "gates.edge < 1" in body and "min_edge=" in body
+    about rows that never arrive — panel configured, alert silently dead. With
+    layers the floor must come from the most generous ACTIVE layer, which is why
+    it moved into its own function; the poll must actually use it."""
+    body = _block(ALERTS_T, "function oppQueryFloor(layers)")
+    assert "< 1" in body and "Math.min" in body, (
+        "oppQueryFloor no longer takes the lowest edge across layers")
+    poll = _block(ALERTS_T, "async function poll()")
+    assert "oppQueryFloor(layers)" in poll and "min_edge=" in poll
 
 
 def test_gates_are_read_fresh_every_poll():
     """Config changes must take effect on the next cycle without a reload."""
     body = _block(ALERTS_T, "async function poll()")
-    assert "readOppGates()" in body
+    assert "readLayers()" in body
 
 
 def test_the_master_switch_still_gates_everything():

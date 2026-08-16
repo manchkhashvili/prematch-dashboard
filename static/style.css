@@ -272,6 +272,71 @@ header nav a.active {
 }
 .alert-config .kind-unit { color: var(--text-faint); font-family: var(--mono); }
 
+/* ── alert layers (Arbs tab) ────────────────────────────────────────────── */
+/* The layer chips select which gate-set the editor below is editing. A row
+   alerts if it clears ANY layer, so the bar reads as a list of alternatives. */
+.alert-config .layer-bar,
+.alert-config .layer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+.alert-config .layer-bar { padding-top: 2px; }
+.alert-config .layer-head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.alert-config .layer-lead {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.alert-config .layer-head label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.alert-config #layer-name {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 7px;
+  width: 170px;
+  font-size: 12px;
+}
+.alert-config .layer-btn {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.alert-config .layer-btn:hover { color: var(--text); border-color: var(--text-faint); }
+/* The selected layer is the one being edited — a filled chip, distinct from the
+   merely-"on" state a multi-select chip uses elsewhere in this panel. */
+.alert-config #layer-tabs .chip.sel {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+/* An inactive layer stays visible (so you can find and re-enable it) but reads
+   as parked rather than live. */
+.alert-config #layer-tabs .chip.parked {
+  opacity: .5;
+  text-decoration: line-through;
+}
+/* Odds-band gap warning: a hole between bands is silent, so it has to be loud
+   in the panel. */
+.alert-config .warn-note { color: var(--warn); }
+
 /* Chip multi-selects inside the alert panel (Arbs tab). Same look as the
    toolbar chips, but these are MULTI-select: none selected means "all", so a
    sport or book added later is never silently excluded from alerting. */

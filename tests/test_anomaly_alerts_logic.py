@@ -13,41 +13,15 @@ absent — it is not a dependency of the dashboard itself.
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
-import textwrap
-from pathlib import Path
 
 import pytest
 
-ALERTS = Path(__file__).resolve().parent.parent / "static" / "alerts.js"
-NODE = shutil.which("node")
+# The node harness lives in tests/jsrun.py so this suite and the arb-layers one
+# share one stub environment — alerts.js touches a few browser globals at load,
+# and two hand-maintained copies of that stub would drift.
+from tests.jsrun import NODE, run_js
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="node not installed")
-
-
-def run_js(body: str, store: dict | None = None):
-    """Execute `body` with alerts.js loaded and a localStorage stub seeded from
-    `store`. The body assigns its result to `out`."""
-    harness = textwrap.dedent("""
-        const store = %s;
-        globalThis.localStorage = {
-          getItem: k => (k in store ? String(store[k]) : null),
-          setItem: (k, v) => { store[k] = String(v); },
-        };
-        // alerts.js schedules timers and touches the DOM at load; stub both.
-        globalThis.document = { addEventListener() {} };
-        globalThis.setTimeout = () => 0;
-        globalThis.setInterval = () => 0;
-        globalThis.fetch = () => Promise.reject(new Error("no network in tests"));
-        const A = require(%s);
-        let out;
-        %s
-        console.log(JSON.stringify(out));
-    """) % (json.dumps(store or {}), json.dumps(str(ALERTS)), body)
-    r = subprocess.run([NODE, "-e", harness], capture_output=True, text=True)
-    assert r.returncode == 0, f"node failed:\n{r.stderr}"
-    return json.loads(r.stdout.strip().splitlines()[-1])
 
 
 LAD_PCT = "anom_ladder_alert_pct"
