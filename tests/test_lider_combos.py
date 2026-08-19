@@ -337,3 +337,142 @@ def test_exact_rung_still_participates_in_containment():
     # 9.0 vs... no violation here, but the pair must be considered at all.
     hits = LC.containment(bets)
     assert isinstance(hits, list)
+
+
+# ── duplicate pricing: the same event quoted twice ──────────────────────────
+def test_duplicates_finds_two_prices_for_one_outcome_set():
+    """Lider prices one event in several places. 'Team 1 Win and score more
+    than 1.5 goals' IS the 1X2/Total grid cell 'Over / 1' at 1.5 — measured
+    live at 6.90 and 3.10 on the same match."""
+    m = LC.t_mask("1", "o")
+    bets = [(m, 6.90, "1 win & score 2+", True), (m, 3.10, "1&O1.5", True)]
+    hits = LC.duplicates(bets)
+    assert len(hits) == 1
+    hi_lab, hi_v, lo_lab, lo_v, gap = hits[0]
+    assert (hi_lab, hi_v) == ("1 win & score 2+", 6.90)
+    assert (lo_lab, lo_v) == ("1&O1.5", 3.10)
+    assert gap == pytest.approx(122.58, abs=0.05)
+
+
+def test_duplicates_respects_the_gap_floor_and_ignores_singletons():
+    m = LC.t_mask("1", "o")
+    assert LC.duplicates([(m, 6.90, "a", True), (m, 3.10, "b", True)], 200.0) == []
+    assert LC.duplicates([(m, 6.90, "a", True)]) == []
+
+
+def test_duplicate_needs_the_model_to_say_which_side_is_wrong():
+    """A duplicate says one of the two is wrong, not which. Framing the gap as
+    an overlay produced 3240 board-wide rows whose biggest were cases where the
+    LONG side was the correct one and the short side the mistake — and a bad
+    short price is not bettable. So no model, no row."""
+    mts = {"mt:16:2679": {"outcomeTypes": [{"id": "y", "name": "Yes"},
+                                           {"id": "n", "name": "No"}]}}
+    match = {"markets": {"a": {"typeId": "mt:16:2679", "specifier": None,
+                               "outcomes": {"y": {"value": 6.90}}},
+                         "b": {"typeId": "mt:16:1080",
+                               "specifier": {"special": "1.5", "total": "1.5"},
+                               "outcomes": {"ot:16:1531": {"value": 3.10}}}}}
+    g = LC.parse_match(match, mts)
+    assert len(g["cells"][("FT", 1.5)]) == 2      # both parsed, same mask
+    # no 1X2 and no ladder -> no model -> nothing claimed
+    assert [f for f in LC.analyse_match(g, "a", "b", None, "x")
+            if f["kind"] == "combo_duplicate"] == []
+
+
+# ── model fair pricing ──────────────────────────────────────────────────────
+def _iwata_full():
+    """Iwata's real 1X2 + totals ladder, including the INTEGER rungs."""
+    mts = {"mt:16:500": {"outcomeTypes": [{"id": "ot:16:2", "name": "1"},
+                                          {"id": "ot:16:1", "name": "X"},
+                                          {"id": "ot:16:3", "name": "2"}]}}
+    mk = {"x": {"typeId": "mt:16:500", "specifier": None,
+                "outcomes": {"ot:16:2": {"value": 2.25}, "ot:16:1": {"value": 2.95},
+                             "ot:16:3": {"value": 2.85}}}}
+    ladder = {0.5: (5.7, 1.06), 1: (5.1, 1.08), 1.5: (2.7, 1.33), 2: (2.1, 1.55),
+              2.5: (1.6, 2.05), 3: (1.29, 2.9), 3.5: (1.21, 3.45), 4: (1.07, 5.4),
+              4.5: (1.05, 5.8), 5: (1.01, 7.6), 5.5: (1.01, 7.7)}
+    for i, (L, (u, o)) in enumerate(ladder.items()):
+        mk[f"t{i}"] = {"typeId": "mt:16:502",
+                       "specifier": {"special": str(L), "total": str(L)},
+                       "outcomes": {"ot:16:6": {"value": u}, "ot:16:7": {"value": o}}}
+    return {"markets": mk}, mts
+
+
+def test_model_fit_reproduces_the_posted_half_line_ladder():
+    match, mts = _iwata_full()
+    g = LC.parse_match(match, mts)
+    F = LC.fit_score_model(g, "J2 League")
+    assert F is not None, "the fit must succeed on a normal match"
+    ap = LC._atom_probs(F, 1.5)
+    # the owner's market: 'Team 1 Win and score more than 1.5 goals' @ 6.90.
+    # Fair sits near 3.45 — the book's own other price for it was 3.10.
+    assert ap[("1", "o")] == pytest.approx(0.29, abs=0.02)
+
+
+def test_integer_rungs_are_excluded_because_they_push():
+    """A total of exactly L is a PUSH on an integer rung, so the two sides do
+    not partition and a proportional devig of them is meaningless. Feeding them
+    in put the fitted model 19.9pp off the posted ladder and killed the fit."""
+    match, mts = _iwata_full()
+    g = LC.parse_match(match, mts)
+    assert LC.fit_score_model(g, "J2 League") is not None
+    # strip every half-line, leaving only pushable integer rungs
+    for k in [k for k, m in match["markets"].items()
+              if m["typeId"] == "mt:16:502"
+              and abs(float(m["specifier"]["total"]) % 1 - 0.5) < 1e-9]:
+        del match["markets"][k]
+    g2 = LC.parse_match(match, mts)
+    assert LC.fit_score_model(g2, "J2 League") is None
+
+
+def test_model_is_rejected_when_it_cannot_reproduce_the_ladder():
+    """A fair price is only as good as the fit under it."""
+    match, mts = _iwata_full()
+    # bend one half-line rung far away from the rest
+    for m in match["markets"].values():
+        if m["typeId"] == "mt:16:502" and m["specifier"]["total"] == "3.5":
+            m["outcomes"]["ot:16:6"]["value"] = 5.0
+            m["outcomes"]["ot:16:7"]["value"] = 1.1
+    g = LC.parse_match(match, mts)
+    assert LC.fit_score_model(g, "J2 League") is None
+
+
+def test_fair_flag_fires_on_the_owners_market():
+    match, mts = _iwata_full()
+    mts["mt:16:2679"] = {"outcomeTypes": [{"id": "y", "name": "Yes"},
+                                          {"id": "n", "name": "No"}]}
+    match["markets"]["w"] = {"typeId": "mt:16:2679", "specifier": None,
+                             "outcomes": {"y": {"value": 6.90}}}
+    g = LC.parse_match(match, mts)
+    fair = [f for f in LC.analyse_match(g, "Iwata", "Tokushima", "J2 League", "x")
+            if f["kind"] == "combo_fair"]
+    assert len(fair) == 1
+    assert fair[0]["severity"] > 80, "6.90 against a ~3.45 fair is a huge overlay"
+    assert "model fair" in fair[0]["detail"]
+
+
+def test_fair_flag_silent_when_the_combo_is_priced_sanely():
+    match, mts = _iwata_full()
+    mts["mt:16:2679"] = {"outcomeTypes": [{"id": "y", "name": "Yes"},
+                                          {"id": "n", "name": "No"}]}
+    match["markets"]["w"] = {"typeId": "mt:16:2679", "specifier": None,
+                             "outcomes": {"y": {"value": 3.20}}}   # below fair
+    g = LC.parse_match(match, mts)
+    assert [f for f in LC.analyse_match(g, "a", "b", None, "x")
+            if f["kind"] == "combo_fair"] == []
+
+
+def test_model_can_be_switched_off():
+    match, mts = _iwata_full()
+    mts["mt:16:2679"] = {"outcomeTypes": [{"id": "y", "name": "Yes"}]}
+    match["markets"]["w"] = {"typeId": "mt:16:2679", "specifier": None,
+                             "outcomes": {"y": {"value": 6.90}}}
+    g = LC.parse_match(match, mts)
+    kinds = {f["kind"] for f in LC.analyse_match(g, "a", "b", None, "x", model=False)}
+    assert "combo_fair" not in kinds and "combo_duplicate" not in kinds
+
+
+def test_new_limits_are_registered():
+    from src import runtime_config
+    for k in ("lider_combo_min_dup", "lider_combo_min_ev"):
+        assert k in runtime_config.LIMITS

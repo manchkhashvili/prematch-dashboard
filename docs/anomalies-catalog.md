@@ -718,3 +718,47 @@ so one is mislabelled at source — the same trap as `mt:16:501`/`1079`. A mappi
 was only trusted after its partition sum reproduced the posted leg across the
 population (`1716/1718` → `1X` at **1.35pp** median absolute error over 1140
 observations).
+
+
+### Two more detectors (2026-08-20) — the exact tests were too weak
+
+Containment and cover only catch what is logically *impossible*, and that bar is
+very low. The market the owner was actually pointing at —
+**"Team 1 Win and score more than 1.5 goals" @ 6.90** on Iwata — sits comfortably
+inside its Frechet box `[0.062, 0.392]` and violates nothing. Its fair price is
+about 3.45. Board-wide the exact tests found 4 covers and ~78 containment rows;
+"almost nothing to actually bet on" was a fair verdict.
+
+**`combo_duplicate`** — Lider prices one event in several places, and the prices
+disagree. "Team 1 Win and score more than 1.5 goals" *is* the 1X2/Total grid cell
+`Over / 1` at 1.5 (given A wins, `A>=2` ⟺ `total>=2`), and it was quoted at
+**6.90 and 3.10 simultaneously**. `_dedup` collapsed every set to its best price
+before anything looked at it, so the detector was deleting its own strongest
+signal.
+
+A duplicate says one of the two is wrong, **not which** — framing the gap as an
+overlay produced **3240** board-wide rows, and the biggest were cases like
+`X2&O2.5` @ 24 vs 7.8 on a 1.10 favourite, where 24 is the *correct* price and
+7.8 the mistake. A bad short price is not bettable. So the long side must
+independently clear model fair before it earns a row; then it carries more
+evidence than either check alone, because two unrelated methods agree.
+
+**`combo_fair`** — fit a Poisson score matrix to the book's own 1X2 + totals
+ladder (`src/soccer_model.fit_lambdas`) and price every combo exactly off it.
+**Half-lines only**: Lider posts integer rungs too, where a total of exactly L is
+a *push*, so the two sides do not partition and a proportional devig of them is
+meaningless. Measured on Iwata the integer rungs missed the fitted model by
+**-19.9pp** and **-16.3pp** while every half-line landed within **2.4pp** —
+including them killed the fit outright. The fit is rejected unless it reproduces
+every posted half-line rung to 3pp, because a fair price is only as good as the
+fit under it.
+
+Result on the same board: **3331 → 177 flags across 116 distinct matches**, in
+~34 s. The owner's market now reads
+
+```
+'1 win & score 2+' @ 6.90  vs  '1&O1.5' @ 3.10   (122.6% apart)
+model fair 3.45            ->  EV +99.8%
+```
+
+with the two methods agreeing to within 0.35 on the fair price.

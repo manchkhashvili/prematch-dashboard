@@ -146,6 +146,13 @@ LIMITS: dict[str, tuple] = {
     # is coarse enough that adjacent rungs differ by 2-3%, so 3.0 is the floor
     # that keeps ladder granularity out of the tab.
     "lider_combo_min_dom": (lambda: _env_float("LIDER_COMBO_MIN_DOM", 3.0), 0.0, 100.0),
+    # Same outcome set priced twice by two different markets. Exact and
+    # model-free, so the floor can be low; measured up to +122% on one match.
+    "lider_combo_min_dup": (lambda: _env_float("LIDER_COMBO_MIN_DUP", 8.0), 0.0, 1000.0),
+    # Model EV (%) floor for combo_fair. Higher than the exact tests because a
+    # fitted score distribution carries real error — this is the only check
+    # here that can be wrong about football rather than about arithmetic.
+    "lider_combo_min_ev": (lambda: _env_float("LIDER_COMBO_MIN_EV", 25.0), 0.0, 1000.0),
 }
 
 

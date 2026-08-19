@@ -61,6 +61,16 @@ MIN_EDGE_PCT = float(os.environ.get("LIDER_COMBO_MIN_EDGE", "0.5"))
 # ones are real but not worth acting on, and the odds ladder is coarse enough
 # that adjacent rungs routinely differ by 2-3%.
 MIN_DOM_PCT = float(os.environ.get("LIDER_COMBO_MIN_DOM", "3.0"))
+# Minimum gap (%) between two prices for the SAME outcome set before it is
+# worth a row. Exact and model-free, so this can be low.
+MIN_DUP_PCT = float(os.environ.get("LIDER_COMBO_MIN_DUP", "8.0"))
+# Minimum model EV (%) for a combo_fair row. Higher than the exact tests
+# because a fitted distribution carries real error and this is the only check
+# here that can be wrong about the world rather than about arithmetic.
+MIN_EV_PCT = float(os.environ.get("LIDER_COMBO_MIN_EV", "25.0"))
+# Reject the fit outright if it cannot reproduce the posted totals ladder to
+# this many probability points on every rung.
+MODEL_MAX_LADDER_ERR = float(os.environ.get("LIDER_COMBO_MAX_LADDER_ERR", "0.03"))
 _MATCHES_PER_DETAIL = 20
 _HTTP_TIMEOUT = 60.0
 
@@ -254,12 +264,49 @@ def parse_match(match: dict, mts: dict) -> dict:
     return g
 
 
+def duplicates(bets, min_gap_pct=0.0):
+    """The same outcome set priced twice, at different odds.
+
+    Lider prices one event in several places — "Team 1 Win and score more than
+    1.5 goals" is the SAME set as the 1X2/Total grid cell "Over / 1" at 1.5,
+    and the double-chance families overlap the DC/Total grid. When the two
+    prices disagree the book is contradicting itself with no ambiguity at all:
+    the shorter price is its own opinion, so the longer one is an overlay of
+    exactly that ratio. Measured on Iwata vs Tokushima, 2026-08-19:
+
+        (1, Over 1.5)   6.90  vs  3.10     +123%
+        (2, Over 1.5)   4.10  vs  2.60      +58%
+        (X2, Under 1.5) 4.40  vs  3.35      +31%
+
+    This was invisible until now because _dedup collapsed each set to its best
+    price before anything looked at it — the detector was deleting its own
+    strongest signal.
+    """
+    by_mask: dict[int, list] = {}
+    for m, v, lab, _ex in bets:
+        if m:
+            by_mask.setdefault(m, []).append((v, lab))
+    out = []
+    for m, prices in by_mask.items():
+        if len(prices) < 2:
+            continue
+        prices.sort()
+        (lo_v, lo_lab), (hi_v, hi_lab) = prices[0], prices[-1]
+        gap = (hi_v / lo_v - 1.0) * 100.0
+        if gap >= min_gap_pct:
+            out.append((hi_lab, hi_v, lo_lab, lo_v, gap))
+    return out
+
+
 def _dedup(bets):
     """One bet per distinct outcome set — keep the longest odds.
 
     Bets are (mask, odds, label, exact). `exact` means the mask IS the bet's
     winning set inside this space; False means the mask is merely a subset of
     it — the bet also wins on outcomes the mask does not claim.
+
+    Call `duplicates()` BEFORE this if you care about a set priced twice: this
+    throws the losing price away.
     """
     best = {}
     for m, v, lab, exact in bets:
@@ -371,6 +418,77 @@ def containment(bets):
     return hits
 
 
+# ── model-based fair pricing ────────────────────────────────────────────────
+# Containment and cover only catch what is logically IMPOSSIBLE, and that is a
+# very low bar: on Iwata the market the owner was actually pointing at,
+# "Team 1 Win and score more than 1.5 goals" @ 6.90, sits comfortably inside
+# its Frechet box [0.062, 0.392] and violates nothing. Its fair price is near
+# 3.4. To see that at all you need a distribution over scores, not a bound —
+# so fit one to the book's OWN 1X2 and totals ladder, then price every combo
+# exactly off it. src/soccer_model.py already does the fitting.
+def fit_score_model(g, league=None, per="FT"):
+    """Fit (lh, la) to this match's devigged 1X2 + main total, return the score
+    matrix — or None if the fit does not reproduce the posted ladder.
+
+    The guard matters: a fair price is only as good as the fit under it, and a
+    model that cannot reproduce the ladder it was fitted to has no business
+    calling another market wrong.
+    """
+    import numpy as np
+    from src import soccer_model as sm
+
+    x = g["x12"].get(per) or {}
+    rungs = g["tot"].get(per) or {}
+    if len(x) != 3:
+        return None
+    # HALF-LINES ONLY. Lider posts integer rungs too (Under 2, Under 3), and on
+    # those a total of exactly L is a PUSH — the stake comes back, so the two
+    # sides do not partition and a proportional devig of them is meaningless.
+    # Measured on Iwata: the integer rungs miss the fitted model by -19.9pp and
+    # -16.3pp while every half-line lands within 2.4pp. Feeding them to the fit
+    # or to the guard throws the whole thing away.
+    two_sided = {L: s for L, s in rungs.items()
+                 if len(s) == 2 and abs(L - round(L)) > 1e-9}
+    if not two_sided:
+        return None
+    ph, pd, pa = sm.devig([x["1"], x["X"], x["2"]])
+    # anchor on the rung nearest 2.5 — the one the book actually balances
+    anchor = min(two_sided, key=lambda L: abs(L - 2.5))
+    au, ao = two_sided[anchor]["u"], two_sided[anchor]["o"]
+    p_under, p_over = sm.devig([au, ao])
+    try:
+        lh, la, _info = sm.fit_lambdas(ph, pd, pa, anchor, p_over)
+    except Exception:
+        return None
+    if not (0.05 < lh < 8 and 0.05 < la < 8):
+        return None
+    F = sm.score_matrix(lh, la)
+    # ── the guard: reproduce every OTHER rung of the ladder ──
+    ii, jj = np.indices(F.shape)
+    tot = ii + jj
+    worst = 0.0
+    for L, sides in two_sided.items():
+        pu, po = sm.devig([sides["u"], sides["o"]])
+        worst = max(worst, abs(float(F[tot > L].sum()) - po))
+    if worst > MODEL_MAX_LADDER_ERR:
+        return None
+    return F
+
+
+def _atom_probs(F, line):
+    """P of each (result, total side) atom under the fitted score matrix."""
+    import numpy as np
+    ii, jj = np.indices(F.shape)
+    tot = ii + jj
+    res = {"1": ii > jj, "X": ii == jj, "2": ii < jj}
+    side = {"u": tot < line, "o": tot > line}
+    return {(r, s): float(F[res[r] & side[s]].sum()) for r in res for s in side}
+
+
+def _mask_prob(mask, atom_p):
+    return sum(p for a, p in atom_p.items() if mask & (1 << TIX[a]))
+
+
 # ── flags ───────────────────────────────────────────────────────────────────
 def _flag(kind, home, away, league, eid, detail, severity, start=None, periods="FT"):
     return {
@@ -385,12 +503,65 @@ def _flag(kind, home, away, league, eid, detail, severity, start=None, periods="
 
 
 def analyse_match(g, home, away, league, eid, start=None,
-                  min_edge=None, min_dom=None) -> list[dict]:
-    """Both tests on one parsed match → flag rows."""
+                  min_edge=None, min_dom=None, min_dup=None, min_ev=None,
+                  model=True) -> list[dict]:
+    """All four tests on one parsed match → flag rows.
+
+    Ordered by how hard they are to argue with: duplicate pricing and
+    containment are arithmetic, the cover is arithmetic plus a hedge, and the
+    model check is the only one that can be wrong about football rather than
+    about the book.
+    """
     min_edge = MIN_EDGE_PCT if min_edge is None else min_edge
     min_dom = MIN_DOM_PCT if min_dom is None else min_dom
+    min_dup = MIN_DUP_PCT if min_dup is None else min_dup
+    min_ev = MIN_EV_PCT if min_ev is None else min_ev
     out: list[dict] = []
+    F = fit_score_model(g, league) if model else None
     for (per, line) in list(g["cells"]):
+        raw = g["cells"].get((per, line), [])
+        atom_p = _atom_probs(F, line) if (F is not None and per == "FT") else None
+        # A duplicate says one of the two prices is wrong, NOT which. Framing
+        # the gap as an overlay on the longer side was plain wrong: measured
+        # board-wide it produced 3240 rows, and the biggest were cases like
+        # 'X2&O2.5' @ 24 vs 7.8 on a 1.10 favourite, where 24 is the CORRECT
+        # price and 7.8 is the bad one — and you cannot lay the bad one. So the
+        # long side has to independently clear model fair before this is worth
+        # a row; then it carries more evidence than either check alone, because
+        # two unrelated methods agree. Without a model there is no way to tell
+        # which side is the mistake, so nothing is emitted.
+        covered: set[int] = set()
+        if atom_p is not None:
+            for hi_lab, hi_v, lo_lab, lo_v, gap in duplicates(raw, min_dup):
+                m = next((mm for mm, vv, ll, _e in raw if ll == hi_lab and vv == hi_v), None)
+                if m is None:
+                    continue
+                p = _mask_prob(m, atom_p)
+                ev = (p * hi_v - 1.0) * 100.0
+                if p <= 0.0 or ev <= 0.0:
+                    continue
+                covered.add(m)
+                out.append(_flag(
+                    "combo_duplicate", home, away, league, eid,
+                    f"{per} line {line:g}: the same outcome is priced twice — "
+                    f"'{hi_lab}' @ {hi_v:g} vs '{lo_lab}' @ {lo_v:g} ({gap:.1f}% apart); "
+                    f"model fair {1.0 / p:.2f}, so the long side is EV {ev:+.1f}%",
+                    ev, start, periods=per))
+        if atom_p is not None:
+            for m, v, lab, _ex in _dedup(raw):
+                if m in covered:
+                    continue      # a combo_duplicate row already carries this,
+                                  # with the book's own second price as evidence
+                p = _mask_prob(m, atom_p)
+                if p <= 0.0:
+                    continue
+                ev = (p * v - 1.0) * 100.0
+                if ev >= min_ev:
+                    out.append(_flag(
+                        "combo_fair", home, away, league, eid,
+                        f"{per} line {line:g}: '{lab}' @ {v:g} vs model fair "
+                        f"{1.0 / p:.2f} (P={p:.3f}) — EV {ev:+.1f}%",
+                        ev, start, periods=per))
         bl = total_bets(g, per, line)
         if len(bl) < 2:
             continue
@@ -431,7 +602,8 @@ def analyse_match(g, home, away, league, eid, start=None,
 
 # ── the sweep ───────────────────────────────────────────────────────────────
 def scan(hours: float | None = None, min_edge: float | None = None,
-         min_dom: float | None = None) -> list[dict]:
+         min_dom: float | None = None, min_dup: float | None = None,
+         min_ev: float | None = None) -> list[dict]:
     """Fetch Lider's soccer detail payloads and run both tests. Sync — call it
     from a thread, like every other scanner here."""
     from curl_cffi.requests import Session
@@ -509,7 +681,8 @@ def scan(hours: float | None = None, min_edge: float | None = None,
             try:
                 g = parse_match(m, mts)
                 flags.extend(analyse_match(g, home, away, league, mid,
-                                           _start_time(src), min_edge, min_dom))
+                                           _start_time(src), min_edge, min_dom,
+                                           min_dup, min_ev))
             except Exception:
                 log.exception("lider_combos: match %s failed", mid)
 

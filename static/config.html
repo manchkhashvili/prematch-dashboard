@@ -185,6 +185,8 @@ const LIM_DESC = {
   crocobet_detail_hours: "Crocobet: full ladders within (hours), board inline beyond",
   lider_combo_hours: "Lider combo scan: only matches starting within (hours). 0 = whole board (~1380 matches, ~312 MB, ~45s). WIDER than the odds detail tier on purpose — the locked covers measured 2026-08-19 sat 3 days out, because a match nobody is betting yet is where a hand-maintained combo block goes unattended.",
   lider_combo_min_edge: "Lider combo: minimum locked edge (%) for a cover row. Board-wide p1 cover cost was 1.0458, so anything under 1.0 is already far outside the pack — this only trims rounding noise.",
+  lider_combo_min_dup: "Lider combo: minimum gap (%) between two prices for the SAME outcome set. Exact and model-free — Lider prices one event in several places ('Team 1 Win and score more than 1.5 goals' IS the 1X2/Total grid cell 'Over/1' at 1.5), so a disagreement is the book contradicting itself. Measured up to +122% on one match.",
+  lider_combo_min_ev: "Lider combo: minimum model EV (%) for a fair-price row. Fits a Poisson score matrix to the book's own 1X2 + totals ladder (half-lines only — integer rungs push), then prices every combo off it. Higher floor than the exact tests because a fitted distribution carries real error.",
   lider_combo_min_dom: "Lider combo: minimum free-upgrade (%) for a containment row. Lider's odds ladder is coarse enough that adjacent rungs differ by 2–3%, so 3.0 keeps ladder granularity out of the tab.",
 };
 const BOOK_SLOT = { crystalbet: "cb" };  // state slot name differs for CB

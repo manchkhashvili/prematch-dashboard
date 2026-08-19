@@ -301,6 +301,8 @@ const KIND_LABEL = {
   soccer_curve: "soccer curve",
   combo_cover: "lider combo: locked cover",
   combo_dominance: "lider combo: containment",
+  combo_duplicate: "lider combo: same event, two prices",
+  combo_fair: "lider combo: vs model fair",
 };
 function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
 
@@ -341,6 +343,9 @@ const KIND_UNIT = {
   // locked profit on a full cover, combo_dominance is how much more the
   // superset pays than the subset sitting inside it. Both %.
   combo_cover: "%", combo_dominance: "%",
+  // combo_duplicate severity is how much more the longer of two prices for the
+  // SAME event pays; combo_fair is model EV. Both %.
+  combo_duplicate: "%", combo_fair: "%",
 };
 
 function lsGet(k, dflt) {

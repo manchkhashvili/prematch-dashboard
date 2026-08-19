@@ -2139,8 +2139,13 @@ async def _lider_combo_loop():
                                           lider_combos.MIN_EDGE_PCT)
             min_dom = runtime_config.num("limits", "lider_combo_min_dom",
                                          lider_combos.MIN_DOM_PCT)
+            min_dup = runtime_config.num("limits", "lider_combo_min_dup",
+                                         lider_combos.MIN_DUP_PCT)
+            min_ev = runtime_config.num("limits", "lider_combo_min_ev",
+                                        lider_combos.MIN_EV_PCT)
             t0 = time.monotonic()
-            flags = await asyncio.to_thread(lider_combos.scan, hours, min_edge, min_dom)
+            flags = await asyncio.to_thread(lider_combos.scan, hours, min_edge,
+                                            min_dom, min_dup, min_ev)
             took = time.monotonic() - t0
             ts = datetime.now(tz=timezone.utc)
             prev = {(f.get("book_event_id"), f.get("kind"), f.get("detail")):
@@ -2158,6 +2163,8 @@ async def _lider_combo_loop():
                     "hours": hours,
                     "covers": sum(1 for f in flags if f["kind"] == "combo_cover"),
                     "dominance": sum(1 for f in flags if f["kind"] == "combo_dominance"),
+                    "duplicate": sum(1 for f in flags if f["kind"] == "combo_duplicate"),
+                    "fair": sum(1 for f in flags if f["kind"] == "combo_fair"),
                 }
             log.info("lider_combos: %d flags in %.1fs (%.0fh horizon)",
                      len(flags), took, hours)
