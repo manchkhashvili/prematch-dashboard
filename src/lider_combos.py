@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from itertools import product
 
@@ -184,11 +185,44 @@ def h_col(code):
 
 
 # ── parsing ─────────────────────────────────────────────────────────────────
+# ── the book's own wording ───────────────────────────────────────────────────
+# Internal shorthand like "1X&O4.5 Yes" is unusable for finding the position on
+# the site. Lider's marketType names are the exact strings its search box
+# matches, so carry them through: substitute the {1}/{total} placeholder with
+# the real line and strip the trailing circled glyphs the UI decorates with.
+_DECOR_RE = re.compile(r"[\u2460-\u24ff\u2070-\u209f\u2150-\u218f]")
+
+
+def _disp(mts, tid, oid=None, line=None):
+    """'<market name with the line filled in> - <outcome name>', as shown on
+    the site. Falls back to the typeId if the dictionary has no entry."""
+    mt = mts.get(tid) or {}
+    name = _DECOR_RE.sub("", mt.get("name") or tid).strip()
+    name = re.sub(r"\s{2,}", " ", name)
+    if line is not None:
+        ls = f"{line:g}"
+        name = name.replace("{1}", ls).replace("{total}", ls)
+        if "{" not in name and ls not in name:
+            name = f"{name} {ls}"
+    name = re.sub(r"\{[^}]*\}", "", name).strip()
+    if oid is None:
+        return name
+    out = ""
+    for o in mt.get("outcomeTypes") or []:
+        if o.get("id") == oid:
+            out = _DECOR_RE.sub("", o.get("name") or "").strip()
+            break
+    return f"{name} - {out}" if out else name
+
+
 def parse_match(match: dict, mts: dict) -> dict:
     """Pull every market on one match that lands in either atom space."""
     from collections import defaultdict
     g = {"x12": defaultdict(dict), "tot": defaultdict(lambda: defaultdict(dict)),
-         "dc": {}, "cells": defaultdict(list), "htft": []}
+         "dc": {}, "cells": defaultdict(list), "htft": [],
+         # book wording for the primitives, so a hedge leg is findable too
+         "x12lab": defaultdict(dict), "totlab": defaultdict(lambda: defaultdict(dict)),
+         "dclab": {}}
     dcn = {o["id"]: (o.get("name") or "").replace(" ", "").upper()
            for o in (mts.get(DC_T) or {}).get("outcomeTypes") or []}
     for mkt in (match.get("markets") or {}).values():
@@ -199,68 +233,72 @@ def parse_match(match: dict, mts: dict) -> dict:
                 for oid, oc in ocs.items():
                     if oid in X12_OT and (v := _f(oc.get("value"))):
                         g["x12"][per][X12_OT[oid]] = v
+                        g["x12lab"][per][X12_OT[oid]] = _disp(mts, t, oid)
         for per, t in TOT_T.items():
             if tid == t and ln is not None:
                 for oid, oc in ocs.items():
                     if oid in TOT_OT and (v := _f(oc.get("value"))):
                         g["tot"][per][ln][TOT_OT[oid]] = v
+                        g["totlab"][per][ln][TOT_OT[oid]] = _disp(mts, t, oid, ln)
         if tid == DC_T:
             for oid, oc in ocs.items():
                 if dcn.get(oid) in DC_MEMBERS and (v := _f(oc.get("value"))):
                     g["dc"][dcn[oid]] = v
+                    g["dclab"][dcn[oid]] = _disp(mts, DC_T, oid)
         elif tid in ("mt:16:1080", "mt:16:2307") and ln is not None:
             table = GRID_1080 if tid == "mt:16:1080" else GRID_2307
             for oid, oc in ocs.items():
                 hit = table.get(oid)
                 if hit and (v := _f(oc.get("value"))):
                     g["cells"][("FT", ln)].append(
-                        (t_mask(*hit), v,
-                         f"{hit[0]}&{'U' if hit[1]=='u' else 'O'}{ln:g}", True))
+                        (t_mask(*hit), v, _disp(mts, tid, oid, ln), True))
         elif tid in WINSCORE:
             per, res, fixed = WINSCORE[tid]
             yes, no = _yes_no(mkt, mts)
             m = t_mask(res, "o")
             if yes:
-                g["cells"][(per, fixed)].append((m, yes, f"{res} win & score 2+", True))
+                g["cells"][(per, fixed)].append(
+                    (m, yes, f"{_disp(mts, tid)} - Yes", True))
             if no:
-                g["cells"][(per, fixed)].append((T_FULL & ~m, no, f"not({res} win & score 2+)", True))
+                g["cells"][(per, fixed)].append(
+                    (T_FULL & ~m, no, f"{_disp(mts, tid)} - No", True))
         elif tid in TWOWAY and ln is not None:
             per, res, side = TWOWAY[tid]
             m = t_mask(res, side)
-            lab = f"{res}&{'U' if side=='u' else 'O'}{ln:g}"
+            lab = _disp(mts, tid, line=ln)
             yes, no = _yes_no(mkt, mts)
             if yes:
-                g["cells"][(per, ln)].append((m, yes, f"{lab} Yes", True))
+                g["cells"][(per, ln)].append((m, yes, f"{lab} - Yes", True))
             if no:
-                g["cells"][(per, ln)].append((T_FULL & ~m, no, f"{lab} No", True))
+                g["cells"][(per, ln)].append((T_FULL & ~m, no, f"{lab} - No", True))
         elif tid in UNION and ln is not None:
             per, res, side = UNION[tid]
             m = t_mask(res, "u") | t_mask(res, "o")
             m |= sum(1 << TIX[(r, side)] for r in R)
-            lab = f"{res} or {'U' if side=='u' else 'O'}{ln:g}"
+            lab = _disp(mts, tid, line=ln)
             yes, no = _yes_no(mkt, mts)
             if yes:
-                g["cells"][(per, ln)].append((m, yes, f"{lab} Yes", True))
+                g["cells"][(per, ln)].append((m, yes, f"{lab} - Yes", True))
             if no:
-                g["cells"][(per, ln)].append((T_FULL & ~m, no, f"{lab} No", True))
+                g["cells"][(per, ln)].append((T_FULL & ~m, no, f"{lab} - No", True))
         # ── HTFT space ──
         elif tid == "mt:16:573":
             for oid, oc in ocs.items():
                 if oid in HTFT_OT and (v := _f(oc.get("value"))):
                     h, f_ = HTFT_OT[oid]
-                    g["htft"].append((1 << HIX[(h, f_)], v, f"HT/FT {h}/{f_}", True))
+                    g["htft"].append((1 << HIX[(h, f_)], v, _disp(mts, tid, oid), True))
         elif tid == "mt:16:5132":
             for oid, oc in ocs.items():
                 if oid in UNION_5132 and (v := _f(oc.get("value"))):
                     c = UNION_5132[oid]
-                    g["htft"].append((h_row(c) | h_col(c), v, f"{c} in H1 or in match", True))
+                    g["htft"].append((h_row(c) | h_col(c), v, _disp(mts, tid, oid), True))
         elif tid in H1_NOT_FT:
             c = H1_NOT_FT[tid]
             other = [x for x in R if x != c]
             yes, _ = _yes_no(mkt, mts)
             if yes:
                 m = sum(1 << HIX[(c, f_)] for f_ in other)
-                g["htft"].append((m, yes, f"{c} wins H1, not the match", True))
+                g["htft"].append((m, yes, f"{_disp(mts, tid)} - Yes", True))
     return g
 
 
@@ -325,10 +363,12 @@ def total_bets(g, per, line):
     """Every bet covering a subset of this (period, line)'s six atoms."""
     out = list(g["cells"].get((per, line), []))
     for r, v in (g["x12"].get(per) or {}).items():
-        out.append((t_mask(r, "u") | t_mask(r, "o"), v, f"{per} {r}", True))
+        out.append((t_mask(r, "u") | t_mask(r, "o"), v,
+                    (g.get("x12lab", {}).get(per) or {}).get(r) or f"{per} {r}", True))
     if per == "FT":
         for dc, v in g["dc"].items():
-            out.append((t_mask(dc, "u") | t_mask(dc, "o"), v, f"DC {dc}", True))
+            out.append((t_mask(dc, "u") | t_mask(dc, "o"), v,
+                    g.get("dclab", {}).get(dc) or f"DC {dc}", True))
     # Ladder monotonicity, and the DIRECTION is what makes a shifted rung a
     # valid hedge: Under M implies Under L whenever M <= L, so a rung at or
     # above the line covers the three Under atoms. Over is the mirror.
@@ -345,21 +385,23 @@ def total_bets(g, per, line):
     for M, sides in (g["tot"].get(per) or {}).items():
         if "u" in sides and M >= line:
             out.append((sum(1 << TIX[(r, "u")] for r in R), sides["u"],
-                        f"{per} Under {M:g}", M == line))
+                        ((g.get("totlab", {}).get(per) or {}).get(M) or {}).get("u")
+                        or f"{per} Under {M:g}", M == line))
         if "o" in sides and M <= line:
             out.append((sum(1 << TIX[(r, "o")] for r in R), sides["o"],
-                        f"{per} Over {M:g}", M == line))
+                        ((g.get("totlab", {}).get(per) or {}).get(M) or {}).get("o")
+                        or f"{per} Over {M:g}", M == line))
     return _dedup(out)
 
 
 def htft_bets(g):
     out = list(g["htft"])
     for r, v in (g["x12"].get("H1") or {}).items():
-        out.append((h_row(r), v, f"H1 {r}", True))
+        out.append((h_row(r), v, (g.get("x12lab", {}).get("H1") or {}).get(r) or f"H1 {r}", True))
     for r, v in (g["x12"].get("FT") or {}).items():
-        out.append((h_col(r), v, f"FT {r}", True))
+        out.append((h_col(r), v, (g.get("x12lab", {}).get("FT") or {}).get(r) or f"FT {r}", True))
     for dc, v in g["dc"].items():
-        out.append((h_col(dc), v, f"FT DC {dc}", True))
+        out.append((h_col(dc), v, g.get("dclab", {}).get(dc) or f"FT DC {dc}", True))
     return _dedup(out)
 
 

@@ -148,7 +148,9 @@ def test_cover_never_understates_cost_when_legs_overlap():
 def _g(cells=None, tot=None, x12=None, dc=None):
     from collections import defaultdict
     g = {"x12": defaultdict(dict), "tot": defaultdict(lambda: defaultdict(dict)),
-         "dc": dc or {}, "cells": defaultdict(list), "htft": []}
+         "dc": dc or {}, "cells": defaultdict(list), "htft": [],
+         "x12lab": defaultdict(dict),
+         "totlab": defaultdict(lambda: defaultdict(dict)), "dclab": {}}
     for k, v in (x12 or {}).items():
         g["x12"][k] = v
     for per, rungs in (tot or {}).items():
@@ -166,7 +168,7 @@ def test_under_rung_at_or_above_the_line_is_a_valid_hedge():
     g = _g(cells={("FT", 4.5): [(LC.t_mask("2", "o"), 2.60, "cell", True)]},
            tot={"FT": {5.5: {"u": 1.05, "o": 7.7}}})
     labels = [lab for _m, _v, lab, _e in LC.total_bets(g, "FT", 4.5)]
-    assert any("Under 5.5" in l for l in labels)
+    assert any("Under 5.5" in l or "Under 5.5" in l for l in labels)
     assert not any("Over 5.5" in l for l in labels), "Over 5.5 cannot cover Over 4.5"
 
 
@@ -382,9 +384,13 @@ def test_duplicate_needs_the_model_to_say_which_side_is_wrong():
 # ── model fair pricing ──────────────────────────────────────────────────────
 def _iwata_full():
     """Iwata's real 1X2 + totals ladder, including the INTEGER rungs."""
-    mts = {"mt:16:500": {"outcomeTypes": [{"id": "ot:16:2", "name": "1"},
+    mts = {"mt:16:500": {"name": "Full Time Result",
+                         "outcomeTypes": [{"id": "ot:16:2", "name": "1"},
                                           {"id": "ot:16:1", "name": "X"},
-                                          {"id": "ot:16:3", "name": "2"}]}}
+                                          {"id": "ot:16:3", "name": "2"}]},
+           "mt:16:502": {"name": "Total",
+                         "outcomeTypes": [{"id": "ot:16:6", "name": "Under"},
+                                          {"id": "ot:16:7", "name": "Over"}]}}
     mk = {"x": {"typeId": "mt:16:500", "specifier": None,
                 "outcomes": {"ot:16:2": {"value": 2.25}, "ot:16:1": {"value": 2.95},
                              "ot:16:3": {"value": 2.85}}}}
@@ -490,3 +496,50 @@ def test_scan_reports_started_separately_from_completed():
     assert "_lider_combo_started = datetime.now" in src, \
         "the start stamp must be written BEFORE the sweep, not after"
     assert src.index("_lider_combo_started = datetime") < src.index("await asyncio.to_thread")
+
+
+# ── the book's own wording, so a row can be found on the site ───────────────
+def test_disp_substitutes_the_line_and_strips_ui_decoration():
+    mts = {"mt:16:1716": {"name": "I Team Not lose and Total Under {1}",
+                          "outcomeTypes": [{"id": "y", "name": "Yes"}]},
+           "mt:16:1080": {"name": "1X2 / Total ①",
+                          "outcomeTypes": [{"id": "ot:16:1531", "name": "Over / 1 "}]}}
+    assert LC._disp(mts, "mt:16:1716", "y", 4.5) == "I Team Not lose and Total Under 4.5 - Yes"
+    # the circled glyph the UI decorates with is noise for a search box
+    assert LC._disp(mts, "mt:16:1080", "ot:16:1531", 1.5) == "1X2 / Total 1.5 - Over / 1"
+
+
+def test_disp_appends_the_line_when_the_name_has_no_placeholder():
+    mts = {"t": {"name": "Total", "outcomeTypes": [{"id": "o", "name": "Over"}]}}
+    assert LC._disp(mts, "t", "o", 2.5) == "Total 2.5 - Over"
+
+
+def test_disp_falls_back_to_the_typeid_when_undocumented():
+    assert LC._disp({}, "mt:16:9999") == "mt:16:9999"
+
+
+def test_flag_detail_carries_the_books_wording_not_internal_shorthand():
+    """The row has to be findable on the site; '1&O1.5' is not a thing you can
+    search for, 'Team 1 Win and score more than 1.5 goals' is."""
+    match, mts = _iwata_full()
+    mts["mt:16:2679"] = {"name": "Team 1 Win and score more than 1.5 goals ①",
+                         "outcomeTypes": [{"id": "y", "name": "Yes"},
+                                          {"id": "n", "name": "No"}]}
+    match["markets"]["w"] = {"typeId": "mt:16:2679", "specifier": None,
+                             "outcomes": {"y": {"value": 6.90}}}
+    g = LC.parse_match(match, mts)
+    f = [x for x in LC.analyse_match(g, "Iwata", "Tokushima", "J2 League", "x")
+         if x["kind"] == "combo_fair"][0]
+    assert "Team 1 Win and score more than 1.5 goals - Yes" in f["detail"]
+    assert "&O1.5" not in f["detail"], "internal shorthand must not reach the tab"
+
+
+def test_primitive_hedge_legs_also_use_the_books_wording():
+    """A cover names legs you have to go and place, so the 1X2 / total legs need
+    the same treatment as the combo cells."""
+    match, mts = _iwata_full()
+    mts["mt:16:500"]["name"] = "Full Time Result"
+    g = LC.parse_match(match, mts)
+    labels = [lab for _m, _v, lab, _e in LC.total_bets(g, "FT", 2.5)]
+    assert any(l.startswith("Full Time Result - ") for l in labels)
+    assert any("Total 2.5 - " in l for l in labels)
