@@ -501,6 +501,92 @@ being graded-then-retired.
 
 ---
 
+## Why `htft_combo` fires: it is a STALENESS detector (measured 2026-08-19)
+
+Owner's read: *"most likely I think when ml positions move they kind of stay
+stale and that causes it"*. Correct, and the grid proves it about itself.
+
+### The instrument: the grid's own identity
+
+An HT/FT grid must reconcile with the book's own 1X2 legs, with no model and no
+reference book involved:
+
+    rows    {1/1,1/X,1/2} -> H1 home   {X/*} -> H1 draw   {2/*} -> H1 away
+    columns {1/1,X/1,2/1} -> FT home   {*/X} -> FT draw   {*/2} -> FT away
+
+(Verified on three other books earlier: median row/column error 0.32–0.99 pp.)
+
+Comparing each CB grid against CB's *own* posted H1 and FT moneylines, live,
+flagged games versus a control group expanded in the same pass:
+
+| | row vs H1 | col vs FT |
+|---|---|---|
+| **flagged** (n=17) | median **2.78 pp**, max 4.66 | median **2.33 pp**, max 5.51 |
+| control (n=59) | median 0.80 pp, **max 1.99** | median 0.42 pp, max 1.66 |
+
+**Perfect separation**: every flagged game's row error (2.15–4.66 pp) exceeds
+every control game's maximum (1.99 pp). The grid is out of step with the legs on
+100 % of flags and on none of the controls — the signature of legs that moved
+while the grid did not.
+
+**Practical consequence:** a row error above ~2 pp identifies a stale grid
+without running the correlation model at all. Cheap pre-filter, and a candidate
+severity input.
+
+### The error has a direction
+
+    cell 1/1: 11    cell 2/2: 3
+    too generous (book price longer than fair): 14 of 14
+
+Always the favourite's coherent outcome, always too long, never the reverse.
+Systematic, not noise — consistent with a grid derived from an older, less
+confident price and never refreshed as the favourite shortened.
+
+### Nothing else on those games is stale
+
+Every consistency check and the ladder detector, run over all 17 flagged games:
+
+    OTHER consistency kinds on flagged games: none
+    ladder anomalies: 2 across all 17   (control: 0)
+
+The grid is the *only* market out of step. Spreads, totals, team totals and
+period markets stay coherent. There is no second market type to mine this way —
+at least not on the games HT/FT flags.
+
+For scale, board-wide CB soccer staleness (time since a market's last price
+*change*, from `ticks.db`):
+
+| market | median | p90 |
+|---|---|---|
+| **moneyline FT** | **930 min** | 2816 min |
+| total FT (lined) | 213 min | 2489 min |
+| spread FT (lined) | 95 min | 213 min |
+
+The grid is not unusually stale in absolute terms; it is stale *relative to legs
+that moved*.
+
+### Provider: no tag exists, but the pattern is competition-shaped
+
+CB exposes no odds-provider field — the `Provider` strings in its HTML are
+casino banners and the SportRadar references are the stats widget, not a feed
+tag. So there is nothing to join on.
+
+What is visible: flags cluster in secondary competitions — **youth 6, cup 3,
+women 2, reserves 1** of 17 — and **13 of 17 games do appear on other books**,
+so this is not a CB-only obscure feed. The likeliest reading is that these
+competitions get algorithmically-derived HT/FT refreshed on a slower schedule
+than the mains, rather than a distinct provider.
+
+### Known gap: the grid has no history
+
+Only the four PRICE loops call `ticks.rows_from_odds`. The ladder scan — the
+only thing that fetches grids — writes nothing, so **HT/FT has no tick history
+at all** and staleness has to be inferred from a single snapshot. Writing the
+ladder scan's odds to the tick store would make the lag directly measurable and
+allow an alert on "ML moved > X, grid unchanged for > Y". Not done.
+
+---
+
 ## How they reach the Anomalies tab
 - CB ladder (A) + CB consistency (B) via the main CB scan (`ANOMALY_SCAN=1`).
 - Betlive OT-fold (C) via `BETLIVE_ANOMALY=1` — flags land in the consistency list.

@@ -6085,3 +6085,48 @@ Demonstrated end-to-end against the real decision chain before writing docs:
                                                      but 4.40 is not in that band)
     Palmeiras AH-2         4.60  18.0%   mid 4-5
     Gap: 3-4 band          3.50  40.0%   — silent   (→ the gap warning)
+
+## 2026-08-19 — htft_combo is a staleness detector, and the grid proves it
+
+Owner, on a day's worth of 1/1 and 2/2 flags: *"most likely I think when ml
+positions move they kind of stay stale and that causes it ... I wanna know if
+there is something else too, also wann know if there is provider issue"*.
+
+Answered with the grid's own identity — rows sum to the H1 1X2, columns to the
+FT 1X2 — compared against CB's own posted legs, flagged games vs a control
+group expanded in the same pass:
+
+    flagged (n=17)   row-vs-H1 median 2.78pp  max 4.66      col-vs-FT median 2.33pp
+    control (n=59)   row-vs-H1 median 0.80pp  max 1.99      col-vs-FT median 0.42pp
+
+Perfect separation: every flagged game is above every control game's maximum.
+So the grid is out of step with its own legs on 100 % of flags and none of the
+controls. A row error over ~2 pp is therefore a stale-grid detector that needs
+no model — a cheap pre-filter and a candidate severity input.
+
+Direction is systematic: cell 1/1 eleven times, 2/2 three times, and **too
+generous in 14 of 14**. Always the favourite's coherent outcome, always too
+long. Consistent with a grid derived from an older, less confident price that
+was never refreshed as the favourite shortened.
+
+Nothing else on those games is wrong: every other consistency check returns
+nothing, and the ladder detector finds 2 anomalies across all 17 (0 on the
+control). So there is no second market type to mine the same way. Board-wide,
+`moneyline FT` is actually CB's stalest market (median 930 min since its last
+price change, p90 2816) — the grid is not unusually stale in absolute terms, it
+is stale relative to legs that moved.
+
+Provider: CB exposes no odds-provider tag (the `Provider` strings are casino
+banners, the SportRadar ones are the stats widget). The visible pattern is
+competition shape — youth 6, cup 3, women 2, reserves 1 of 17 — and 13 of 17
+games do appear on other books, so it is not a CB-only feed. Reads as
+algorithmically-priced HT/FT on secondary competitions, refreshed slower than
+the mains.
+
+Gap found while doing this: only the four PRICE loops write to `ticks.db`. The
+ladder scan is the only thing that fetches grids and it records nothing, so
+**HT/FT has no tick history** and the lag had to be inferred from one snapshot
+rather than shown directly. Writing ladder odds to the tick store would turn the
+next investigation of this kind into a SQL query. Offered, not done.
+
+Full write-up in `docs/anomalies-catalog.md`.
