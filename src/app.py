@@ -671,6 +671,11 @@ SOFT_SCAN = os.environ.get("SOFT_SCAN", "").strip().lower() in ("1", "on", "true
 # Lider-only extended sweep since the single-poll change (CB/Betlive flags
 # ride their own loops now) → non-CB books every 2.5 min (owner call).
 SOFT_SCAN_SEC = int(os.environ.get("SOFT_SCAN_SEC", "150"))
+# Lider combo-bound scan. Slow by default: it pays for its own detail fetch
+# (~312 MB for the whole board), and the violations it finds are not the kind
+# that vanish in seconds — the one measured on 2026-08-19 held unchanged for
+# over 11 minutes across three full passes.
+LIDER_COMBO_SEC = int(os.environ.get("LIDER_COMBO_SEC", "900"))
 
 
 # ── Shared state (per-sport namespaced) ───────────────────────────────────────
@@ -794,6 +799,14 @@ _betlive_error: str | None = None
 _betlive_energy: dict = {}                    # bytes/time of the last discover sweep
 
 # ── Soft-book HT/FT + basketball-favourite sweep state ────────────────────────
+# Lider combo-bound flags (containment + min-cost cover). Kept in their own
+# list, like _betlive_consistency, so neither subsystem can clobber the other;
+# merged into /api/anomalies `consistency` at request time.
+_lider_combo_flags: list[dict] = []
+_lider_combo_at: datetime | None = None
+_lider_combo_error: str | None = None
+_lider_combo_stats: dict = {}
+
 _soft_scan_flags: list[dict] = []             # consistency rows from soft_scan.scan_all
 _soft_scan_at: datetime | None = None
 _soft_scan_error: str | None = None
@@ -2100,6 +2113,62 @@ async def _soft_scan_loop():
                            "scans", "soft_scan")
 
 
+async def _lider_combo_loop():
+    """Lider combo markets vs the primitives they are built from → Anomalies tab.
+
+    Two model-free tests (see src/lider_combos.py): a containment violation,
+    where a subset of outcomes is priced longer than a superset it sits inside,
+    and a min-cost cover, where a group of bets covering every outcome costs
+    less than 1. Neither needs a devig, a correlation model or a second book,
+    so neither can be argued with — which is why this is allowed to publish
+    rows straight to the tab.
+
+    Runs in a worker thread: the sweep is network-bound (its own detail fetch)
+    and the DP is ~1 s for the whole board, so it must not sit on the loop.
+    """
+    from src import lider_combos
+    global _lider_combo_flags, _lider_combo_at, _lider_combo_error, _lider_combo_stats
+    await asyncio.sleep(45)
+    while True:
+        if not await _gated("scans", "lider_combo", "lider combo scan"):
+            continue
+        try:
+            hours = runtime_config.num("limits", "lider_combo_hours",
+                                       lider_combos.COMBO_HOURS)
+            min_edge = runtime_config.num("limits", "lider_combo_min_edge",
+                                          lider_combos.MIN_EDGE_PCT)
+            min_dom = runtime_config.num("limits", "lider_combo_min_dom",
+                                         lider_combos.MIN_DOM_PCT)
+            t0 = time.monotonic()
+            flags = await asyncio.to_thread(lider_combos.scan, hours, min_edge, min_dom)
+            took = time.monotonic() - t0
+            ts = datetime.now(tz=timezone.utc)
+            prev = {(f.get("book_event_id"), f.get("kind"), f.get("detail")):
+                    f.get("first_seen") for f in _lider_combo_flags}
+            for f in flags:
+                key = (f.get("book_event_id"), f.get("kind"), f.get("detail"))
+                f["first_seen"] = prev.get(key) or ts.isoformat()
+            flags.sort(key=lambda f: f["severity"], reverse=True)
+            async with _state_lock:
+                _lider_combo_flags = flags
+                _lider_combo_at = ts
+                _lider_combo_error = None
+                _lider_combo_stats = {
+                    "took_sec": round(took, 1),
+                    "hours": hours,
+                    "covers": sum(1 for f in flags if f["kind"] == "combo_cover"),
+                    "dominance": sum(1 for f in flags if f["kind"] == "combo_dominance"),
+                }
+            log.info("lider_combos: %d flags in %.1fs (%.0fh horizon)",
+                     len(flags), took, hours)
+        except Exception as e:
+            log.exception("lider combo sweep failed")
+            async with _state_lock:
+                _lider_combo_error = str(e)[:200]
+        await _sleep_gated(runtime_config.secs("lider_combo_sec", LIDER_COMBO_SEC),
+                           "scans", "lider_combo")
+
+
 def _carry_stale_flags(prev: list[dict], fresh: list[dict], failed: set,
                        now: datetime, stale_max: float) -> list[dict]:
     """Keep last-good flags for (book, sport) scanners that failed this sweep, so
@@ -2284,6 +2353,7 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(_betlive_discover_loop(), name="betlive_discover_loop"))
     tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
     tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
+    tasks.append(asyncio.create_task(_lider_combo_loop(), name="lider_combo_loop"))
     _rc = runtime_config.get()
     log.info("runtime config — books ON: %s | scans ON: %s (change live at /config.html)",
              ", ".join(k for k, v in _rc["books"].items() if v) or "none",
@@ -2637,7 +2707,8 @@ async def api_anomalies(
     extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
     book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
     cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags
-                        + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons)
+                        + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
+                        + _lider_combo_flags)
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
@@ -2647,7 +2718,8 @@ async def api_anomalies(
         "enabled": (runtime_config.is_on("scans", "anomaly")
                     or runtime_config.is_on("scans", "anomaly_extra")
                     or runtime_config.is_on("scans", "betlive_anomaly")
-                    or runtime_config.is_on("scans", "soft_scan")),
+                    or runtime_config.is_on("scans", "soft_scan")
+                    or runtime_config.is_on("scans", "lider_combo")),
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "cb_fetched_at": _anomalies_cb_fetched_at.isoformat() if _anomalies_cb_fetched_at else None,
         "scan_sec": runtime_config.secs("anomaly_scan_sec", ANOMALY_SCAN_SEC),
@@ -2669,6 +2741,14 @@ async def api_anomalies(
             "watch_sec": runtime_config.secs("betlive_watch_sec", BETLIVE_WATCH_SEC),
             "discover_sec": runtime_config.secs("betlive_discover_sec", BETLIVE_DISCOVER_SEC),
             "error": _betlive_error,
+        },
+        "lider_combo": {
+            "enabled": runtime_config.is_on("scans", "lider_combo"),
+            "computed_at": _lider_combo_at.isoformat() if _lider_combo_at else None,
+            "scan_sec": runtime_config.secs("lider_combo_sec", LIDER_COMBO_SEC),
+            "flags": len(_lider_combo_flags),
+            "error": _lider_combo_error,
+            **_lider_combo_stats,
         },
         "extra": {
             "sports": sorted(_extra_anomalies.keys()),

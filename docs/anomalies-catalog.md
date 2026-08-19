@@ -629,3 +629,92 @@ Family E (soccer, in the `SOFT_SCAN` sweep): `SOCCER_FAV_MAX` (game gate, defaul
 5. **B1–B5 (consistency diagnostics)** — "go look", not EV.
 6. **D2 (basketball fav)** — structural disagreement, promising, needs outcome data.
 7. 🟡 **B6 soccer path / D1 vs-ML** — SUPERSEDED by E; kept in shadow only.
+
+---
+
+## Lider combo bounds — `combo_cover` / `combo_dominance`
+
+*Built 2026-08-19. Engine: `src/lider_combos.py`. Scan toggle: Config → Scans →
+`lider_combo` (default OFF — it pays for its own detail fetch).*
+
+Lider prices ~50 **combo** market types ("Team 2 win and Total Over 1.5",
+"1st Half Result or Match Result", "I Team Not lose and Total Under {L}"). Each
+is a bet on a *set* of outcomes, and so is every primitive — the 1X2, the double
+chance, each rung of the totals ladder. Express both as bitmasks over a small
+atom space and two exact, model-free tests fall out.
+
+**Atom spaces.** `TOTAL` = (FT result) × (Under/Over @ line), 6 atoms, one space
+per line. `HTFT` = (H1 result) × (FT result), 9 atoms.
+
+**`combo_dominance`** — if set A sits inside set B, A can never pay more than B.
+Odds compare directly: no devig, no margin assumption, no correlation model, no
+second book. A violation is a logical impossibility, not an opinion.
+
+**`combo_cover`** — buy a group whose sets union to everything. Every outcome
+pays, so an outlay of `sum(1/odds) < 1` is locked profit. Exact 2ⁿ-state DP.
+
+### Why only some families are worth scanning
+
+Measured on the whole 1380-match board, 225 matches re-polled 16× at 3-minute
+spacing. **Two completely different behaviours** when a leg moves:
+
+| family | moves | given 1X2 moved | given neither moved |
+|---|---|---|---|
+| `mt:16:3396` Total/HT-FT | 4.0% | **100%** | 0.2% |
+| `mt:16:2307` DC/Total | 3.8% | **100%** | 0.2% |
+| `mt:16:1080` 1X2/Total | 3.8% | **98.5%** | 0.2% |
+| `mt:16:1095` 1X2/BTTS | 3.6% | **98.5%** | 0.1% |
+| `mt:16:1716-1719` not-lose & total | 13.6% | **22%** | 13.2% |
+| `mt:16:3910/4793` H1 win & total | 13.9% | **12%** | 13.9% |
+| `mt:16:3976/3977` win & BTTS | 8.3% | 19% | 7.8% |
+
+The 6-way grids are **derived** — they reprice in the same tick as their legs,
+so nothing accumulates (best cover across 30 000 grid cells: 1.0333, zero arbs).
+The 2-way Yes/No families are **independently maintained**: their follow rate is
+no higher than their baseline, so a leg moving carries *no information* about
+whether they update. **Every arb found was in that second group.** Both are
+parsed (the grids are free once the payload is read, and they make good hedge
+legs) but the yield is in the 2-way families.
+
+### What it found
+
+Board-wide, 96 h horizon, ~50 s: **4 locked covers** and ~70 containment rows.
+The covers were all one match — Iwata vs Tokushima, J2 League, whose whole
+"I Team Not lose" block was mispriced at every line:
+
+```
+buy  I Team Not lose & Under 4.5  @ 1.85     0.5405
+buy  I Team Not lose & Over  4.5  @ 24.00    0.0417
+buy  FT 2 (away win)              @ 2.85     0.3509
+                                             ------
+                                             0.9331   →  +7.17%
+```
+
+It held unchanged for 11+ minutes across three full passes. Next best cover on
+the entire board was 1.0333, so there is a clean gap between one broken match
+and everything else — this fires almost never, which is what makes a flag worth
+acting on.
+
+### Three traps, all of which bit during the build
+
+1. **Exactness.** A totals rung at M ≠ L is a valid *cover* leg but its mask
+   understates what it wins ("Over 2.5" inside the 4.5 space also wins on 3 and
+   4 goals). Understating a cover leg is safe; understating a *containment*
+   operand invents subset relations. The first live sweep produced **98**
+   dominance rows whose biggest were all this artefact. Only `M == L` is exact,
+   and only exact bets take part in containment.
+2. **Margin direction.** An early "too rich" test compared margin-inflated raw
+   probability against a ceiling and produced **280** phantom violations. Each
+   direction must use the raw odds of the side you would actually back, so the
+   margin works *against* a flag rather than manufacturing one.
+3. **Silent death.** An identity check requiring a matched line produced **zero**
+   rows and looked clean — Lider offers `Draw & Under` at 2.5 but `Draw & Over`
+   at 1.5, so the lines never paired. `tests/test_lider_combos.py` pins all
+   three.
+
+Mappings are read by **typeId + outcomeId only**, never by name: `mt:16:3982`
+and `mt:16:3985` carry the identical name `'Team 1 win and number of goals: 3-5'`,
+so one is mislabelled at source — the same trap as `mt:16:501`/`1079`. A mapping
+was only trusted after its partition sum reproduced the posted leg across the
+population (`1716/1718` → `1X` at **1.35pp** median absolute error over 1140
+observations).

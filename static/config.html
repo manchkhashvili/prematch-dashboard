@@ -159,6 +159,7 @@ const SCAN_DESC = {
   anomaly_watch:   "Fast re-scan of games already flagged.",
   betlive_anomaly: "Betlive favourite-flip watch (discover + refreshOdds).",
   soft_scan:       "Soft-book HT/FT + basketball-favourite sweep.",
+  lider_combo:     "Lider-Bet combo markets vs the primitives they are built from — containment violations and locked covers. Fetches its own detail payloads, so it costs bandwidth nothing else pays for.",
 };
 const CAD_DESC = {
   pinnacle_poll_sec: "Pinnacle reference poll",
@@ -171,6 +172,7 @@ const CAD_DESC = {
   betlive_discover_sec: "Betlive discover sweep",
   betlive_watch_sec: "Betlive refreshOdds",
   soft_scan_sec: "Soft scan",
+  lider_combo_sec: "Lider combo-bound scan",
 };
 const LIM_DESC = {
   max_start_days: "GLOBAL data horizon (days) — no book pulls, parses or emits an event starting later than this. 0 = no cap. Caps every per-book horizon below.",
@@ -181,6 +183,9 @@ const LIM_DESC = {
   cb_expand_max_sec: "CB price cycle: cap the expansion phase at this many seconds (0 = unlimited). The cycle holds the sport lock throughout — a measured cb/soccer cycle ran 3365s (56 min) with no soccer prices, no ladder scan and no re-verify for the whole of it. Unreached games keep cached/list odds and the next cycle resumes past them.",
   setanta_detail_hours: "Setanta: full ladders within (hours), main markets beyond",
   crocobet_detail_hours: "Crocobet: full ladders within (hours), board inline beyond",
+  lider_combo_hours: "Lider combo scan: only matches starting within (hours). 0 = whole board (~1380 matches, ~312 MB, ~45s). WIDER than the odds detail tier on purpose — the locked covers measured 2026-08-19 sat 3 days out, because a match nobody is betting yet is where a hand-maintained combo block goes unattended.",
+  lider_combo_min_edge: "Lider combo: minimum locked edge (%) for a cover row. Board-wide p1 cover cost was 1.0458, so anything under 1.0 is already far outside the pack — this only trims rounding noise.",
+  lider_combo_min_dom: "Lider combo: minimum free-upgrade (%) for a containment row. Lider's odds ladder is coarse enough that adjacent rungs differ by 2–3%, so 3.0 keeps ladder granularity out of the tab.",
 };
 const BOOK_SLOT = { crystalbet: "cb" };  // state slot name differs for CB
 const SPORT_LABEL = {

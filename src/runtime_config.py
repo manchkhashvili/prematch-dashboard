@@ -65,7 +65,8 @@ def _env_float(name: str, default: float) -> float:
 # Toggle spec: key -> (section, label, kind, default_factory, min, max)
 # `kind` drives the UI widget and the validator.
 BOOKS = ("crystalbet", "liderbet", "betlive", "crocobet", "setanta", "xbet")
-SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_scan")
+SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_scan",
+         "lider_combo")
 # Per-sport master switch (2026-08-14). Orthogonal to `books`: a book toggle is
 # "stop paying for this book, on every sport", a sport toggle is "stop paying
 # for this sport, at every book" — including the reference feeds and the scans,
@@ -86,6 +87,7 @@ CADENCES: dict[str, tuple] = {
     "betlive_discover_sec": (lambda: _env_int("BETLIVE_DISCOVER_SEC", 150), 30, 21600),
     "betlive_watch_sec":   (lambda: _env_int("BETLIVE_WATCH_SEC", 8), 3, 3600),
     "soft_scan_sec":       (lambda: _env_int("SOFT_SCAN_SEC", 150), 30, 21600),
+    "lider_combo_sec":     (lambda: _env_int("LIDER_COMBO_SEC", 900), 60, 21600),
 }
 
 # Cost/horizon knobs — the levers that cut per-cycle work without turning a
@@ -129,6 +131,21 @@ LIMITS: dict[str, tuple] = {
     "api_cache_sec": (lambda: _env_float("API_CACHE_SEC", 0.0 if "pytest" in __import__("sys").modules else 10.0), 0.0, 300.0),
     "setanta_detail_hours":    (lambda: _env_float("SETANTA_DETAIL_HOURS", 24.0), 1.0, 240.0),
     "crocobet_detail_hours":   (lambda: _env_float("CROCOBET_DETAIL_HOURS", 24.0), 1.0, 240.0),
+    # Lider combo-bound scan (see src/lider_combos.py). The horizon is WIDER
+    # than any other detail tier on purpose: measured 2026-08-19, the locked
+    # covers sat 3 days out, because a match nobody is betting yet is where a
+    # hand-maintained combo block goes unattended. 0 = the whole board (~1380
+    # matches, 69 calls, ~312 MB, ~45 s) — fine on a 15 min cadence, but the
+    # default 96 h keeps it to a fraction of that.
+    "lider_combo_hours":  (lambda: _env_float("LIDER_COMBO_HOURS", 96.0), 0.0, 720.0),
+    # Minimum locked edge (%) for a combo_cover row. Board-wide p1 cover cost
+    # was 1.0458, so anything under 1.0 is already far outside the pack; this
+    # only trims rounding-level noise.
+    "lider_combo_min_edge": (lambda: _env_float("LIDER_COMBO_MIN_EDGE", 0.5), 0.0, 100.0),
+    # Minimum free-upgrade (%) for a combo_dominance row. Lider's odds ladder
+    # is coarse enough that adjacent rungs differ by 2-3%, so 3.0 is the floor
+    # that keeps ladder granularity out of the tab.
+    "lider_combo_min_dom": (lambda: _env_float("LIDER_COMBO_MIN_DOM", 3.0), 0.0, 100.0),
 }
 
 
@@ -155,6 +172,9 @@ def _defaults() -> dict[str, Any]:
             "anomaly_watch":   _env_on("ANOMALY_SCAN"),
             "betlive_anomaly": _env_on("BETLIVE_ANOMALY"),
             "soft_scan":       _env_on("SOFT_SCAN"),
+            # Opt-in: it fetches Lider's detail payloads itself, so it costs
+            # bandwidth nothing else pays for. Off until asked for.
+            "lider_combo":     _env_on("LIDER_COMBO"),
         },
         "cadence": {k: f() for k, (f, _lo, _hi) in CADENCES.items()},
         "limits": {k: f() for k, (f, _lo, _hi) in LIMITS.items()},
