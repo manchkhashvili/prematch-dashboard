@@ -804,6 +804,12 @@ _betlive_energy: dict = {}                    # bytes/time of the last discover 
 # merged into /api/anomalies `consistency` at request time.
 _lider_combo_flags: list[dict] = []
 _lider_combo_at: datetime | None = None
+# Stamped BEFORE the sweep runs, so "computed_at is null" can be told apart
+# from "never started". A scan whose first pass takes ~50s otherwise reports
+# exactly what a dead loop reports — the trap docs/debugging-lessons.md #8 was
+# written about, and which this loop walked straight back into.
+_lider_combo_started: datetime | None = None
+_lider_combo_passes: int = 0
 _lider_combo_error: str | None = None
 _lider_combo_stats: dict = {}
 
@@ -2128,6 +2134,7 @@ async def _lider_combo_loop():
     """
     from src import lider_combos
     global _lider_combo_flags, _lider_combo_at, _lider_combo_error, _lider_combo_stats
+    global _lider_combo_started, _lider_combo_passes
     await asyncio.sleep(45)
     while True:
         if not await _gated("scans", "lider_combo", "lider combo scan"):
@@ -2144,6 +2151,8 @@ async def _lider_combo_loop():
             min_ev = runtime_config.num("limits", "lider_combo_min_ev",
                                         lider_combos.MIN_EV_PCT)
             t0 = time.monotonic()
+            async with _state_lock:
+                _lider_combo_started = datetime.now(tz=timezone.utc)
             flags = await asyncio.to_thread(lider_combos.scan, hours, min_edge,
                                             min_dom, min_dup, min_ev)
             took = time.monotonic() - t0
@@ -2158,8 +2167,10 @@ async def _lider_combo_loop():
                 _lider_combo_flags = flags
                 _lider_combo_at = ts
                 _lider_combo_error = None
+                _lider_combo_passes += 1
                 _lider_combo_stats = {
                     "took_sec": round(took, 1),
+                    "passes": _lider_combo_passes,
                     "hours": hours,
                     "covers": sum(1 for f in flags if f["kind"] == "combo_cover"),
                     "dominance": sum(1 for f in flags if f["kind"] == "combo_dominance"),
@@ -2752,6 +2763,9 @@ async def api_anomalies(
         "lider_combo": {
             "enabled": runtime_config.is_on("scans", "lider_combo"),
             "computed_at": _lider_combo_at.isoformat() if _lider_combo_at else None,
+            # started_at without computed_at == first pass still in flight, which
+            # is NOT the same as never having run.
+            "started_at": _lider_combo_started.isoformat() if _lider_combo_started else None,
             "scan_sec": runtime_config.secs("lider_combo_sec", LIDER_COMBO_SEC),
             "flags": len(_lider_combo_flags),
             "error": _lider_combo_error,

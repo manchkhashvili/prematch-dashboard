@@ -476,3 +476,17 @@ def test_new_limits_are_registered():
     from src import runtime_config
     for k in ("lider_combo_min_dup", "lider_combo_min_ev"):
         assert k in runtime_config.LIMITS
+
+
+def test_scan_reports_started_separately_from_completed():
+    """A first pass takes ~50s. Reporting only computed_at makes an in-flight
+    sweep indistinguishable from a dead loop — the exact ambiguity that made
+    this scan look broken on its first deploy."""
+    from src import app
+    assert hasattr(app, "_lider_combo_started")
+    assert hasattr(app, "_lider_combo_passes")
+    import inspect
+    src = inspect.getsource(app._lider_combo_loop)
+    assert "_lider_combo_started = datetime.now" in src, \
+        "the start stamp must be written BEFORE the sweep, not after"
+    assert src.index("_lider_combo_started = datetime") < src.index("await asyncio.to_thread")
