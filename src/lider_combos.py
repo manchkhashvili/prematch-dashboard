@@ -616,13 +616,28 @@ def analyse_match(g, home, away, league, eid, start=None,
                     "combo_cover", home, away, league, eid,
                     f"{per} line {line:g}: {legs} — outlay {got[0]:.4f}, "
                     f"locked {edge:.2f}%", edge, start, periods=per))
+        # A containment row invites you to back the SUPERSET, so the superset
+        # has to be worth backing. Without that gate the check fires on pairs
+        # where both prices are bad and the gap is just one of them being
+        # awful: Eintracht Trier v RB Leipzig posted DC 1X @ 4.50 against a
+        # fair 13.31, so "the superset pays 71% more" was true, useless, and
+        # itself EV -27%. Same rule as combo_duplicate — no model, no row.
         for la, oa, lb, ob, gain in containment(bl):
-            if gain >= min_dom:
-                out.append(_flag(
-                    "combo_dominance", home, away, league, eid,
-                    f"{per} line {line:g}: '{la}' @ {oa:g} is contained in "
-                    f"'{lb}' @ {ob:g} — the superset pays {gain:.2f}% more",
-                    gain, start, periods=per))
+            if gain < min_dom or atom_p is None:
+                continue
+            msup = next((mm for mm, vv, ll, _e in bl if ll == lb and vv == ob), None)
+            if msup is None:
+                continue
+            p_sup = _mask_prob(msup, atom_p)
+            ev_sup = (p_sup * ob - 1.0) * 100.0
+            if p_sup <= 0.0 or ev_sup <= 0.0:
+                continue
+            out.append(_flag(
+                "combo_dominance", home, away, league, eid,
+                f"{per} line {line:g}: '{la}' @ {oa:g} is contained in "
+                f"'{lb}' @ {ob:g} — the superset pays {gain:.2f}% more, and is "
+                f"EV {ev_sup:+.1f}% against model fair {1.0 / p_sup:.2f}",
+                ev_sup, start, periods=per))
     hb = htft_bets(g)
     if len(hb) >= 4:
         got = min_cover(hb, H_FULL, 9)

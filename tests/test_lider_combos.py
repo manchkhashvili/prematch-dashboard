@@ -543,3 +543,53 @@ def test_primitive_hedge_legs_also_use_the_books_wording():
     labels = [lab for _m, _v, lab, _e in LC.total_bets(g, "FT", 2.5)]
     assert any(l.startswith("Full Time Result - ") for l in labels)
     assert any("Total 2.5 - " in l for l in labels)
+
+
+# ── dominance must not fire on a pair where both prices are bad ─────────────
+def test_dominance_needs_the_superset_to_be_worth_backing():
+    """Eintracht Trier v RB Leipzig, 2026-08-20. The book posted
+
+        1X2   1: 28.00  X: 10.00  2: 1.02      -> devigged P(1X) = 0.075, fair 13.31
+        DC    1X: 4.50                          -> grossly underpriced
+        totals Over 0.5 @ 1.01, Over 1.5 @ 1.01 -> pinned at the book's floor
+
+    and the check fired "'Double Chance - 1X' @ 4.50 is contained in 'Team 2
+    Win and score more than 1.5 goals - No' @ 7.70, the superset pays 71% more".
+    Logically true, and useless: 1X at 4.50 is worth 13.31 so nobody would back
+    it, and the superset is itself EV -27%. The model could not even be fitted
+    here because the floored totals rungs are unreproducible. A row that invites
+    a bet must have that bet clear model fair."""
+    bets = [(LC.t_mask("1", "u") | LC.t_mask("1", "o")
+             | LC.t_mask("X", "u") | LC.t_mask("X", "o"), 4.50, "DC 1X", True),
+            (LC.T_FULL & ~LC.t_mask("2", "o"), 7.70, "2 win & score 2+ - No", True)]
+    # the raw containment relation is real and must still be detectable
+    hits = LC.containment(bets)
+    assert len(hits) == 1 and hits[0][4] == pytest.approx(71.11, abs=0.05)
+    # ...but with no model behind it, nothing may be published
+    g = _g(cells={("FT", 1.5): bets}, x12={"FT": {"1": 28.0, "X": 10.0, "2": 1.02}})
+    assert [f for f in LC.analyse_match(g, "Trier", "Leipzig", "Cup", "x")
+            if f["kind"] == "combo_dominance"] == []
+
+
+def test_dominance_still_fires_when_the_superset_is_good():
+    """The gate must not silence the real ones: Iwata's '1X2 / Total 4.5 -
+    Over / 1' @ 16 inside 'I Team Not lose and Total Over 4.5 - Yes' @ 24,
+    where the superset is +39.8% against model fair."""
+    match, mts = _iwata_full()
+    mts["mt:16:1718"] = {"name": "I Team Not lose and Total Over {1}",
+                         "outcomeTypes": [{"id": "y", "name": "Yes"},
+                                          {"id": "n", "name": "No"}]}
+    mts["mt:16:1080"] = {"name": "1X2 / Total",
+                         "outcomeTypes": [{"id": "ot:16:1531", "name": "Over / 1"}]}
+    match["markets"]["a"] = {"typeId": "mt:16:1718",
+                             "specifier": {"special": "4.5"},
+                             "outcomes": {"y": {"value": 24.0}}}
+    match["markets"]["b"] = {"typeId": "mt:16:1080",
+                             "specifier": {"special": "4.5", "total": "4.5"},
+                             "outcomes": {"ot:16:1531": {"value": 16.0}}}
+    g = LC.parse_match(match, mts)
+    dom = [f for f in LC.analyse_match(g, "Iwata", "Tokushima", "J2", "x")
+           if f["kind"] == "combo_dominance"]
+    assert len(dom) == 1
+    assert dom[0]["severity"] > 20, "severity is now the superset's EV, not the gap"
+    assert "EV" in dom[0]["detail"] and "model fair" in dom[0]["detail"]
