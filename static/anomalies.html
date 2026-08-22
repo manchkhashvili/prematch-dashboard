@@ -285,6 +285,7 @@ async function fetchAndRender() {
 
 const KIND_LABEL = {
   ml_vs_spread: "ML vs handicap",
+  pickem_arb: "pick'em lock (push-aware)",
   favourite_flip: "favourite flip",
   total_additivity: "period totals",
   quarter_ml_extreme: "quarter ML extreme",
@@ -327,7 +328,9 @@ const CONS_KINDS  = "anom_cons_alert_kinds";
 //   pts — total_additivity (points the periods miss their parent by)
 //   %   — htft_combo, htft_fair, soccer_htft (ratio over the leg), soccer_fair (EV)
 const KIND_UNIT = {
-  ml_vs_spread: "pp", favourite_flip: "pp", total_additivity: "pts",
+  ml_vs_spread: "pp", favourite_flip: "pp",
+  // pickem_arb severity is the locked return on outlay, not a probability gap.
+  pickem_arb: "%", total_additivity: "pts",
   quarter_ml_extreme: "pp", htft_combo: "%", htft_fair: "%",
   betlive_flip: "pp", betlive_ot_fold: "pp", soccer_htft: "%",
   basketball_fav: "pp", soccer_fair: "%", soccer_identity: "pp",

@@ -6,6 +6,8 @@ are caught.
 """
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -286,3 +288,96 @@ def test_ht_vs_ft_divergence_is_gone():
     for rows in ordinary_favourites:
         kinds = {f.kind for f in find_consistency_flags(rows)}
         assert "ht_vs_ft_divergence" not in kinds
+
+
+# ── pick'em vs a 3-way moneyline (CrystalBet, 2026-08-23) ───────────────────
+def _cb_lomza(ml=(3.35, 5.45, 1.55), pick=(5.25, 1.08)):
+    """Lomza II v Ruch Wysokie Mazo. as CrystalBet posted it."""
+    now = datetime.now(tz=timezone.utc)
+
+    def o(mt, sel, line=None, period="FT"):
+        return Odds(source="crystalbet", sport="soccer", home="Lomza II",
+                    away="Ruch Wysokie", market_type=mt, period=period,
+                    selections=sel, fetched_at=now, line=line,
+                    league="Liga 2", raw_event_id="LOMZA")
+    return [o("moneyline", {"home": ml[0], "draw": ml[1], "away": ml[2]}),
+            o("spread", {"home": pick[0], "away": pick[1]}, line=0.0)]
+
+
+def test_pickem_gap_is_measured_on_the_no_draw_basis():
+    """A pick'em VOIDS the draw, so it must be compared to P(home | no draw),
+    not to the raw 3-way P(home). Comparing the wrong basis understates the gap
+    (12.6pp instead of 17.0pp here) and can flag coherent books."""
+    flags = [f for f in find_consistency_flags(_cb_lomza()) if f.kind == "ml_vs_spread"]
+    assert len(flags) == 1
+    assert flags[0].severity == pytest.approx(17.0, abs=0.5)
+    assert "no-draw basis" in flags[0].detail
+
+
+def test_three_way_moneyline_no_longer_skips_the_check():
+    """The regression this fixes: ml_phome is only filled from a 2-way ML, so
+    soccer's 3-way main result left it None and the comparison never ran."""
+    from src.consistency import _build_period_view
+    rows = _cb_lomza()
+    view = _build_period_view({"moneyline": [rows[0]], "spread": [rows[1]]})
+    assert view.ml_phome is None, "soccer has no 2-way ML — this was the blind spot"
+    assert view.ml_phome3 is not None
+    assert view.ml_pwin_nodraw is not None
+    assert view.ml_pwin_nodraw > view.ml_phome3, "removing the draw must raise P(home)"
+
+
+def test_pickem_lock_accounts_for_the_push():
+    """Ignoring the push reads 1/5.25 + 1/5.45 + 1/1.55 = 1.0191 (no arb). The
+    pick'em stake comes BACK on a draw, so the draw leg only has to cover
+    1 - x, and the true outlay is 0.9842 = +1.61%."""
+    flags = [f for f in find_consistency_flags(_cb_lomza()) if f.kind == "pickem_arb"]
+    assert len(flags) == 1
+    f = flags[0]
+    assert f.severity == pytest.approx(1.61, abs=0.05)
+    assert "0.9842" in f.detail and "1.0191" in f.detail
+    assert f.outcome == "pickem_home"
+
+
+def test_pickem_lock_pays_the_same_on_all_three_outcomes():
+    """Re-derive the position from the stakes the flag prints."""
+    P, D, A = 5.25, 5.45, 1.55
+    x, z = 1.0 / P, 1.0 / A
+    y = (1.0 - x) / D
+    outlay = x + y + z
+    assert P * x == pytest.approx(1.0)
+    assert x + D * y == pytest.approx(1.0)      # draw: stake returned + draw win
+    assert A * z == pytest.approx(1.0)
+    assert outlay < 1.0
+
+
+def test_no_pickem_lock_on_a_coherent_book():
+    flags = find_consistency_flags(_cb_lomza(ml=(2.10, 3.40, 3.60), pick=(1.62, 2.30)))
+    assert not [f for f in flags if f.kind == "pickem_arb"]
+    assert not [f for f in flags if f.kind == "ml_vs_spread"]
+
+
+def test_pickem_lock_needs_a_real_pickem_rung():
+    """A -0.5 / +0.5 rung has no push, so its semantics differ and it must not
+    be read as a pick'em."""
+    rows = _cb_lomza()
+    rows[1].line = -0.5
+    assert not [f for f in find_consistency_flags(rows) if f.kind == "pickem_arb"]
+
+
+def test_pickem_lock_refuses_legs_from_different_fetches():
+    """Replaying this over the tick store produced 21 locks, every one of which
+    paired an ML and a pick'em captured days apart (median 1.6 days). Two prices
+    from different moments are not a position you can take."""
+    from datetime import timedelta
+    rows = _cb_lomza()
+    assert [f for f in find_consistency_flags(rows) if f.kind == "pickem_arb"]
+    rows[1].fetched_at = rows[0].fetched_at - timedelta(hours=6)
+    assert not [f for f in find_consistency_flags(rows) if f.kind == "pickem_arb"]
+
+
+def test_pickem_lock_tolerates_a_few_seconds_of_skew():
+    """Within one poll cycle the two rows are stamped moments apart."""
+    from datetime import timedelta
+    rows = _cb_lomza()
+    rows[1].fetched_at = rows[0].fetched_at - timedelta(seconds=20)
+    assert [f for f in find_consistency_flags(rows) if f.kind == "pickem_arb"]

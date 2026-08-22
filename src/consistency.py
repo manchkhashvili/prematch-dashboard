@@ -74,6 +74,8 @@ from src.vig import devig_2way, devig_3way  # FAIR PROBABILITIES (devigged)
 
 # ── Thresholds (tunable; defaults sit well above measured normal variation) ────
 ML_SPREAD_GAP_PP = 5.0     # ml vs spread win-prob gap (clean game: <=0.5pp)
+PICKEM_LOCK_PCT = 0.3      # min locked % for a pickem_arb row
+_PICKEM_MAX_SKEW_SEC = 120.0  # both legs must come from the same fetch
 TOTAL_ADD_PTS = 5.0        # period totals vs parent sum (clean game: ~0.5pt)
 DECISIVE_PROB = 0.06       # |P-0.5| past this = a "decisive" favourite (~1.8/2.05)
 EXTREME_PP = 6.0           # quarter |P-0.5| exceeding FT's by this many pp
@@ -264,6 +266,33 @@ class _PeriodView:
         (home / (home+away+draw)). Lets HT-vs-FT compare across sports."""
         return self.ml_phome if self.ml_phome is not None else self.ml_phome3
 
+    @property
+    def ml_pwin_nodraw(self) -> Optional[float]:
+        """P(home wins | the game is not drawn) — the basis a pick'em rung and a
+        Draw-No-Bet actually settle on.
+
+        A 2-way ML is already draw-free, so it passes through. A 3-way 1X2 has
+        to have the draw taken OUT before it can be compared to a line-0 rung;
+        comparing the raw 3-way P(home) against a pick'em is a category error,
+        because the pick'em voids the draw rather than losing to it.
+
+        This is why the check was silent on every soccer game: `ml_phome` is
+        only ever filled from a 2-way moneyline, soccer's main result is 3-way,
+        so `ml_phome` stayed None and the comparison was skipped outright.
+        Measured on CrystalBet, Lomza II v Ruch Wysokie (2026-08-23): the 1X2
+        implies P(home | no draw) = 30.3% while the posted Asian Handicap 0.0
+        implies 13.2% — a 17.0pp disagreement that produced zero flags.
+        """
+        if self.ml_phome is not None:
+            return self.ml_phome
+        if self.ml_phome3 is not None and self.ml_pdraw3 is not None:
+            den = 1.0 - self.ml_pdraw3
+            if den > 1e-9:
+                p = self.ml_phome3 / den
+                if 0.0 < p < 1.0:
+                    return p
+        return None
+
 
 def _main_section(rows: list[Odds]) -> list[Odds]:
     """Pick the single section (by Odds.section) with the most rungs, so we never
@@ -274,6 +303,82 @@ def _main_section(rows: list[Odds]) -> list[Odds]:
     for o in rows:
         by_section.setdefault(o.section, []).append(o)
     return max(by_section.values(), key=len)
+
+
+
+def _pickem_locks(period_odds: dict, per: str, min_pct: float = 0.3) -> list[tuple]:
+    """Locked positions across a 3-way moneyline and a pick'em (line-0) rung.
+
+    The pick'em VOIDS the draw, so backing it alongside the draw and the far
+    side of the moneyline is a complete cover in which the draw branch pays the
+    pick'em stake back on top of the draw's own return:
+
+        stake x on pick'em home @ P    home  -> P*x
+        stake y on the draw     @ D    draw  -> x + D*y      (x is returned)
+        stake z on away ML      @ A    away  -> A*z
+
+    Equalise all three to 1 and the outlay is x + y + z with y only needing to
+    make up (1 - x), not the whole unit. Ignore the push and you compute
+    sum(1/odds), overstate the cost, and miss the arb entirely.
+
+    Returns (detail, profit_pct, outcome_label) per lockable side.
+    """
+    out: list[tuple] = []
+    ml3 = ml_at = None
+    for o in period_odds.get("moneyline", []):
+        s = o.selections
+        if {"home", "draw", "away"} <= set(s):
+            ml3, ml_at = s, o.fetched_at
+            break
+    if not ml3:
+        return out
+    pick = pick_at = None
+    for o in period_odds.get("spread", []):
+        if o.line is not None and abs(o.line) < 1e-6 and {"home", "away"} <= set(o.selections):
+            pick, pick_at = o.selections, o.fetched_at
+            break
+    if not pick:
+        return out
+    # SAME INSTANT ONLY. Two prices captured at different times are not a
+    # position you can take, and pairing them manufactures arbs wholesale:
+    # replaying this over the local tick store (whose `latest` keeps each
+    # market's own last-seen tick) produced 21 "locks" of which ALL 21 had the
+    # two legs more than 5 minutes apart — median 1.6 days, max 13. In
+    # production the check runs on one poll's odds so they always match, but
+    # a cached or carried-over rung would otherwise slip straight through.
+    if ml_at is not None and pick_at is not None:
+        try:
+            if abs((ml_at - pick_at).total_seconds()) > _PICKEM_MAX_SKEW_SEC:
+                return out
+        except (TypeError, AttributeError):
+            pass
+    D = ml3.get("draw")
+    if not D or D <= 1.0:
+        return out
+
+    for side, far in (("home", "away"), ("away", "home")):
+        P, A = pick.get(side), ml3.get(far)
+        if not P or not A or P <= 1.0 or A <= 1.0:
+            continue
+        x = 1.0 / P                      # pick'em stake, returns 1 on a win
+        z = 1.0 / A                      # far side of the ML
+        y = (1.0 - x) / D                # the draw only has to cover 1 - x
+        if y < 0:
+            continue
+        outlay = x + y + z
+        if outlay <= 0:
+            continue
+        profit = (1.0 / outlay - 1.0) * 100.0
+        if profit < min_pct:
+            continue
+        naive = 1.0 / P + 1.0 / D + 1.0 / A
+        out.append((
+            f"{per}: pick'em {side} @ {P:g} + draw @ {D:g} + {far} @ {A:g} — "
+            f"the pick'em pushes on the draw, so the outlay is {outlay:.4f} "
+            f"(naive {naive:.4f}), locking {profit:.2f}%. "
+            f"Stakes {x/outlay:.3f} / {y/outlay:.3f} / {z/outlay:.3f} per unit.",
+            profit, f"pickem_{side}"))
+    return out
 
 
 def _build_period_view(period_odds: dict[str, list[Odds]]) -> _PeriodView:
@@ -343,6 +448,7 @@ def find_consistency_flags(
     odds: Iterable[Odds],
     *,
     ml_spread_gap_pp: float = ML_SPREAD_GAP_PP,
+    pickem_lock_pct: float = PICKEM_LOCK_PCT,
     total_add_pts: float = TOTAL_ADD_PTS,
     decisive_prob: float = DECISIVE_PROB,
     extreme_pp: float = EXTREME_PP,
@@ -377,12 +483,24 @@ def find_consistency_flags(
 
         # 1. ML vs spread win-prob (per period)
         for per, v in views.items():
-            if v.ml_phome is not None and v.spread_pwin is not None:
-                gap = abs(v.ml_phome - v.spread_pwin) * 100.0
+            pml = v.ml_pwin_nodraw
+            if pml is not None and v.spread_pwin is not None:
+                gap = abs(pml - v.spread_pwin) * 100.0
                 if gap >= ml_spread_gap_pp:
+                    basis = ("no-draw basis" if v.ml_phome is None else "2-way ML")
                     mk("ml_vs_spread", per,
-                       f"{per}: ML says P(home)={v.ml_phome*100:.0f}% but the handicap "
-                       f"ladder implies {v.spread_pwin*100:.0f}% (gap {gap:.0f}pp)", gap)
+                       f"{per}: ML says P(home)={pml*100:.0f}% ({basis}) but the "
+                       f"pick'em rung implies {v.spread_pwin*100:.0f}% "
+                       f"(gap {gap:.0f}pp)", gap)
+
+        # 1b. the same disagreement, priced. A pick'em / Draw-No-Bet PUSHES on a
+        #     draw, so a three-leg cover costs less than the naive sum of its
+        #     inverse odds and an arb can hide behind that. On the CrystalBet
+        #     game above the naive read was 1/5.25 + 1/5.45 + 1/1.55 = 1.0191,
+        #     "no arb", while the push-aware outlay is 0.9842 = +1.61% locked.
+        for per, mkts in periods.items():
+            for flag in _pickem_locks(mkts, per, min_pct=pickem_lock_pct):
+                mk("pickem_arb", per, flag[0], flag[1], outcome=flag[2])
 
         # 2. favourite flip across periods (vs FT)
         ft = views.get("FT")
