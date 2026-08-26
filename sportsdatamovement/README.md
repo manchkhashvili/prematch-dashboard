@@ -172,7 +172,7 @@ covering both suspension and leaving the board.
 
 ---
 
-## Five traps, all of them measured
+## Seven traps, all of them measured
 
 Each of these was found by running the collector and disbelieving the output.
 Every one is pinned by a test.
