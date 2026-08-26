@@ -10,7 +10,9 @@ CLI: python -m sportsdatamovement <command>
     event                  one event's whole board, each position's last move
     board                  reconstruct a full board as it stood at an instant
     export                 the movement log as CSV
+    purge-players          delete player-prop history already collected
     prune                  drop events not seen for N days
+    serve                  the movement dashboard
 
 Run from the prematch root so `src.scrapers` resolves:
     python -m sportsdatamovement snapshot --max-events 5
@@ -74,6 +76,7 @@ def cmd_snapshot(args) -> None:
             store, books=tuple(args.books), cb_concurrency=args.cb_concurrency,
             max_start_days=args.max_start_days,
             skip_simulated=not args.include_simulated,
+            drop_players=not args.keep_player_markets,
             max_events=args.max_events))
     print(json.dumps(res, indent=2, default=str))
     print("\ndb:", json.dumps(store.stats(), indent=2))
@@ -89,6 +92,7 @@ def cmd_loop(args) -> None:
                 books=tuple(args.books), cb_concurrency=args.cb_concurrency,
                 max_start_days=args.max_start_days,
                 skip_simulated=not args.include_simulated,
+                drop_players=not args.keep_player_markets,
                 max_events=args.max_events))
     except KeyboardInterrupt:
         print("\nstopped")
@@ -235,6 +239,27 @@ def cmd_export(args) -> None:
         con.close()
 
 
+def cmd_serve(args) -> None:
+    from sportsdatamovement import web
+    if args.db:
+        import os
+        os.environ['SDM_DB_PATH'] = args.db
+    print(f"movement dashboard on http://{args.host}:{args.port}")
+    web.serve(host=args.host, port=args.port)
+
+
+def cmd_purge_players(args) -> None:
+    store = Store(args.db) if args.db else runner.open_store()
+    before = store.stats()
+    dropped = store.purge_players()
+    after = store.stats()
+    print(f"dropped {dropped['positions']:,} positions, "
+          f"{dropped['odds']:,} odds rows, {dropped['markets']:,} markets, "
+          f"{dropped['sides']:,} sides")
+    print(f"positions {before['positions']:,} -> {after['positions']:,}")
+    print("run VACUUM to hand the space back to the filesystem")
+
+
 def cmd_prune(args) -> None:
     store = Store(args.db) if args.db else runner.open_store()
     print(store.prune(args.days))
@@ -258,6 +283,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="skip events starting later than this (0 = no cap)")
         sp.add_argument("--max-events", type=int, default=0,
                         help="cap events per sport — for smoke runs")
+        sp.add_argument("--keep-player-markets", action="store_true",
+                        help="keep anytime-goalscorer / shots / assists and "
+                             "the combos built on them (52%% of CrystalBet's "
+                             "soccer board, 33%% of Lider's)")
         sp.add_argument("--include-simulated", action="store_true",
                         help="keep simulated/virtual leagues (off by default: "
                              "they reprice constantly by construction)")
@@ -295,6 +324,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("export"); sp.set_defaults(func=cmd_export)
     sp.add_argument("--out", default="movements.csv")
     sp.add_argument("--limit", type=int, default=1_000_000)
+
+    sp = sub.add_parser("serve"); sp.set_defaults(func=cmd_serve)
+    sp.add_argument("--host", default="127.0.0.1")
+    sp.add_argument("--port", type=int, default=8100)
+
+    sp = sub.add_parser("purge-players"); sp.set_defaults(func=cmd_purge_players)
 
     sp = sub.add_parser("prune"); sp.set_defaults(func=cmd_prune)
     sp.add_argument("--days", type=float, default=14.0)

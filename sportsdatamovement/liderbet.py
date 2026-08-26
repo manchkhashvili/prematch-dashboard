@@ -56,6 +56,7 @@ if str(_ROOT) not in sys.path:
 
 from src.normalize import is_simulated_league, transliterate   # noqa: E402
 from sportsdatamovement.common import slug                     # noqa: E402
+from sportsdatamovement.players import is_player_market        # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -311,11 +312,13 @@ def read_menu(session, *, skip_simulated: bool = True) -> dict[str, dict]:
 
 # ── parse ─────────────────────────────────────────────────────────────────────
 
-def parse_match(m: dict, ancestors: dict, market_types: dict) -> dict:
+def parse_match(m: dict, ancestors: dict, market_types: dict, *,
+                drop_players: bool = True) -> dict:
     """One match -> {"event": {...}, "rows": [(market_key, name, side, line,
     odds, ref)]}.
 
-    Every market and every outcome, unfiltered.
+    Every market and every outcome, save for player props when `drop_players`
+    (a third of Lider's soccer board — see players.py).
     """
     home = _clean(transliterate(
         (ancestors.get(m.get("homeId"), {}) or {}).get("name") or ""))
@@ -339,6 +342,12 @@ def parse_match(m: dict, ancestors: dict, market_types: dict) -> dict:
         # this market from its siblings under the same typeId — see
         # split_specifier.
         spec = mk.get("specifier")
+        # Decided on the RAW title and specifier, before the name is filled in:
+        # substitution puts the player's name into the title, so testing
+        # afterwards would work for the wrong reason and would keep working if
+        # the structural tell ever disappeared.
+        if drop_players and is_player_market(market=title, specifier=spec):
+            continue
         market_line, market_rest = split_specifier(spec)
         market_key = f"{type_id}|{market_rest}" if market_rest else str(type_id)
         title = fill_name(title, spec, skip=_line_key(spec))
@@ -369,7 +378,8 @@ def parse_match(m: dict, ancestors: dict, market_types: dict) -> dict:
 
 def collect_section_sync(writer, session, section: dict, *,
                          max_start_days: float = 0.0,
-                         max_matches: int = 0) -> dict:
+                         max_matches: int = 0,
+                         drop_players: bool = True) -> dict:
     """Pull one sport's whole board into `writer`. Runs in a worker thread."""
     t0 = time.monotonic()
     cut = (datetime.now(timezone.utc) + timedelta(days=max_start_days)
@@ -424,7 +434,7 @@ def collect_section_sync(writer, session, section: dict, *,
             m = matches.get(mid) or matches.get(str(mid))
             if not m:
                 continue
-            parsed = parse_match(m, anc, mts)
+            parsed = parse_match(m, anc, mts, drop_players=drop_players)
             ev = parsed["event"]
             if not ev["event_key"]:
                 continue
@@ -449,6 +459,7 @@ def collect_section_sync(writer, session, section: dict, *,
 
 async def collect(store, *, skip_simulated: bool = True,
                   max_start_days: float = 0.0, max_matches: int = 0,
+                  drop_players: bool = True,
                   sections: Optional[list[str]] = None) -> list[dict]:
     """One full Lider-Bet pass. Each sport is its own snapshot row."""
     from curl_cffi.requests import Session
@@ -469,7 +480,8 @@ async def collect(store, *, skip_simulated: bool = True,
                 with store.snapshot(BOOK, sec["slug"]) as w:
                     stats = await asyncio.to_thread(
                         collect_section_sync, w, session, sec,
-                        max_start_days=max_start_days, max_matches=max_matches)
+                        max_start_days=max_start_days, max_matches=max_matches,
+                        drop_players=drop_players)
                     out = w.commit()
                 out.update(stats)
                 out["sport"] = sec["slug"]

@@ -45,6 +45,70 @@ two HTML round trips per game.
 
 ---
 
+## Player markets are dropped
+
+Anytime goalscorer, shots, assists, cards and the combinations built on them are
+**not collected**. `--keep-player-markets` brings them back.
+
+They were half the board — 52 % of CrystalBet's soccer positions and 33 % of
+Lider's — and they were also the entire cause of the dimension tables being
+unusable. Purging them from a full pass:
+
+| | before | after |
+|---|---|---|
+| positions | 4,368,032 | **2,574,225** |
+| markets | 122,170 | **10,194** |
+| sides | 113,793 | **4,621** |
+
+`markets` going from 122 k rows to 10 k is what makes "how does *Halftime/
+Fulltime* behave across every game" a question the schema can answer at all.
+
+Lider says so structurally — the specifier carries a `player` key or an
+`sr:player:NNNN` value — and that is used where available. CrystalBet says
+nothing structurally, so a player is recognised by the "Last, First" convention
+both books write people in. The pattern has to survive what real boards contain:
+
+    Welbeck, D                     initial-only first name       -> player
+    Bughail-mellor, D Mani         hyphen, two given names       -> player
+    Assists Chust, Víctor (Elche)  accented, mid-title           -> player
+    0:1, 0:2 or 0:3                a Multiscores selection       -> KEEP
+    Team 1 win or 0-0, 0-1         a scoreline list              -> KEEP
+
+The discriminator is what sits immediately before the comma — a letter for a
+person, a digit for a scoreline. Matching on `", "` alone would take every
+correct-score market out of the study.
+
+Already-collected player history can be removed in place, without losing the
+passes around it:
+
+```bash
+python -m sportsdatamovement purge-players    # then VACUUM to reclaim the file
+```
+
+## The dashboard
+
+```bash
+python -m sportsdatamovement serve      # http://127.0.0.1:8100
+```
+
+Four views, all filtered by book/sport and all sortable by clicking a column:
+
+- **movers** — every price change with what it moved *from*, ranked by how far.
+  `odds` stores only the new price, so the old one is recovered by looking back
+  for that position's previous row. Click a row for its full price history.
+- **events** — events ranked by how much of their board moved. Click one for its
+  **move grid**: a row per position, a column per hourly pass, a filled cell
+  where the price changed — green up, red down, blank unchanged, grey not
+  offered. This is the view the project exists for: the main result moving while
+  HT/FT 1/1 stays blank for six hours is visible without trusting a statistic.
+- **markets** — moves per position per pass, by market type. Sort *ascending* to
+  find the markets that never move.
+- **passes** — the collector's own log, including `dupes`, which should be zero.
+
+Charts are inline SVG with no libraries, and the price chart draws a **step**
+line rather than a curve: between two ticks the price is *known* to have held,
+which is the premise the whole store rests on.
+
 ## Why the store is a change log
 
 One snapshot of both boards is **4.43 million positions**. At 24 snapshots a day

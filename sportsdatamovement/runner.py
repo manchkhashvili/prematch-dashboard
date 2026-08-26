@@ -61,6 +61,7 @@ def next_sleep(elapsed: float, interval: float, min_gap: float) -> float:
 async def run_pass(store: Store, *, books: tuple[str, ...] = ("liderbet", "crystalbet"),
                    cb_concurrency: int = 3, max_start_days: float = 0.0,
                    skip_simulated: bool = True, max_events: int = 0,
+                   drop_players: bool = True,
                    cb_sports: list[int] | None = None,
                    lider_sections: list[str] | None = None) -> dict:
     """One snapshot of everything. Returns per-book results plus totals."""
@@ -70,11 +71,13 @@ async def run_pass(store: Store, *, books: tuple[str, ...] = ("liderbet", "cryst
     if "liderbet" in books:
         jobs["liderbet"] = liderbet.collect(
             store, skip_simulated=skip_simulated, max_start_days=max_start_days,
-            max_matches=max_events, sections=lider_sections)
+            max_matches=max_events, drop_players=drop_players,
+            sections=lider_sections)
     if "crystalbet" in books:
         jobs["crystalbet"] = crystalbet.collect(
             store, sports=cb_sports, concurrency=cb_concurrency,
-            max_start_days=max_start_days, max_games=max_events)
+            max_start_days=max_start_days, max_games=max_events,
+            drop_players=drop_players)
 
     done = await asyncio.gather(*jobs.values(), return_exceptions=True)
     out: dict = {"started_at": started.isoformat(timespec="seconds"),

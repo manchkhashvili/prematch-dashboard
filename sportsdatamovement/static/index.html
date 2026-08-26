@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>movement</title>
+<style>
+  :root {
+    --bg:#0e1116; --panel:#161b22; --line:#272e38; --ink:#e6edf3; --dim:#8b949e;
+    --up:#3fb950; --down:#f85149; --accent:#58a6ff; --still:#21262d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fff; --panel:#f6f8fa; --line:#d0d7de; --ink:#1f2328;
+            --dim:#656d76; --still:#eaeef2; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45
+         ui-monospace,SFMono-Regular,Menlo,monospace; }
+  header { display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+           padding:10px 14px; border-bottom:1px solid var(--line);
+           background:var(--panel); position:sticky; top:0; z-index:20; }
+  h1 { font-size:14px; margin:0 10px 0 0; font-weight:600; letter-spacing:.02em; }
+  nav button { background:none; border:1px solid transparent; color:var(--dim);
+               padding:5px 11px; border-radius:6px; cursor:pointer; font:inherit; }
+  nav button.on { color:var(--ink); border-color:var(--line); background:var(--bg); }
+  select, input, .btn { background:var(--bg); color:var(--ink);
+        border:1px solid var(--line); border-radius:6px; padding:5px 8px;
+        font:inherit; }
+  input[type=search] { min-width:190px; }
+  .grow { flex:1; }
+  .muted { color:var(--dim); }
+  main { padding:12px 14px 60px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:5px 9px; border-bottom:1px solid var(--line);
+           white-space:nowrap; }
+  th { position:sticky; top:47px; background:var(--panel); z-index:10;
+       cursor:pointer; user-select:none; font-weight:600; }
+  th:hover { color:var(--accent); }
+  tbody tr:hover { background:var(--panel); }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .wrap { overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+  .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line);
+          border-radius:20px; font-size:11px; color:var(--dim); }
+  .clickable { cursor:pointer; color:var(--accent); }
+  .bar { height:9px; background:var(--accent); border-radius:2px; display:inline-block;
+         vertical-align:middle; min-width:1px; }
+  /* the move grid */
+  .grid td.cell { padding:0; width:16px; min-width:16px; border-bottom:none; }
+  .grid td.cell i { display:block; width:14px; height:14px; margin:1px;
+        border-radius:3px; background:var(--still); }
+  .grid td.cell i.mv { background:var(--accent); }
+  .grid td.cell i.up { background:var(--up); }
+  .grid td.cell i.dn { background:var(--down); }
+  .grid td.cell i.gone { background:var(--dim); opacity:.45; }
+  .grid td.name { max-width:420px; overflow:hidden; text-overflow:ellipsis;
+                  white-space:nowrap; }
+  .legend span { margin-right:14px; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:3px;
+              vertical-align:-1px; margin-right:4px; }
+  #detail { position:fixed; right:0; top:0; bottom:0; width:min(520px,92vw);
+      background:var(--panel); border-left:1px solid var(--line); padding:14px;
+      overflow:auto; transform:translateX(102%); transition:transform .16s;
+      z-index:30; }
+  #detail.open { transform:none; }
+  .empty { padding:30px; text-align:center; color:var(--dim); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0 14px; }
+  .kv div:nth-child(odd) { color:var(--dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>movement</h1>
+  <nav>
+    <button data-tab="movers" class="on">movers</button>
+    <button data-tab="events">events</button>
+    <button data-tab="markets">markets</button>
+    <button data-tab="passes">passes</button>
+  </nav>
+  <select id="scope"></select>
+  <label class="muted">passes <input id="passes" type="number" value="1" min="1"
+         max="200" style="width:62px"></label>
+  <label class="muted" id="minpct-wrap">min% <input id="minpct" type="number"
+         value="0" step="0.5" style="width:66px"></label>
+  <label class="muted" id="maxodds-wrap">max odds <input id="maxodds"
+         type="number" value="0" step="1" style="width:66px"
+         title="0 = no cap. Longshots dominate percentage moves."></label>
+  <input id="search" type="search" placeholder="team, league or market">
+  <span class="grow"></span>
+  <span id="status" class="muted"></span>
+  <button class="btn" id="reload">reload</button>
+</header>
+
+<main>
+  <div id="view"><div class="empty">loading…</div></div>
+</main>
+
+<aside id="detail"></aside>
+
+<script>
+const $ = s => document.querySelector(s);
+const state = { tab:'movers', scope:'', passes:1, minpct:0, maxodds:0, search:'',
+                sort:{}, meta:null, rows:[] };
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = (v, d=2) => v == null ? '' : Number(v).toFixed(d);
+const when = t => t ? String(t).slice(5,16).replace('T',' ') : '';
+
+async function api(path, params={}) {
+  const q = new URLSearchParams();
+  for (const [k,v] of Object.entries(params))
+    if (v !== '' && v != null) q.set(k, v);
+  const r = await fetch(path + (q.toString() ? '?'+q : ''));
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function scopeParts() {
+  if (!state.scope) return {};
+  const [book, sport] = state.scope.split('|');
+  return { book, sport };
+}
+
+// ── sortable tables ──────────────────────────────────────────────────────────
+// Sorting happens in the browser over the rows the server already ranked and
+// limited. The server's own ORDER BY decides WHICH rows you get; this decides
+// how the ones you got are arranged.
+function sortRows(rows, key, dir) {
+  return [...rows].sort((a,b) => {
+    let x = a[key], y = b[key];
+    if (x == null) return 1;
+    if (y == null) return -1;
+    if (typeof x === 'number' && typeof y === 'number') return dir*(x-y);
+    return dir * String(x).localeCompare(String(y), undefined, {numeric:true});
+  });
+}
+
+function table(cols, rows, opts={}) {
+  const key = state.sort[state.tab];
+  const sorted = key ? sortRows(rows, key.k, key.d) : rows;
+  const head = cols.map(c =>
+    `<th class="${c.num?'num':''}" data-k="${c.k}">${esc(c.t)}${
+      key && key.k===c.k ? (key.d>0?' ▲':' ▼') : ''}</th>`).join('');
+  const body = sorted.map(r => '<tr'+(opts.rowAttrs?opts.rowAttrs(r):'')+'>' +
+      cols.map(c => `<td class="${c.num?'num':''}${c.cls?' '+c.cls(r):''}">${
+        c.f ? c.f(r) : esc(r[c.k])}</td>`).join('') + '</tr>').join('');
+  return `<div class="wrap"><table><thead><tr>${head}</tr></thead>
+          <tbody>${body}</tbody></table></div>`;
+}
+
+function wireSort() {
+  document.querySelectorAll('th[data-k]').forEach(th => th.onclick = () => {
+    const k = th.dataset.k, cur = state.sort[state.tab];
+    state.sort[state.tab] = { k, d: cur && cur.k===k ? -cur.d : -1 };
+    render();
+  });
+}
+
+// ── charts (inline SVG, no libraries) ────────────────────────────────────────
+function stepChart(points, w=470, h=170) {
+  const vals = points.map(p => p.odds).filter(v => v != null);
+  if (vals.length < 2) return '<div class="muted">only one recorded price</div>';
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.12 || Math.max(hi*0.02, 0.01);
+  const y0 = lo - pad, y1 = hi + pad;
+  const X = i => 34 + i * (w-46) / Math.max(1, points.length-1);
+  const Y = v => h - 22 - (v - y0) * (h - 40) / (y1 - y0);
+  // A step line: the price is KNOWN to have held between ticks.
+  let d = '', prev = null;
+  points.forEach((p, i) => {
+    if (p.odds == null) return;
+    if (prev === null) d += `M${X(i)},${Y(p.odds)}`;
+    else d += `L${X(i)},${Y(prev)}L${X(i)},${Y(p.odds)}`;
+    prev = p.odds;
+  });
+  const dots = points.map((p,i) => p.odds == null ? '' :
+    `<circle cx="${X(i)}" cy="${Y(p.odds)}" r="2.5" fill="var(--accent)">
+       <title>${esc(when(p.ts))} — ${num(p.odds)}</title></circle>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">
+    <line x1="34" y1="${h-22}" x2="${w-12}" y2="${h-22}" stroke="var(--line)"/>
+    <text x="2" y="16" fill="var(--dim)" font-size="10">${num(hi)}</text>
+    <text x="2" y="${h-24}" fill="var(--dim)" font-size="10">${num(lo)}</text>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+    ${dots}</svg>`;
+}
+
+// ── tabs ─────────────────────────────────────────────────────────────────────
+const TABS = {};
+
+TABS.movers = async () => {
+  const d = await api('/api/movers', {...scopeParts(), since_passes:state.passes,
+      search:state.search, min_pct:state.minpct, max_odds:state.maxodds,
+      sort:'abs_pp', limit:600});
+  state.rows = d.rows;
+  if (!d.rows.length) return `<div class="empty">nothing moved in the last
+      ${state.passes} pass(es) of this scope</div>`;
+  return `<div class="muted" style="margin-bottom:8px">ranked by shift in
+      implied probability — a longshot drifting 40.0&nbsp;→&nbsp;60.0 is +67%
+      but only 0.8pp, while 2.00&nbsp;→&nbsp;1.10 is 41pp. Click any row for
+      its price history.</div>` + table([
+    {k:'ts', t:'when', f:r=>esc(when(r.ts))},
+    {k:'book', t:'book'},
+    {k:'sport', t:'sport'},
+    {k:'league', t:'league', f:r=>`<span class="muted">${esc((r.league||'').slice(0,28))}</span>`},
+    {k:'home', t:'event', f:r=>esc(r.home+' - '+r.away)},
+    {k:'market', t:'market'},
+    {k:'side', t:'side', f:r=>esc(r.side)+(r.line!=null?` <span class="muted">@${r.line}</span>`:'')},
+    {k:'was', t:'from', num:1, f:r=>num(r.was)},
+    {k:'odds', t:'to', num:1, f:r=>num(r.odds)},
+    {k:'pct', t:'move %', num:1, cls:r=>r.pct>0?'up':'down',
+     f:r=>(r.pct>0?'+':'')+num(r.pct,1)},
+    {k:'pp', t:'prob pp', num:1, cls:r=>r.pp>0?'down':'up',
+     f:r=>(r.pp>0?'+':'')+num(r.pp,1)},
+  ], d.rows, {rowAttrs:r=>` class="clickable" data-pos="${r.position_id}"`});
+};
+
+TABS.events = async () => {
+  const d = await api('/api/events', {...scopeParts(), search:state.search,
+      since_passes:Math.max(state.passes,6), limit:250});
+  state.rows = d.rows;
+  if (!d.rows.length) return '<div class="empty">no events in this scope</div>';
+  const max = Math.max(...d.rows.map(r=>r.moves), 1);
+  return `<div class="muted" style="margin-bottom:8px">click an event for its
+      move grid — a row per position, a column per pass</div>` + table([
+    {k:'kickoff', t:'kickoff', f:r=>esc(when(r.kickoff))},
+    {k:'book', t:'book'},
+    {k:'sport', t:'sport'},
+    {k:'league', t:'league', f:r=>`<span class="muted">${esc((r.league||'').slice(0,30))}</span>`},
+    {k:'home', t:'event', f:r=>esc(r.home+' - '+r.away)},
+    {k:'positions', t:'positions', num:1, f:r=>r.positions.toLocaleString()},
+    {k:'moves', t:'moves', num:1, f:r=>r.moves.toLocaleString()},
+    {k:'moves', t:'', f:r=>`<span class="bar" style="width:${
+        Math.round(60*r.moves/max)}px"></span>`},
+  ], d.rows, {rowAttrs:r=>` class="clickable" data-event="${r.event_id}"`});
+};
+
+TABS.markets = async () => {
+  const d = await api('/api/markets', {...scopeParts(),
+      since_passes:Math.max(state.passes,12), sort:'rate', limit:600});
+  let rows = d.rows;
+  if (state.search) {
+    const q = state.search.toLowerCase();
+    rows = rows.filter(r => r.market.toLowerCase().includes(q));
+  }
+  state.rows = rows;
+  if (!rows.length) return '<div class="empty">no markets in this scope</div>';
+  const max = Math.max(...rows.map(r=>r.rate), 0.0001);
+  return `<div class="muted" style="margin-bottom:8px">moves per position per
+      pass, over the last ${d.passes} pass(es). Sort ascending to find the
+      markets that never move.</div>` + table([
+    {k:'market', t:'market'},
+    {k:'book', t:'book'},
+    {k:'sport', t:'sport'},
+    {k:'positions', t:'positions', num:1, f:r=>r.positions.toLocaleString()},
+    {k:'moves', t:'moves', num:1, f:r=>r.moves.toLocaleString()},
+    {k:'rate', t:'rate', num:1, f:r=>num(r.rate,4)},
+    {k:'rate', t:'', f:r=>`<span class="bar" style="width:${
+        Math.round(90*r.rate/max)}px"></span>`},
+  ], rows);
+};
+
+TABS.passes = async () => {
+  const rows = state.meta.passes;
+  state.rows = rows;
+  return table([
+    {k:'started_at', t:'started', f:r=>esc(when(r.started_at))},
+    {k:'book', t:'book'},
+    {k:'sport', t:'sport'},
+    {k:'ok', t:'ok', f:r=>r.ok?'✓':`<span class="down">✕ ${esc((r.error||'').slice(0,44))}</span>`},
+    {k:'n_events', t:'events', num:1, f:r=>r.n_events.toLocaleString()},
+    {k:'n_positions', t:'positions', num:1, f:r=>r.n_positions.toLocaleString()},
+    {k:'n_new', t:'new', num:1, f:r=>r.n_new.toLocaleString()},
+    {k:'n_moved', t:'moved', num:1, f:r=>r.n_moved.toLocaleString()},
+    {k:'n_gone', t:'gone', num:1, f:r=>r.n_gone.toLocaleString()},
+    {k:'n_dupes', t:'dupes', num:1, cls:r=>r.n_dupes?'down':'',
+     f:r=>r.n_dupes.toLocaleString()},
+    {k:'bytes', t:'MB', num:1, f:r=>(r.bytes/1e6).toFixed(0)},
+    {k:'dur_ms', t:'sec', num:1, f:r=>(r.dur_ms/1000).toFixed(0)},
+  ], rows);
+};
+
+// ── the move grid ────────────────────────────────────────────────────────────
+async function openEvent(id) {
+  const d = await api('/api/event/'+id, {passes:36});
+  const ev = d.event, cols = d.columns;
+  const head = cols.map(c =>
+    `<th class="cell" title="${esc(c.started_at)}"></th>`).join('');
+  const body = d.rows.map(r => {
+    let prev = null;
+    const cells = cols.map(c => {
+      const v = r.cells[c.id];
+      let cls = '';
+      if (v === undefined) cls = '';
+      else if (v === null) cls = 'gone';
+      else { cls = prev == null ? 'mv' : (v > prev ? 'up' : v < prev ? 'dn' : 'mv'); }
+      if (v != null) prev = v;
+      const tip = v === undefined ? 'unchanged' : v === null ? 'not offered' : num(v);
+      return `<td class="cell" title="${esc(when(c.started_at))} — ${tip}">`
+           + `<i class="${cls}"></i></td>`;
+    }).join('');
+    return `<tr data-pos="${r.position_id}" class="clickable">
+      <td class="name">${esc(r.market)}</td>
+      <td class="muted">${esc(r.side)}${r.line!=null?' @'+r.line:''}</td>
+      <td class="num">${num(r.latest)}</td>
+      <td class="num muted">${r.n_moves}</td>${cells}</tr>`;
+  }).join('');
+  $('#view').innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="btn" id="back">← back</button>
+      <strong style="margin-left:10px">${esc(ev.home)} - ${esc(ev.away)}</strong>
+      <span class="pill">${esc(ev.book)}</span>
+      <span class="pill">${esc(ev.sport)}</span>
+      <span class="muted"> ${esc(ev.league||'')} · kickoff ${esc(when(ev.start_time))}</span>
+    </div>
+    <div class="legend muted" style="margin-bottom:8px">
+      <span><i style="background:var(--up)"></i>moved up</span>
+      <span><i style="background:var(--down)"></i>moved down</span>
+      <span><i style="background:var(--accent)"></i>first price</span>
+      <span><i style="background:var(--still)"></i>unchanged</span>
+      <span><i style="background:var(--dim);opacity:.45"></i>not offered</span>
+      <span>${cols.length} passes, oldest left · click a row for its history</span>
+    </div>
+    <div class="wrap"><table class="grid"><thead><tr>
+      <th>market</th><th>side</th><th class="num">odds</th><th class="num">n</th>
+      ${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  $('#back').onclick = () => { state.tab = 'events'; render(); };
+  wireRowClicks();
+}
+
+async function openPosition(id) {
+  const d = await api('/api/history/'+id);
+  const p = d.position;
+  $('#detail').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:start">
+      <strong>${esc(p.market)}</strong>
+      <button class="btn" id="close">close</button>
+    </div>
+    <div class="kv">
+      <div>side</div><div>${esc(p.side)}${p.line!=null?' @'+p.line:''}</div>
+      <div>event</div><div>${esc(p.home)} - ${esc(p.away)}</div>
+      <div>league</div><div>${esc(p.league||'')}</div>
+      <div>book</div><div>${esc(p.book)} / ${esc(p.sport)}</div>
+      <div>kickoff</div><div>${esc(when(p.kickoff))}</div>
+      <div>book ref</div><div class="muted">${esc(p.ref||'')}</div>
+    </div>
+    ${stepChart(d.points)}
+    <table style="margin-top:10px"><thead><tr><th>when</th>
+      <th class="num">odds</th><th class="num">move</th></tr></thead><tbody>
+      ${d.points.map((pt,i) => {
+        const prev = i ? d.points[i-1].odds : null;
+        const pc = prev && pt.odds ? (pt.odds-prev)*100/prev : null;
+        return `<tr><td>${esc(when(pt.ts))}</td>
+          <td class="num">${pt.odds==null?'<span class="muted">—</span>':num(pt.odds)}</td>
+          <td class="num ${pc>0?'up':pc<0?'down':''}">${
+            pc==null?'':(pc>0?'+':'')+num(pc,1)+'%'}</td></tr>`;
+      }).join('')}
+    </tbody></table>`;
+  $('#detail').classList.add('open');
+  $('#close').onclick = () => $('#detail').classList.remove('open');
+}
+
+function wireRowClicks() {
+  document.querySelectorAll('tr[data-event]').forEach(tr =>
+    tr.onclick = () => openEvent(tr.dataset.event));
+  document.querySelectorAll('tr[data-pos]').forEach(tr =>
+    tr.onclick = () => openPosition(tr.dataset.pos));
+}
+
+// ── shell ────────────────────────────────────────────────────────────────────
+async function render() {
+  $('#status').textContent = 'loading…';
+  for (const id of ['#minpct-wrap','#maxodds-wrap'])
+    $(id).style.display = state.tab === 'movers' ? '' : 'none';
+  try {
+    $('#view').innerHTML = await TABS[state.tab]();
+    wireSort();
+    wireRowClicks();
+    const db = state.meta.db;
+    $('#status').textContent =
+      `${state.rows.length} rows · ${db.positions.toLocaleString()} positions · `
+      + `${db.odds_rows.toLocaleString()} recorded moves · `
+      + `${(db.db_bytes/1e6).toFixed(0)} MB`;
+  } catch (e) {
+    $('#view').innerHTML = `<div class="empty down">${esc(e.message)}</div>`;
+    $('#status').textContent = 'error';
+  }
+}
+
+async function boot() {
+  state.meta = await api('/api/meta');
+  const sel = $('#scope');
+  sel.innerHTML = '<option value="">all books &amp; sports</option>' +
+    state.meta.scopes.map(s =>
+      `<option value="${esc(s.book)}|${esc(s.sport)}">${esc(s.book)} · ${
+        esc(s.sport)} (${s.events})</option>`).join('');
+  // Default to the busiest board rather than everything: the unfiltered
+  // movers query spans 57 sports and is the slowest thing here.
+  if (state.meta.scopes.length) {
+    sel.value = state.meta.scopes[0].book + '|' + state.meta.scopes[0].sport;
+    state.scope = sel.value;
+  }
+  sel.onchange = () => { state.scope = sel.value; render(); };
+  $('#passes').onchange = e => { state.passes = +e.target.value || 1; render(); };
+  $('#minpct').onchange = e => { state.minpct = +e.target.value || 0; render(); };
+  $('#maxodds').onchange = e => { state.maxodds = +e.target.value || 0; render(); };
+  let t; $('#search').oninput = e => {
+    clearTimeout(t);
+    t = setTimeout(() => { state.search = e.target.value; render(); }, 280);
+  };
+  $('#reload').onclick = async () => { state.meta = await api('/api/meta'); render(); };
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('nav button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    state.tab = b.dataset.tab;
+    render();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') $('#detail').classList.remove('open');
+  });
+  render();
+}
+boot();
+</script>
+</body>
+</html>

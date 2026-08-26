@@ -406,6 +406,56 @@ class Store:
 
     # ── retention ─────────────────────────────────────────────────────────────
 
+    def purge_players(self) -> dict:
+        """Delete player-scoped positions and their history.
+
+        The collectors skip these at source, so this is for a database that was
+        filled before that — half the CrystalBet soccer board — rather than
+        something the loop needs. It reuses the same detector the collectors
+        use, registered as a SQLite function, so the two can never drift.
+
+        A market or a side is enough on its own: `is_player_market` ORs the
+        two, and evaluating them separately over the dimension tables is a few
+        thousand calls instead of one per position.
+        """
+        from sportsdatamovement.players import is_player_market
+
+        with self._lock:
+            con = self._connect()
+            try:
+                con.create_function(
+                    "sdm_is_player", 2,
+                    lambda m, s: 1 if is_player_market(market=m or "",
+                                                       side=s or "") else 0)
+                con.execute("CREATE TEMP TABLE _pm AS SELECT id FROM markets"
+                            " WHERE sdm_is_player(name, '')")
+                con.execute("CREATE TEMP TABLE _ps AS SELECT id FROM sides"
+                            " WHERE sdm_is_player('', label)")
+                con.execute(
+                    "CREATE TEMP TABLE _dead AS SELECT id FROM positions"
+                    " WHERE market_id IN (SELECT id FROM _pm)"
+                    "    OR side_id IN (SELECT id FROM _ps)")
+                n_pos = con.execute("SELECT COUNT(*) FROM _dead").fetchone()[0]
+                n_odds = con.execute(
+                    "SELECT COUNT(*) FROM odds WHERE position_id IN"
+                    " (SELECT id FROM _dead)").fetchone()[0]
+                con.execute("DELETE FROM odds WHERE position_id IN (SELECT id FROM _dead)")
+                con.execute("DELETE FROM latest WHERE position_id IN (SELECT id FROM _dead)")
+                con.execute("DELETE FROM positions WHERE id IN (SELECT id FROM _dead)")
+                n_mkt = con.execute(
+                    "DELETE FROM markets WHERE id NOT IN"
+                    " (SELECT DISTINCT market_id FROM positions)").rowcount
+                n_side = con.execute(
+                    "DELETE FROM sides WHERE id NOT IN"
+                    " (SELECT DISTINCT side_id FROM positions)").rowcount
+                for t in ("_pm", "_ps", "_dead"):
+                    con.execute(f"DROP TABLE {t}")
+                con.commit()
+            finally:
+                con.close()
+        return {"positions": n_pos, "odds": n_odds,
+                "markets": max(0, n_mkt), "sides": max(0, n_side)}
+
     def prune(self, keep_days: float) -> dict:
         """Drop events whose last_seen is older than `keep_days`, and everything
         hanging off them.

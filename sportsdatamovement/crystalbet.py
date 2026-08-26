@@ -79,6 +79,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.scrapers import cb_http                      # noqa: E402
+from sportsdatamovement.players import is_player_market  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -213,7 +214,8 @@ def slice_detail(html: str, event_key: str) -> str:
     return html[j:end]
 
 
-def parse_detail(frag: str) -> Iterator[tuple[str, str, str, str, Optional[float]]]:
+def parse_detail(frag: str, *, drop_players: bool = True
+                 ) -> Iterator[tuple[str, str, str, str, Optional[float]]]:
     """-> (market_key, market_title, side_label, selection_ref, odds) per cell.
 
     A market's cells are laid out in visual GROUPS separated by
@@ -260,6 +262,8 @@ def parse_detail(frag: str) -> Iterator[tuple[str, str, str, str, Optional[float
             if not lab:
                 continue
             name = base if group == 0 else f"{base} #{group + 1}"
+            if drop_players and is_player_market(market=name, side=lab):
+                continue
             # The NAME is the market key. The `<tr id>` is tempting and wrong:
             # it is allocated per game, so keying on it turns `markets` from an
             # intern table of a few hundred titles into one row per
@@ -334,7 +338,8 @@ async def _list_with_retry(sport_id: int, attempts: int = 3) -> str:
 
 
 async def collect_sport(writer, sport_id: int, *, max_start_days: float = 0.0,
-                        max_games: int = 0, progress_every: int = 200) -> dict:
+                        max_games: int = 0, drop_players: bool = True,
+                        progress_every: int = 200) -> dict:
     """Expand every game of one sport into `writer`.
 
     Expands run sequentially on the sport's single session: CrystalBet
@@ -393,7 +398,8 @@ async def collect_sport(writer, sport_id: int, *, max_start_days: float = 0.0,
         # Only now is this event's market list known in full, which is what
         # licenses concluding that a position missing from it was pulled.
         writer.mark_read(g["event_key"])
-        for mkey, title, label, ref, odds in parse_detail(frag):
+        for mkey, title, label, ref, odds in parse_detail(
+                frag, drop_players=drop_players):
             n_cells += 1
             writer.add(g["event_key"], mkey, title, label, odds, ref=ref)
         if progress_every and (i + 1) % progress_every == 0:
@@ -410,7 +416,7 @@ async def collect_sport(writer, sport_id: int, *, max_start_days: float = 0.0,
 
 async def collect(store, *, sports: Optional[list[int]] = None,
                   concurrency: int = 3, max_start_days: float = 0.0,
-                  max_games: int = 0) -> list[dict]:
+                  max_games: int = 0, drop_players: bool = True) -> list[dict]:
     """One full CrystalBet pass. Each sport is its own snapshot row."""
     if sports is None:
         found = await asyncio.to_thread(discover_sports)
@@ -428,7 +434,7 @@ async def collect(store, *, sports: Optional[list[int]] = None,
                 with store.snapshot(BOOK, name) as w:
                     stats = await collect_sport(
                         w, sport_id, max_start_days=max_start_days,
-                        max_games=max_games)
+                        max_games=max_games, drop_players=drop_players)
                     out = w.commit()
                 out.update(stats)
                 out["sport"] = name
