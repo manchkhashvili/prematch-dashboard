@@ -59,3 +59,4 @@ Thumbs.db
 *~
 /data/raw/pinnacle_smoke_*.txt
 .fuse_hidden*
+/sportsdatamovement/logs/

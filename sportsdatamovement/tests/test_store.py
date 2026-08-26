@@ -292,3 +292,40 @@ def test_the_lock_is_released_when_the_collector_finishes(store):
         pass
     with runner.exclusive(store):          # must not raise
         pass
+
+
+# ── undoing a bad pass ────────────────────────────────────────────────────────
+
+def test_dropping_a_pass_removes_its_ticks_and_restores_the_baseline(store):
+    """A bad pass moves the baseline: `latest` is what the NEXT pass diffs
+    against, so deleting its ticks without rebuilding `latest` leaves the
+    following pass wrong too."""
+    _pass(store, [("e1", "M", "1", 2.00)])
+    _pass(store, [("e1", "M", "1", 2.20)])
+    bad = _pass(store, [("e1", "M", "1", 9.99)])
+    assert store.snapshot_at("liderbet", "soccer")[0]["odds"] == 9.99
+
+    out = store.drop_snapshots([bad["snapshot_id"]])
+    assert out["odds"] == 1
+    assert store.snapshot_at("liderbet", "soccer")[0]["odds"] == 2.20
+
+
+def test_a_pass_after_an_undo_diffs_against_the_restored_baseline(store):
+    _pass(store, [("e1", "M", "1", 2.00)])
+    bad = _pass(store, [("e1", "M", "1", 9.99)])
+    store.drop_snapshots([bad["snapshot_id"]])
+    res = _pass(store, [("e1", "M", "1", 2.00)])
+    assert (res["n_moved"], res["n_new"]) == (0, 0)   # nothing actually changed
+
+
+def test_undoing_the_only_pass_leaves_a_position_unpriced(store):
+    first = _pass(store, [("e1", "M", "1", 2.00)])
+    store.drop_snapshots([first["snapshot_id"]])
+    assert store.snapshot_at("liderbet", "soccer") == []
+    assert store.stats()["odds_rows"] == 0
+
+
+def test_dropping_nothing_is_a_no_op(store):
+    _pass(store, [("e1", "M", "1", 2.00)])
+    assert store.drop_snapshots([])["snapshots"] == 0
+    assert store.stats()["odds_rows"] == 1

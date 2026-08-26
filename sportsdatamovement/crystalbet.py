@@ -350,8 +350,24 @@ async def collect_sport(writer, sport_id: int, *, max_start_days: float = 0.0,
     t0 = time.monotonic()
     raw = await _list_with_retry(sport_id)
     writer.count_bytes(len(raw))
-    games = parse_list(raw)
+    listed = parse_list(raw)
 
+    # EVERY game the list showed is registered, including the ones this pass is
+    # not going to expand. That is what stops a truncated pass from concluding
+    # the rest of the board has left the book: an event that is listed but
+    # unread is left exactly as it was.
+    #
+    # Getting this wrong is not a small error. Measured 2026-08-27, a
+    # `--max-events 2` smoke run over 57 boards nulled 2,547,857 positions in
+    # one pass, because the 2-event cap was applied before the events were
+    # registered and the pass still reported a complete list read.
+    for g in listed:
+        writer.add_event(
+            g["event_key"], league=g["league"], home=g["home"], away=g["away"],
+            start_time=g["start_time"].isoformat(timespec="seconds")
+            if g["start_time"] else None)
+
+    games = listed
     if max_start_days > 0:
         cut = datetime.now(timezone.utc) + timedelta(days=max_start_days)
         games = [g for g in games
@@ -362,10 +378,6 @@ async def collect_sport(writer, sport_id: int, *, max_start_days: float = 0.0,
     n_expanded = n_failed = n_cells = n_rewarm = 0
     consecutive = 0
     for i, g in enumerate(games):
-        writer.add_event(
-            g["event_key"], league=g["league"], home=g["home"], away=g["away"],
-            start_time=g["start_time"].isoformat(timespec="seconds")
-            if g["start_time"] else None)
         try:
             html = await cb_http.expand_detail_raw(sport_id, g["event_key"])
         except Exception as exc:

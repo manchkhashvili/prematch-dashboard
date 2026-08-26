@@ -387,6 +387,7 @@ def collect_section_sync(writer, session, section: dict, *,
 
     tours = section["tours"]
     match_ids: list[str] = []
+    listed: list[tuple] = []          # (event_key, league, home, away, start)
     ancestors: dict = {}
     n_bytes = 0
 
@@ -404,11 +405,22 @@ def collect_section_sync(writer, session, section: dict, *,
             continue
         ancestors.update(data.get("ancestors", {}))
         for m in (data.get("matches") or {}).values():
+            if not m.get("id"):
+                continue
+            listed.append((str(m["id"]), _start_time(m)))
             st = _start_time(m)
             if cut is not None and st is not None and st > cut:
                 continue
-            if m.get("id"):
-                match_ids.append(m["id"])
+            match_ids.append(m["id"])
+
+    # Register every match the list carried, including the ones this pass will
+    # not pull detail for. An event that is listed but unread must be left
+    # alone; without this a truncated pass reads as "the rest of the board has
+    # left the book" and nulls it — 2,547,857 positions in one measured case.
+    for event_key, st in listed:
+        writer.add_event(
+            event_key,
+            start_time=st.isoformat(timespec="seconds") if st else None)
 
     if max_matches > 0:
         match_ids = match_ids[:max_matches]

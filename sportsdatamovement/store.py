@@ -406,6 +406,56 @@ class Store:
 
     # ── retention ─────────────────────────────────────────────────────────────
 
+    def drop_snapshots(self, ids: Iterable[int]) -> dict:
+        """Undo one or more passes: delete their ticks and rebuild `latest`.
+
+        A pass that read the board wrongly does not just add noise, it moves
+        the baseline — `latest` is what the NEXT pass diffs against, so a bad
+        pass makes the following one wrong too. Removing the ticks is therefore
+        only half the job; `latest` has to be recomputed from whatever the most
+        recent surviving tick for each position now is.
+
+        Positions whose only ticks came from the dropped passes lose their
+        `latest` row entirely, which is correct: as far as the store is
+        concerned they have never been priced.
+        """
+        ids = [int(i) for i in ids]
+        if not ids:
+            return {"snapshots": 0, "odds": 0, "latest": 0}
+        marks = ",".join("?" * len(ids))
+        with self._lock:
+            con = self._connect()
+            try:
+                touched = [r[0] for r in con.execute(
+                    f"SELECT DISTINCT position_id FROM odds"
+                    f" WHERE snapshot_id IN ({marks})", ids)]
+                n_odds = con.execute(
+                    f"SELECT COUNT(*) FROM odds WHERE snapshot_id IN ({marks})",
+                    ids).fetchone()[0]
+                con.execute(f"DELETE FROM odds WHERE snapshot_id IN ({marks})", ids)
+                con.execute(f"DELETE FROM snapshots WHERE id IN ({marks})", ids)
+                con.execute(
+                    "CREATE TEMP TABLE _touch (id INTEGER PRIMARY KEY)")
+                con.executemany("INSERT INTO _touch (id) VALUES (?)",
+                                [(p,) for p in touched])
+                con.execute("DELETE FROM latest WHERE position_id IN"
+                            " (SELECT id FROM _touch)")
+                con.execute("""
+                    INSERT INTO latest (position_id, price, snapshot_id)
+                    SELECT o.position_id, o.price, o.snapshot_id FROM odds o
+                     WHERE o.position_id IN (SELECT id FROM _touch)
+                       AND o.snapshot_id = (SELECT MAX(o2.snapshot_id) FROM odds o2
+                                             WHERE o2.position_id = o.position_id)""")
+                n_latest = con.execute(
+                    "SELECT COUNT(*) FROM latest WHERE position_id IN"
+                    " (SELECT id FROM _touch)").fetchone()[0]
+                con.execute("DROP TABLE _touch")
+                con.commit()
+            finally:
+                con.close()
+        return {"snapshots": len(ids), "odds": n_odds,
+                "positions_touched": len(touched), "latest": n_latest}
+
     def purge_players(self) -> dict:
         """Delete player-scoped positions and their history.
 

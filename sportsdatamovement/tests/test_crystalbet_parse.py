@@ -224,3 +224,31 @@ def test_against_a_live_capture_if_present(path):
     assert len(rows) > 4000
     assert any(r[1] == "Main result" for r in rows)
     assert any(r[4] is None for r in rows)          # locked cells present
+
+
+# ── a capped pass must not look like a board that emptied ─────────────────────
+
+def test_a_capped_pass_registers_every_listed_game(monkeypatch):
+    """`--max-events 2` truncates what gets EXPANDED, never what gets listed.
+    Applied before registration it made a smoke run null 2,547,857 positions,
+    because the pass still reported a complete list read."""
+    import asyncio
+    from sportsdatamovement import crystalbet as cb
+
+    seen = []
+
+    class W:
+        def add_event(self, key, **kw): seen.append(key)
+        def mark_read(self, key): pass
+        def add(self, *a, **kw): pass
+        def count_bytes(self, n): pass
+
+    async def fake_list(sport_id, attempts=3): return LIST
+    async def fake_expand(sport_id, gid): return ""
+    monkeypatch.setattr(cb, "_list_with_retry", fake_list)
+    monkeypatch.setattr(cb.cb_http, "expand_detail_raw", fake_expand)
+    monkeypatch.setattr(cb.cb_http, "reset_session", lambda sid: None)
+
+    stats = asyncio.run(cb.collect_sport(W(), 16, max_games=1))
+    assert stats["games"] == 1                    # only one expanded
+    assert set(seen) == {"3171919770", "3171919732"}   # both listed
