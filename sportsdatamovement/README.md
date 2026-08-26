@@ -29,19 +29,21 @@ interpreted, so nothing can be misinterpreted — and the whole point is to
 compare a market against its neighbours, which a classifier would have thrown
 away before we ever saw them.
 
-Measured over full passes, 2026-08-26:
+Measured over full passes, 2026-08-26, with player markets excluded:
 
 | | sports | events | positions | pass time | transport |
 |---|---|---|---|---|---|
-| Lider-Bet | 24 | 2,585 | 2.15 M | ~2 min | 0.5 GB |
-| CrystalBet | 33 | 3,661 | 2.28 M | ~14 min | 1.4 GB |
-| **both** | **57** | **6,246** | **4.43 M** | **~13 min** | **1.9 GB** |
+| Lider-Bet | 24 | 2,516 | 1.34 M | ~2 min | 0.5 GB |
+| CrystalBet | 33 | 3,557 | 1.23 M | ~11 min | 1.4 GB |
+| **both** | **57** | **6,073** | **2.57 M** | **~11 min** | **1.9 GB** |
 
-Soccer dominates both: 1,892 CrystalBet games (2.28 M positions, 848 s, 950 MB)
-and 1,517 Lider matches (1.96 M positions, **58 s**, 371 MB). The books run
+Soccer dominates both: 1,805 CrystalBet games (1.06 M positions, 640 s, 919 MB)
+and 1,444 Lider matches (1.26 M positions, **78 s**, 357 MB). The books run
 concurrently, so the pass costs what CrystalBet costs — Lider is essentially
 free, because its whole board arrives in 143 JSON calls while CrystalBet needs
 two HTML round trips per game.
+
+A full pass leaves the database at **235 MB**, or ~93 bytes per stored change.
 
 ---
 
@@ -111,9 +113,10 @@ which is the premise the whole store rests on.
 
 ## Why the store is a change log
 
-One snapshot of both boards is **4.43 million positions**. At 24 snapshots a day
-that is 106 million rows/day, and there is no row encoding that survives it —
-the last project that tried produced a 32 GB database in three days.
+One snapshot of both boards is **2.57 million positions** (4.43 M before player
+markets were dropped). At 24 snapshots a day that is 62 million rows/day, and
+there is no row encoding that survives it — the last project that tried
+produced a 32 GB database in three days.
 
 So a row is written **only when a price differs from the last price recorded for
 that position**. The `snapshots` table is the heartbeat that makes this
@@ -128,6 +131,24 @@ python -m sportsdatamovement board --book crystalbet --sport soccer --out board.
 That is also, conveniently, the product. A change-only table **is** the movement
 log — `WHERE snapshot_id = ?` is "what moved this hour", and its complement
 within an event is "what didn't".
+
+### What actually moves
+
+Measured across a 27-minute gap between two passes, player markets excluded:
+
+| board | positions | moved | rate |
+|---|---|---|---|
+| crystalbet / tennis | 14,907 | 1,595 | **10.7 %** |
+| liderbet / tennis | 6,977 | 627 | 9.0 % |
+| crystalbet / basketball | 49,744 | 4,100 | 8.2 % |
+| liderbet / soccer | 1,255,186 | 33,368 | 2.7 % |
+| crystalbet / soccer | 1,058,269 | 19,741 | 1.9 % |
+| crystalbet / icehockey | 21,764 | 185 | **0.9 %** |
+
+Tennis and basketball reprice five times as often as soccer, and ice hockey
+barely at all. Soccer is 87 % of the positions and among the *least* volatile,
+which is why a change log costs so little: a pass writes ~66 k rows against
+2.57 M positions read.
 
 ### Schema
 
