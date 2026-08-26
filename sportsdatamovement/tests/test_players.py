@@ -81,3 +81,45 @@ def test_a_market_with_no_specifier_still_decides_on_the_names():
 
 def test_a_specifier_that_is_not_a_dict_is_ignored():
     assert not is_player_market(market="Total", side="Over", specifier="nonsense")
+
+
+# ── "player 1" is a competitor, not a prop ────────────────────────────────────
+# In tennis, table tennis, darts and chess the two sides ARE player 1 and
+# player 2. A bare \bplayer\b token threw away 36 of 190 outcomes on a live
+# Lider tennis match — 19 %, in the sport with the highest movement rate.
+
+@pytest.mark.parametrize("market", [
+    "Total games won by player 1",
+    "Total games won by player 2",
+    "Player 1 to win exactly 1 set",
+    "Player 2 win at least one set",
+    "Player 1 to win the match",
+])
+def test_a_competitor_index_is_not_a_player_prop(market):
+    assert not is_player_market(market=market, side="Yes")
+
+
+@pytest.mark.parametrize("market", [
+    "Player 1+ goals",           # a threshold, not a competitor
+    "Player 3+ shots on target",
+    "Player {count}+ assists (SuperSub)",
+    "1st Team - 1st player to score",
+    "Player Points",
+])
+def test_a_threshold_or_a_bare_player_market_is_still_dropped(market):
+    assert is_player_market(market=market, side="Yes")
+
+
+@pytest.mark.parametrize("market", [
+    "Team 1 Total Assists",
+    "Total Assists",
+    "Team 2 assists",
+])
+def test_team_assist_markets_survive(market):
+    """`assists` used to be a token and took these with it. Every genuine
+    assists prop says "player" or names someone."""
+    assert not is_player_market(market=market, side="over 22.5")
+
+
+def test_a_named_assists_prop_is_still_caught():
+    assert is_player_market(market="Assists Chust, Víctor (Elche CF)", side="1+")

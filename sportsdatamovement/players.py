@@ -46,7 +46,23 @@ import re
 PERSON = re.compile(r"[^\W\d_][\w.'’\-]*,\s+[A-ZÀ-ÖØ-Þ]")
 
 # Titles that name no one but exist only to price individuals.
-TOKENS = re.compile(r"\bgoalscorer\b|\bplayer\b|\bscorer\b|\bassists\b", re.I)
+#
+# "player" needs the lookahead. In tennis, table tennis, darts and chess the two
+# COMPETITORS are called player 1 and player 2, so a bare \bplayer\b throws away
+# the core markets of the sports that move most — measured on a live Lider
+# tennis match, 36 of 190 outcomes (19 %), including "Total games won by
+# player 1" and "Player 1 to win exactly 1 set". Those are the tennis analogue
+# of "Team 1 Total", not props.
+#
+# The exception is a competitor index that continues into a threshold:
+# "Player 1+ goals" is a prop, so `1` followed by `+` or another digit does not
+# get the reprieve.
+#
+# `assists` was here and has been removed: it would take "Team 1 Total Assists"
+# with it, and every genuine assists prop already says "player" or names
+# someone ("Assists Chust, Víctor (Elche CF)").
+TOKENS = re.compile(
+    r"\bgoalscorer\b|\bscorer\b|\bplayer\b(?!\s*[12](?![\d+]))", re.I)
 
 # Lider's structural tells.
 _PLAYER_KEYS = ("player", "lb_br_player")
