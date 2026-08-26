@@ -13,6 +13,10 @@
 /data/ticks.db
 /data/ticks.db-shm
 /data/ticks.db-wal
+# Same reasoning for the movement study's own store: one pass over both whole
+# boards is ~26 M positions, so this grows to GBs and is regenerable by running
+# the collector. Code and docs stay tracked.
+/sportsdatamovement/data/
 
 # Operational telemetry (regenerated each run)
 /dashboard.log*
