@@ -105,7 +105,35 @@ Four views, all filtered by book/sport and all sortable by clicking a column:
   HT/FT 1/1 stays blank for six hours is visible without trusting a statistic.
 - **markets** — moves per position per pass, by market type. Sort *ascending* to
   find the markets that never move.
+- **lag** — when the moneyline moved, what moved with it? Sorted laggiest
+  first. This is the scan the project exists for.
 - **passes** — the collector's own log, including `dupes`, which should be zero.
+
+### Three ways a lag scan lies to you
+
+All three were found by checking one fixture by hand against the aggregate, and
+each one hides exactly the markets worth finding. See `lag.py`.
+
+**Market names have aliases.** CrystalBet prices `Halftime/Fulltime` on 1,281
+soccer events and `HT/FT` on 112 others — no event carries both, and they follow
+the main result 98 % and 60 % of the time respectively. One number for "the
+HT/FT market" averages a maintained market with a neglected one and shows
+neither. `/api/aliases` lists every name matching a description.
+
+**A minimum-sample cutoff deletes the finding.** A market carried on few events
+is, almost by definition, one the book maintains least. Thin rows are shown with
+their `n` so they can be judged, never filtered away.
+
+**A position's first tick is not a reaction.** It is the position being created
+— there was no previous price to move from. Counting it inflates every rate, and
+inflates it most for markets that appear late and then never move. Removing it
+took CrystalBet soccer from 2,889 apparent anchor moves to 1,181, and collapsed
+the follow rates beneath it.
+
+And read the **cell** rate, not the grid rate. "Did the handicap ladder tick" is
+true when any one rung moved; the question is whether the rung you would bet
+moved. On CrystalBet basketball handicaps the two are 44 % and 17 % — the book
+reprices a few rungs and leaves the rest standing.
 
 Charts are inline SVG with no libraries, and the price chart draws a **step**
 line rather than a curve: between two ticks the price is *known* to have held,

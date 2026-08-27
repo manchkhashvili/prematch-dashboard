@@ -234,3 +234,88 @@ def test_a_shortening_price_is_a_rising_probability(longshot):
     rows = longshot.get("/api/movers", params={"since_passes": 1}).json()["rows"]
     main = next(r for r in rows if r["market"] == "Main result")
     assert main["pct"] < 0 and main["pp"] > 0
+
+
+# ── the lag scan ──────────────────────────────────────────────────────────────
+
+@pytest.fixture()
+def lagboard(tmp_path, monkeypatch):
+    """A moneyline that moves every pass, one market that tracks it and one
+    that never does — plus the ALIAS trap that broke the first analysis."""
+    store = Store(tmp_path / "l.db")
+    monkeypatch.setattr(web, "_store", store)
+    for i, ml in enumerate((2.00, 2.10, 2.20, 2.30)):
+        with store.snapshot("crystalbet", "soccer") as w:
+            for ev in ("big", "small"):
+                w.add_event(ev, home=ev, away="x")
+                w.mark_read(ev)
+                w.add(ev, "Main result", "Main result", "1", ml)
+            # tracks the anchor
+            w.add("big", "Halftime/Fulltime", "Halftime/Fulltime", "1/1", 4.0 + i)
+            w.add("big", "Halftime/Fulltime", "Halftime/Fulltime", "2/2", 5.0 + i)
+            # the same market under a different name, frozen
+            w.add("small", "HT/FT", "HT/FT", "1/1", 9.6)
+            w.add("small", "HT/FT", "HT/FT", "2/2", 2.15)
+            w.commit()
+    return TestClient(web.app)
+
+
+def test_the_lag_scan_separates_a_tracker_from_a_frozen_market(lagboard):
+    d = lagboard.get("/api/lag", params={"book": "crystalbet", "sport": "soccer",
+                                         "min_obs": 1}).json()
+    assert d["anchor"] == "Main result"
+    by = {r["market"]: r for r in d["rows"]}
+    assert by["Halftime/Fulltime"]["position_rate"] == 1.0
+    assert by["HT/FT"]["position_rate"] == 0.0
+
+
+def test_an_alias_is_not_averaged_into_its_twin(lagboard):
+    """CrystalBet prices "Halftime/Fulltime" on 1,281 soccer events and "HT/FT"
+    on 112 others, and no event carries both. One number for "the HT/FT market"
+    would average a maintained market with a neglected one."""
+    d = lagboard.get("/api/lag", params={"book": "crystalbet", "sport": "soccer",
+                                         "min_obs": 1}).json()
+    names = {r["market"] for r in d["rows"]}
+    assert {"Halftime/Fulltime", "HT/FT"} <= names
+
+
+def test_thin_markets_are_reported_not_filtered(lagboard):
+    """A market carried on few events is exactly the kind a book maintains
+    least. A minimum-sample cutoff deletes the finding by construction."""
+    d = lagboard.get("/api/lag", params={"book": "crystalbet", "sport": "soccer",
+                                         "min_obs": 1}).json()
+    frozen = next(r for r in d["rows"] if r["market"] == "HT/FT")
+    assert frozen["events"] == 1 and frozen["obs"] >= 1
+
+
+def test_the_scan_is_sorted_laggiest_first(lagboard):
+    rows = lagboard.get("/api/lag", params={"book": "crystalbet", "sport": "soccer",
+                                            "min_obs": 1}).json()["rows"]
+    rates = [r["position_rate"] for r in rows]
+    assert rates == sorted(rates)
+
+
+def test_the_alias_endpoint_lists_every_name(lagboard):
+    d = lagboard.get("/api/aliases", params={"book": "crystalbet", "sport": "soccer",
+                                             "needle": "FT"}).json()
+    assert {r["market"] for r in d["rows"]} == {"Halftime/Fulltime", "HT/FT"}
+
+
+def test_cell_rate_and_grid_rate_differ_on_a_partly_moving_grid(tmp_path, monkeypatch):
+    """"Did the grid tick" is true when 1 of 9 cells moved; the question is
+    whether the cell you would bet moved."""
+    store = Store(tmp_path / "g.db")
+    monkeypatch.setattr(web, "_store", store)
+    for i, ml in enumerate((2.0, 2.1, 2.2)):
+        with store.snapshot("crystalbet", "soccer") as w:
+            w.add_event("e", home="a", away="b"); w.mark_read("e")
+            w.add("e", "Main result", "Main result", "1", ml)
+            w.add("e", "G", "G", "moves", 3.0 + i)   # one cell tracks
+            w.add("e", "G", "G", "frozen", 7.0)      # the other never does
+            w.commit()
+    d = TestClient(web.app).get(
+        "/api/lag", params={"book": "crystalbet", "sport": "soccer",
+                            "min_obs": 1}).json()
+    g = next(r for r in d["rows"] if r["market"] == "G")
+    assert g["market_rate"] == 1.0        # the grid always ticked
+    assert g["position_rate"] == 0.5      # half its cells never did

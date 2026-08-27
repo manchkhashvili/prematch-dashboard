@@ -43,6 +43,7 @@ if str(_ROOT) not in sys.path:
 from fastapi import FastAPI, HTTPException, Query          # noqa: E402
 from fastapi.responses import FileResponse                 # noqa: E402
 
+from sportsdatamovement import lag                         # noqa: E402
 from sportsdatamovement.store import Store, get_store      # noqa: E402
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -330,6 +331,33 @@ def markets(book: Optional[str] = None, sport: Optional[str] = None,
      ORDER BY {order} LIMIT ?"""
     args = [max(1, n_passes)] + list(ids) + params + [limit]
     return {"rows": _rows(sql, tuple(args)), "passes": n_passes}
+
+
+@app.get("/api/lag")
+def lag_scan(book: Optional[str] = None, sport: Optional[str] = None,
+             min_obs: int = 20) -> dict:
+    """Which positions fail to react when the moneyline moves.
+
+    `position_rate` is the one to read: `market_rate` is true when any cell of
+    a multi-cell grid ticked, which is not the question. No minimum-sample
+    filter beyond `min_obs`, because a market carried on few events is exactly
+    the kind a book maintains least — see lag.py.
+    """
+    if not book or not sport:
+        raise HTTPException(400, "book and sport are required")
+    out = lag.follow_rates(store().path, book, sport, min_obs=min_obs)
+    return out
+
+
+@app.get("/api/aliases")
+def alias_scan(book: str, sport: str, needle: str) -> dict:
+    """Every market name matching `needle` — the alias check.
+
+    CrystalBet prices "Halftime/Fulltime" on 1,281 soccer events and "HT/FT" on
+    112 others, and they behave completely differently. Before trusting one
+    number for a market, see how many markets the description covers.
+    """
+    return {"rows": lag.aliases(store().path, book, sport, needle)}
 
 
 @app.get("/")

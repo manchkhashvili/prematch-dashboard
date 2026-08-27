@@ -76,6 +76,7 @@
     <button data-tab="movers" class="on">movers</button>
     <button data-tab="events">events</button>
     <button data-tab="markets">markets</button>
+    <button data-tab="lag">lag</button>
     <button data-tab="passes">passes</button>
   </nav>
   <select id="scope"></select>
@@ -259,6 +260,33 @@ TABS.markets = async () => {
     {k:'rate', t:'', f:r=>`<span class="bar" style="width:${
         Math.round(90*r.rate/max)}px"></span>`},
   ], rows);
+};
+
+TABS.lag = async () => {
+  const sp = scopeParts();
+  if (!sp.book || !sp.sport)
+    return '<div class="empty">pick a book and sport — the lag scan is per board</div>';
+  const d = await api('/api/lag', {...sp, min_obs:20});
+  state.rows = d.rows || [];
+  if (!state.rows.length)
+    return '<div class="empty">not enough passes on this board yet</div>';
+  return `<div class="muted" style="margin-bottom:8px">
+      When <b>${esc(d.anchor)}</b> moved (${d.anchor_moves.toLocaleString()} times),
+      what moved with it? <b>cell%</b> is the one to read — <b>grid%</b> counts a
+      9-cell market as reacting when any one cell did. Low cell% with a high
+      event count is a market the book maintains loosely.
+      <br>No sample cutoff beyond ${20} observations: a market carried on few
+      events is exactly the kind that goes stale, so thin rows are shown with
+      their n rather than filtered out.</div>` + table([
+    {k:'position_rate', t:'cell%', num:1, cls:r=>r.position_rate<0.5?'down':'',
+     f:r=>(100*r.position_rate).toFixed(1)},
+    {k:'market_rate', t:'grid%', num:1, f:r=>(100*r.market_rate).toFixed(1)},
+    {k:'events', t:'events', num:1, f:r=>r.events.toLocaleString()},
+    {k:'obs', t:'n', num:1, f:r=>r.obs.toLocaleString()},
+    {k:'market', t:'market'},
+    {k:'position_rate', t:'', f:r=>`<span class="bar" style="width:${
+        Math.round(80*r.position_rate)}px"></span>`},
+  ], state.rows);
 };
 
 TABS.passes = async () => {
