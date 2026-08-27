@@ -178,7 +178,7 @@ different words — they must agree), `Match to end 2:0` / `0:2`, `Set Handicap`
 (±1.5 **sets**, which would collide with the list-view **games** spread),
 `Odd/even games`.
 
-### B9. `ot_vs_regulation` — the incl-OT winner vs the regulation 1X2 · **AMERICAN FOOTBALL** · BETTABLE direction exists
+### B9. `ot_vs_regulation` — the incl-OT winner vs the regulation 1X2 · **AMERICAN FOOTBALL + ICE HOCKEY** · BETTABLE direction exists
 Added 2026-08-12 with the sport. CB posts the **same period twice**: a 3-way
 **regulation** result (`Main result` at FT, `1st Half Result` at H1 — American
 football can be tied at the end of regulation and CB prices that leg) and a
@@ -233,6 +233,53 @@ inspected by hand and real.
 Sanity check on the tie leg: it devigs to ≈5% on NFL, which matches the ~6–7% of
 NFL games that actually reach overtime — confirming `Main result` really is the
 regulation market and not a mislabelled final result.
+
+**Extended to ice hockey, 2026-08-28 — and it flags nothing there.** Hockey is
+the sport this identity was made for: its tie leg is ~23 % rather than the NFL's
+5 %, and CB posts both markets on 85 events. But the two live in DIFFERENT
+periods here — the 3-way regulation result is `REG` (60 minutes) and the 2-way
+winner is `FT` (incl. overtime and the shootout) — so the AF code path, which
+reads both shapes out of one period view, finds nothing. Hockey gets its own
+cross-period comparison.
+
+Measured over the whole collected hockey history: **0 violations in 85 events**,
+in either direction, and the coin-flip gap maxed at **1.81pp** against the 8.0pp
+threshold. The reason is worth recording: **CrystalBet does not price its
+incl-OT hockey moneyline independently at all.** Implied
+`P(win in OT | tied after 60)` came out p10 0.477, **median 0.500**, p90 0.524 —
+a flat coin flip applied to the regulation 1X2. Two markets computed from one
+number cannot contradict each other.
+
+That is not a reason to drop the check (it is exact, it costs a comparison, and
+the board multiplies when the NHL season opens) but it *is* a reason not to
+count it as coverage. See `docs/icehockey.md` §6.
+
+### B9b. `ot_monotone` — the incl-OT goal ladder must dominate the regulation one · **ICE HOCKEY** · diagnostic
+Added 2026-08-28. CrystalBet publishes two goal ladders per hockey event —
+`Total Goals*` (regulation) and `Total Goals(incl. overtime and penalties)` —
+plus both team-total variants. Overtime can only ever **add** goals, so at every
+line
+
+```
+P(over N incl OT)  ≥  P(over N regulation)
+```
+
+exactly, with no model and no tolerance. A regulation price sitting above the
+incl-OT one at the same line is the book contradicting its own arithmetic.
+
+`OT_MONOTONE_PP = 3.0` is pure devig slack — the true bound is zero, and the two
+ladders carry independent vig.
+
+**Calibration.** 924 shared rungs over 49 events: **not one** had the regulation
+side higher, and the incl-OT side ran **+2.4pp** above it on median (+5–6pp
+mid-ladder), which is what ~0.2 of an overtime goal looks like on a ladder.
+
+**The puck line is deliberately NOT checked this way**, and that is arithmetic
+rather than an omission: overtime is sudden death and is only reached from a
+tie, so the overtime goal always makes a **one-goal** win. Winning by 2+
+including overtime *is* winning by 2+ in regulation. CB prices those two ladders
+identically on **300 of 300** rungs, correctly — a monotonicity check there would
+be checking an equality.
 
 **Caveat before retuning:** residual size depends on the devig model. `src.vig`
 uses a **power** devig, which pushes more vig onto the longshot tie leg than a

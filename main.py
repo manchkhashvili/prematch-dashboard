@@ -20,7 +20,7 @@ Common flavors (per-sport mode via SPORTS env var — see below):
     # Chromium is needed anywhere. Add BETLIVE_ANOMALY=1
     # for the betlive favourite-flip watch (incl-OT vs regulation 1X2):
     ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 BETLIVE=1 \
-      SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list python main.py 2>&1 | tee dashboard.log
+      SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list,icehockey:full python main.py 2>&1 | tee dashboard.log
 
 Dev mode — one cycle, print table, exit:
 
@@ -43,7 +43,7 @@ Environment variables (dashboard mode):
                               (/api/cross_arbs). Example (fully browser-free —
                               all books over HTTP/JSON by default):
                                 ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 \
-                                  SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list \
+                                  SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list,icehockey:full \
                                   LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
     EXTRA_BOOK_POLL_SEC=120   poll cadence for Lider-Bet / Betlive (JSON, cheap)
 
@@ -70,7 +70,7 @@ Environment variables (dashboard mode):
 
     Full example (all anomaly checks + multi-book; CB is browser-free by default):
       ANOMALY_SCAN=1 BETLIVE_ANOMALY=1 SOFT_SCAN=1 \
-        SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list \
+        SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list,icehockey:full \
         LIDERBET=1 BETLIVE=1 python main.py 2>&1 | tee dashboard.log
 
     SPORTS=                   per-sport mode, one knob to rule them all.

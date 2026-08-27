@@ -374,7 +374,11 @@ window.addEventListener("hashchange", () => {
 });
 
 // Display order for period groups in the expander.
-const PERIOD_ORDER = ["FT", "H1", "H2", "Q1", "Q2", "Q3", "Q4"];
+// REG sits next to FT rather than after the periods: for ice hockey the two
+// are the same game priced twice (60 minutes vs including overtime and the
+// shootout), so a reader comparing them wants them adjacent.
+const PERIOD_ORDER = ["FT", "REG", "H1", "H2", "Q1", "Q2", "Q3", "Q4",
+                      "P1", "P2", "P3"];
 const MARKET_TYPE_ORDER = { moneyline: 0, spread: 1, total: 2, team_total: 3 };
 
 // Build a human-readable label for one expander market row. Mirrors

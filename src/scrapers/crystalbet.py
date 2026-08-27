@@ -80,7 +80,8 @@ from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league
 from src.scrapers import cb_detail, cb_http, cb_parse_pool, change_cache
-from src.scrapers.sports import americanfootball, basketball, soccer, tennis
+from src.scrapers.sports import (americanfootball, basketball, icehockey,
+                                 soccer, tennis)
 
 # Re-export basketball list-view parsers so existing imports still resolve.
 # Tests import these names from crystalbet directly (test_crystalbet_parser.py).
@@ -188,6 +189,9 @@ SAMPLE_OUT_TENNIS = (
 SAMPLE_OUT_AMERICANFOOTBALL = (
     Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_amfootball.html"
 )
+SAMPLE_OUT_ICEHOCKEY = (
+    Path(__file__).resolve().parents[2] / "data" / "raw" / "cb_prematch_sample_icehockey.html"
+)
 
 # Map sport_name → module + saved-HTML path for ergonomic lookup.
 _SPORT_MODULES: dict[str, Any] = {
@@ -195,12 +199,14 @@ _SPORT_MODULES: dict[str, Any] = {
     soccer.SPORT_NAME: soccer,
     tennis.SPORT_NAME: tennis,
     americanfootball.SPORT_NAME: americanfootball,
+    icehockey.SPORT_NAME: icehockey,
 }
 _SPORT_SAMPLE_PATHS: dict[str, Path] = {
     basketball.SPORT_NAME: SAMPLE_OUT,
     soccer.SPORT_NAME: SAMPLE_OUT_SOCCER,
     tennis.SPORT_NAME: SAMPLE_OUT_TENNIS,
     americanfootball.SPORT_NAME: SAMPLE_OUT_AMERICANFOOTBALL,
+    icehockey.SPORT_NAME: SAMPLE_OUT_ICEHOCKEY,
 }
 
 
@@ -475,6 +481,11 @@ def parse_html_tennis(html: str, fetched_at: datetime) -> list[Odds]:
 def parse_html_americanfootball(html: str, fetched_at: datetime) -> list[Odds]:
     """Parse an American-football Sports.aspx HTML page."""
     return _parse_html_for_sport(html, fetched_at, americanfootball)
+
+
+def parse_html_icehockey(html: str, fetched_at: datetime) -> list[Odds]:
+    """Parse an ice-hockey Sports.aspx HTML page."""
+    return _parse_html_for_sport(html, fetched_at, icehockey)
 
 
 # ── Singletons: one browser, one page per sport ───────────────────────────────
@@ -1865,6 +1876,7 @@ _ANOMALY_SPORT_TABLE = {
     "tennis": (tennis, None),
     "americanfootball": (americanfootball,
                          americanfootball.classify_market_title_permissive),
+    "icehockey": (icehockey, icehockey.classify_market_title_permissive),
 }
 
 
@@ -2041,6 +2053,25 @@ async def fetch_crystalbet_americanfootball_prematch(
     whole-board detail sweep measured 79 s / 177 games on 2026-08-12.
     """
     return await _fetch_for_sport(americanfootball, headed=headed,
+                                  should_continue=should_continue,
+                                  expand_within_hours=expand_within_hours,
+                                  max_expand_sec=max_expand_sec)
+
+
+async def fetch_crystalbet_icehockey_prematch(
+    *, headed: bool = False, should_continue: Any = None,
+    expand_within_hours: float | None = None,
+    max_expand_sec: float | None = None,
+) -> list[Odds]:
+    """Scrape CB prematch ice hockey with full detail-page expansion.
+
+    Detail is where the sport lives: the list view carries only the regulation
+    1X2, handicap and total, while the incl-OT moneyline that Pinnacle's
+    period-0 board matches against — and the three period ladders — exist only
+    on the detail page. List-only mode would leave the sport's defining market
+    unreachable.
+    """
+    return await _fetch_for_sport(icehockey, headed=headed,
                                   should_continue=should_continue,
                                   expand_within_hours=expand_within_hours,
                                   max_expand_sec=max_expand_sec)

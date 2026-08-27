@@ -107,9 +107,11 @@ def shutdown() -> None:
 # callable cannot be a closure or a lambda.
 
 def _classifier(sport_name: str, mode: str):
-    from src.scrapers.sports import americanfootball, basketball, soccer, tennis
+    from src.scrapers.sports import (americanfootball, basketball, icehockey,
+                                     soccer, tennis)
     mod = {"soccer": soccer, "basketball": basketball, "tennis": tennis,
-           "americanfootball": americanfootball}[sport_name]
+           "americanfootball": americanfootball,
+           "icehockey": icehockey}[sport_name]
     if mode == "permissive":
         return getattr(mod, "classify_market_title_permissive",
                        mod.classify_market_title)
@@ -184,9 +186,11 @@ async def parse_detail(
 def parse_list_job(job: dict) -> list:
     """Normalise + extract the list view. Runs in a worker process."""
     from src.scrapers import crystalbet, cb_http
-    from src.scrapers.sports import americanfootball, basketball, soccer, tennis
+    from src.scrapers.sports import (americanfootball, basketball, icehockey,
+                                     soccer, tennis)
     mod = {"soccer": soccer, "basketball": basketball, "tennis": tennis,
-           "americanfootball": americanfootball}[job["sport_name"]]
+           "americanfootball": americanfootball,
+           "icehockey": icehockey}[job["sport_name"]]
     soup = cb_http.normalize_soup(job["html"])
     return crystalbet._extract_games_from_list_html(
         soup, job["fetched_at"], sport=mod)

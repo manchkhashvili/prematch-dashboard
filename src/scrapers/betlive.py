@@ -44,7 +44,23 @@ LEAGUE_EVENTS_URL = f"{BASE}/api/event/getLeagueEvents"
 IMPERSONATE = "chrome124"
 
 # Betlive sportId per dashboard sport name (verified 2026-06-15).
-SPORT_ID = {"soccer": 1, "basketball": 6, "tennis": 5, "americanfootball": 15}
+# sportId 2 = ice hockey, identified from the league names the id returns
+# (NHL, Champions League, Saley Cup — 183 events across 14 leagues on
+# 2026-08-27), not from another book's numbering.
+SPORT_ID = {"soccer": 1, "basketball": 6, "tennis": 5, "americanfootball": 15,
+            "icehockey": 2}
+
+# The period a book's WHOLE-GAME markets settle on. Everywhere but hockey that
+# is "FT" — the game as it finishes. Betlive's hockey board is named "Fulltime
+# Result" but ships THREE outcomes (1/X/2 on all 92 events that price it), and
+# a three-way result is regulation by definition: a hockey game cannot end
+# level once overtime and the shootout have been played. So the label says full
+# time and the market is the 60 minutes.
+#
+# Leaving it at FT does not mispair — the selection-shape guard in edge.py
+# refuses a 3-way against Pinnacle's 2-way period-0 moneyline — it just means
+# the book matches NOTHING, since Pinnacle's 3-way lives at period 6 (REG).
+_FULL_GAME_PERIOD = {"icehockey": "REG"}
 
 # providerId whose providerEventId is a real SportRadar match id.
 SPORTRADAR_PROVIDER_IDS = frozenset({14})
@@ -226,7 +242,9 @@ def _build(sport_name, home, away, market_type, selections, line,
     try:
         return Odds(
             source="betlive", sport=sport_name, home=home, away=away,
-            market_type=market_type, period="FT", selections=selections,
+            market_type=market_type,
+            period=_FULL_GAME_PERIOD.get(sport_name, "FT"),
+            selections=selections,
             fetched_at=fetched_at, line=line, start_time=start_time,
             league=league, raw_event_id=str(event_id) if event_id else None,
             sr_match_id=sr_match_id,
@@ -292,6 +310,10 @@ async def fetch_betlive_basketball() -> list[Odds]:
 
 async def fetch_betlive_tennis() -> list[Odds]:
     return await fetch_betlive("tennis")
+
+
+async def fetch_betlive_icehockey() -> list[Odds]:
+    return await fetch_betlive("icehockey")
 
 
 async def fetch_betlive_americanfootball() -> list[Odds]:

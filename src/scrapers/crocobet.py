@@ -82,7 +82,15 @@ WORKERS = 8
 # this many hours; farther games use the board's inline main markets.
 DETAIL_HOURS = float(os.environ.get("CROCOBET_DETAIL_HOURS", "24"))
 
-SPORT_ID = {"soccer": 1, "basketball": 2, "tennis": 3, "americanfootball": 16}
+# Read off the book's own /categories census (2026-08-27), not inferred from
+# another book's numbering. Ice hockey is 4 — `ჰოკეი`, 732 events, NHL at the
+# top. Note 3 is BASEBALL (`ბეისბოლი`) and tennis is really 5 (`ჩოგბურთი`);
+# the "tennis": 3 entry below is therefore pointing at the wrong board, which
+# has never mattered only because `_GAMETYPE["tennis"]` is empty and the guard
+# in _fetch_sport_sync returns before any request is made. Left as found rather
+# than silently corrected — fixing it is a tennis change, not a hockey one.
+SPORT_ID = {"soccer": 1, "basketball": 2, "tennis": 3, "americanfootball": 16,
+            "icehockey": 4}
 
 # outcome-name (Georgian, stable) → canonical selection key
 _OUT = {"1": "home", "2": "away", "X": "draw",
@@ -141,6 +149,35 @@ _GAMETYPE = {
     # silently mis-typed nothing else — the kind of miss that only a live
     # gameType census catches. All five carry the "(OT)" suffix in their
     # Georgian names, matching CB/Pinnacle's incl-overtime convention.
+    # Ice hockey (2026-08-27, 244 events / 8 distinct gameTypes on the board).
+    # Two of the codes ARE soccer's — 1 for the 3-way result and 8 for the goals
+    # total — which is no coincidence: hockey's regulation board has soccer's
+    # shape, a 3-way result over 60 minutes. The handicap -458 is soccer's too.
+    #
+    # What is NOT here matters more than what is. Crocobet ships NO incl-OT
+    # market for hockey at all: every name above is bare, with none of the
+    # "(OT)" suffixes that basketball and American football carry. So these are
+    # REGULATION prices and they are emitted at period REG. Filing them at FT
+    # would score a 60-minute price against Pinnacle's period-0 incl-OT
+    # moneyline on every event.
+    #
+    # Deliberately excluded:
+    #   190   'გამარჯვებული ①' — an OUTRIGHT. Its outcomes are team names
+    #         (four of them), not 1/X/2; it is the tournament winner market
+    #         riding on the same board.
+    #   93    'ფრეზე გაყრა ∪ ①' — draw no bet, outcomes '(0)1'/'(0)2'.
+    #         Pinnacle prices nothing against it.
+    #   -273  'I პერიოდი - შედეგი ①' — the opening period result, and it is
+    #         3-WAY. Pinnacle's period-1 hockey moneyline is 2-way, and
+    #         _find_pin_match would have paired them before the selection-shape
+    #         guard landed. Left out until there is a 2-way to pair it with.
+    "icehockey": {
+        1:    ("moneyline", "REG", 3, None),   # 'ძირითადი შედეგი  ∪ ①'
+        8:    ("total", "REG", 2, None),       # 'გოლების რ-ბა 2.5  ① $'
+        -458: ("spread", "REG", 2, None),      # 'ფორა -3.5 / +3.5 ① €'
+        -329: ("spread", "P1", 2, None),       # 'I პერიოდი - ფორა -0.5 / +0.5'
+        66:   ("total", "P1", 2, None),        # 'I პერიოდის გოლების რ-ბა 1.5'
+    },
     "americanfootball": {
         -2527:  ("moneyline", "FT", 2, None),      # '1 2 ∪ ① (OT)'
         -2950:  ("spread", "FT", 2, None),         # 'ფორა -7.5 / +7.5 (OT)'
@@ -332,6 +369,10 @@ async def fetch_crocobet_basketball() -> list[Odds]:
 
 async def fetch_crocobet_tennis() -> list[Odds]:
     return await fetch_crocobet("tennis")
+
+
+async def fetch_crocobet_icehockey() -> list[Odds]:
+    return await fetch_crocobet("icehockey")
 
 
 async def fetch_crocobet_americanfootball() -> list[Odds]:

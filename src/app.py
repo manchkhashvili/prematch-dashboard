@@ -70,11 +70,13 @@ from src.scrapers.crystalbet import (
     SAMPLE_OUT_SOCCER as CB_SAMPLE_PATH_SOCCER,
     SAMPLE_OUT_TENNIS as CB_SAMPLE_PATH_TENNIS,
     SAMPLE_OUT_AMERICANFOOTBALL as CB_SAMPLE_PATH_AMFOOTBALL,
+    SAMPLE_OUT_ICEHOCKEY as CB_SAMPLE_PATH_ICEHOCKEY,
     close_crystalbet,
     fetch_crystalbet_americanfootball_prematch,
     fetch_crystalbet_basketball_anomaly_ladders,
     fetch_crystalbet_basketball_games,
     fetch_crystalbet_basketball_prematch,
+    fetch_crystalbet_icehockey_prematch,
     fetch_crystalbet_soccer_prematch,
     fetch_crystalbet_tennis_prematch,
     last_ladder_scan_stats as _cb_last_ladder_scan_stats,
@@ -83,12 +85,14 @@ from src.scrapers.crystalbet import (
     get_last_expanded_map,
     parse_html as parse_cb_html,
     parse_html_americanfootball as parse_cb_html_amfootball,
+    parse_html_icehockey as parse_cb_html_icehockey,
     parse_html_soccer as parse_cb_html_soccer,
     parse_html_tennis as parse_cb_html_tennis,
 )
 from src.scrapers.pinnacle import (
     fetch_pinnacle_americanfootball,
     fetch_pinnacle_basketball,
+    fetch_pinnacle_icehockey,
     fetch_pinnacle_soccer,
     fetch_pinnacle_tennis,
 )
@@ -161,6 +165,14 @@ _ALL_SPORTS: list[SportConfig] = [
         cb_sample_path=CB_SAMPLE_PATH_AMFOOTBALL,
         cb_parse_html=parse_cb_html_amfootball,
         xbet_fetcher=_xbet.fetch_xbet_americanfootball,
+    ),
+    SportConfig(
+        sport_name="icehockey",
+        cb_fetcher=fetch_crystalbet_icehockey_prematch,
+        pin_fetcher=fetch_pinnacle_icehockey,
+        cb_sample_path=CB_SAMPLE_PATH_ICEHOCKEY,
+        cb_parse_html=parse_cb_html_icehockey,
+        xbet_fetcher=_xbet.fetch_xbet_icehockey,
     ),
 ]
 
@@ -287,24 +299,28 @@ _BOOK_FETCHERS: dict[str, dict[str, Any]] = {
         "basketball": _liderbet.fetch_liderbet_basketball,
         "tennis":     _liderbet.fetch_liderbet_tennis,
         "americanfootball": _liderbet.fetch_liderbet_americanfootball,
+        "icehockey":  _liderbet.fetch_liderbet_icehockey,
     },
     "betlive": {
         "soccer":     _betlive.fetch_betlive_soccer,
         "basketball": _betlive.fetch_betlive_basketball,
         "tennis":     _betlive.fetch_betlive_tennis,
         "americanfootball": _betlive.fetch_betlive_americanfootball,
+        "icehockey":  _betlive.fetch_betlive_icehockey,
     },
     "crocobet": {
         "soccer":     _crocobet.fetch_crocobet_soccer,
         "basketball": _crocobet.fetch_crocobet_basketball,
         "tennis":     _crocobet.fetch_crocobet_tennis,
         "americanfootball": _crocobet.fetch_crocobet_americanfootball,
+        "icehockey":  _crocobet.fetch_crocobet_icehockey,
     },
     "setanta": {
         "soccer":     _setanta.fetch_setanta_soccer,
         "basketball": _setanta.fetch_setanta_basketball,
         "tennis":     _setanta.fetch_setanta_tennis,
         "americanfootball": _setanta.fetch_setanta_americanfootball,
+        "icehockey":  _setanta.fetch_setanta_icehockey,
     },
 }
 
@@ -572,6 +588,13 @@ ANOMALY_EXTRA_HORIZON_H = float(os.environ.get("ANOMALY_EXTRA_HORIZON_H", "12"))
 # most days and never see the "Main result" 3-way that ot_vs_regulation needs.
 ANOMALY_EXTRA_HORIZON_H_BY_SPORT = {
     "americanfootball": float(os.environ.get("ANOMALY_AF_HORIZON_H", "240")),
+    # Ice hockey is AF-shaped, not soccer-shaped: ~320 games on the board and
+    # a cheap detail page, but its two full-game markets ("Main result" and
+    # "Winner (incl. overtime and penalties)") are the pair ot_vs_regulation
+    # needs, and the deeper an event is from kickoff the more likely CB has
+    # published only one of them. 72 h keeps the whole in-season slate of a
+    # weekend in view without reaching for the friendlies weeks out.
+    "icehockey": float(os.environ.get("ANOMALY_ICEHOCKEY_HORIZON_H", "72")),
 }
 # Wall-clock budget per sport per pass. The horizon alone does NOT bound this
 # scan's cost, and the scan holds the CB per-sport lock for its whole duration —
@@ -610,7 +633,7 @@ ANOMALY_MAX_MARKETS_SPORTS = tuple(
     if s.strip()
 )
 _ANOMALY_EXTRA_RAW = os.environ.get("ANOMALY_EXTRA_SPORTS",
-                                    "soccer,tennis,americanfootball")
+                                    "soccer,tennis,americanfootball,icehockey")
 # CB extended (full-ladder) scan cadence. Owner call 2026-07-11: CB every 5 min
 # (it's the heaviest book — ~65s+CPU for a full board), other books every 2.5
 # min (see BETLIVE_DISCOVER_SEC / EXTRA_BOOK_POLL_SEC). List-mode polls unchanged.

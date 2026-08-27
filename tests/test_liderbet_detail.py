@@ -179,11 +179,43 @@ def test_the_detail_pass_is_horizon_gated():
 
 def test_detail_is_only_attempted_for_sports_with_a_mapped_table():
     """typeIds are section-scoped (mt:16:* is soccer). Pulling a detail payload
-    we cannot read would be pure cost."""
+    we cannot read would be pure cost.
+
+    The table stopped being soccer-only when ice hockey landed: mt:3:* entries
+    are the list-tier allowlist for a sport whose market NAMES cannot be
+    trusted (Lider calls hockey's 3-way regulation result "Result", which the
+    name classifier reads as a 2-way moneyline). So the invariant under test is
+    no longer "every key is soccer's" — it is that only sections we have
+    censused appear at all, and that only soccer's detail payload gets fetched.
+    """
     assert L._DETAIL_TYPES_FOR("soccer") is True
-    for other in ("basketball", "tennis", "americanfootball"):
+    for other in ("basketball", "tennis", "americanfootball", "icehockey"):
         assert L._DETAIL_TYPES_FOR(other) is False
-    assert all(k.startswith("mt:16:") for k in L._DETAIL_TYPES)
+    censused = ("mt:16:", "mt:3:")          # soccer, ice hockey
+    assert all(k.startswith(censused) for k in L._DETAIL_TYPES)
+
+
+def test_hockey_result_is_three_way_not_the_name_classifier_s_two():
+    """The trap this table exists to close.
+
+    Lider names ice hockey's regulation result "Result". `_classify_market`
+    maps that word to a 2-way moneyline, which would emit the home and away
+    prices with the tie silently dropped — two prices summing to about 80 % —
+    and then pair them against Pinnacle's incl-OT 2-way, showing the tie
+    probability as edge on every event. The typeId entry has to win, and the
+    name fallback has to be off for the sport entirely.
+    """
+    assert L._classify_market("Result") == ("moneyline", 2)     # the trap
+    assert L._DETAIL_TYPES["mt:3:500"] == ("moneyline", "REG", 3, None)
+    assert L._names_classified("icehockey") is False
+    assert L._names_classified("soccer") is True
+
+
+def test_hockey_periods_are_periods_not_halves():
+    """Hockey has three periods; P1..P3 must not be filed as halves."""
+    for tid, per in (("mt:3:697", "P1"), ("mt:3:741", "P2"), ("mt:3:792", "P3"),
+                     ("mt:3:694", "P1"), ("mt:3:734", "P2"), ("mt:3:789", "P3")):
+        assert L._DETAIL_TYPES[tid][1] == per, tid
 
 
 def test_liderbet_is_in_the_ladder_book_set():

@@ -313,10 +313,12 @@ const NUM_GATES = {
 const SET_GATES = {
   kinds:   ["alert-kinds",   A_KINDS,   ["+EV", "ARB"]],
   conf:    ["alert-conf",    A_CONF,    ["strong", "medium", "weak"]],
-  sports:  ["alert-sports",  A_SPORTS,  ["basketball", "soccer", "tennis", "americanfootball"]],
+  sports:  ["alert-sports",  A_SPORTS,  ["basketball", "soccer", "tennis", "americanfootball",
+                                         "icehockey"]],
   books:   ["alert-books",   A_BOOKS,   ["cb", "liderbet", "betlive", "crocobet", "setanta"]],
   markets: ["alert-markets", A_MARKETS, ["moneyline", "spread", "total", "team_total"]],
-  periods: ["alert-periods", A_PERIODS, ["FT", "H1", "Q1", "Q2", "Q3", "Q4"]],
+  periods: ["alert-periods", A_PERIODS, ["FT", "H1", "Q1", "Q2", "Q3", "Q4",
+                                         "REG", "P1", "P2", "P3"]],
 };
 const chipOptions = {};
 for (const [f, [, , seed]] of Object.entries(SET_GATES)) chipOptions[f] = [...seed];

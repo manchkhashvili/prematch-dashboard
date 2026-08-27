@@ -14,7 +14,26 @@ sides together at the scraper layer lets us compute fair prices and edges
 without rejoining sides downstream.
 
 `period` follows Pinnacle's vocabulary: "FT" for full time, "H1" for first
-half, "Q1".."Q4" for quarters (CB only; Pinnacle has no prematch Qs).
+half, "Q1".."Q4" for quarters (CB only; Pinnacle has no prematch Qs),
+"P1".."P3" for ice-hockey periods, and "REG" for regulation time.
+
+"REG" vs "FT" is an ice-hockey distinction and it is not cosmetic. "FT" always
+means *the game as it settles*, overtime and shootout included; "REG" means the
+60 minutes of regulation, where a tie is a third outcome. Hockey is the first
+sport where a book prices both and they are DIFFERENT markets — CrystalBet
+ships "Total Goals*" alongside "Total Goals(incl. overtime and penalties)", and
+Pinnacle ships regulation on period 6 and incl-OT on period 0. Measured across
+the live board 2026-08-27: the incl-OT ladder's devigged P(over) runs +0.024
+above the regulation one at the same line (+0.05 mid-ladder), and team totals
++0.017 on 98 % of 888 rungs. Folding them into one period would score a
+60-minute price against a full-game one on every event.
+
+The puck line is the exception, and by arithmetic rather than luck: overtime is
+sudden death and only ever reached from a tie, so the OT goal always makes a
+one-goal win. Winning by 2+ including overtime IS winning by 2+ in regulation.
+CB's two handicap ladders were byte-identical on 300 of 300 rungs at |line|
+>= 1.5 (the only lines it offers), so either may be matched against Pinnacle's
+period-6 spread.
 
 `market_type` uses Pinnacle's terms: "moneyline" | "spread" | "total".
 The reference doc (§11) used "match_winner" — we drop that in favor of
@@ -32,7 +51,7 @@ Source     = Literal["crystalbet", "pinnacle", "xbet", "liderbet", "betlive", "c
 # "1/X", ..., "2/2"). Captured only by the permissive (anomaly-scan) classifier
 # for CB-internal consistency checks — never matched against Pinnacle.
 MarketType = Literal["moneyline", "spread", "total", "team_total", "htft"]
-Period     = Literal["FT", "H1", "Q1", "Q2", "Q3", "Q4"]
+Period     = Literal["FT", "H1", "Q1", "Q2", "Q3", "Q4", "REG", "P1", "P2", "P3"]
 Submarket  = Literal["corners", "bookings"]
 TeamSide   = Literal["home", "away"]
 

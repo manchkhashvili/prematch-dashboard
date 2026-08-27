@@ -44,7 +44,10 @@ MATCHDATA_URL = f"{BASE}/pre/m4/api/sport/matchData"
 IMPERSONATE = "chrome124"
 
 # Lider sport "section" id per dashboard sport name (verified 2026-06-15).
+# s:3 = Ice Hockey, read off the book's own menu (85 games, 17 tournaments,
+# 2026-08-27) — fourth-largest section after soccer, table tennis and tennis.
 SECTION = {"soccer": "s:16", "basketball": "s:2", "tennis": "s:13",
+           "icehockey": "s:3",
            # American football (2026-08-12): 85 matches over CFL / Regular
            # Season / Pre-Season. Its three market names — 'Winner (OT)',
            # 'Handicap (OT)', 'Total (OT)' — are already in _classify_market's
@@ -135,6 +138,44 @@ _DETAIL_TYPES: dict[str, tuple] = {
     # mt:16:504 / mt:16:505  team totals — same shape, max 51.20pp.
     # None of the three is needed for the consistency checks; they are an arbs
     # -grid enrichment and can wait for a proper census.
+
+    # ══ ICE HOCKEY (mt:3:*) — census 2026-08-27, 65 matches / 20 market types ══
+    # These are NOT optional decoration on top of the name classifier: without
+    # them hockey is actively wrong. Lider names its 3-way regulation result
+    # "Result", and `_classify_market` maps the bare word "result" to a 2-WAY
+    # moneyline. That row would carry the regulation home/away prices with the
+    # tie silently dropped — two prices summing to ~80 % — and the
+    # selection-shape guard in edge.py cannot catch it, because the shape is
+    # right and only the meaning is wrong. It would then pair against
+    # Pinnacle's period-0 incl-OT moneyline and show the tie probability as
+    # edge on every event on the board.
+    #
+    # Hence `_names_classified()` below returns False for hockey: this table is
+    # the whole mapping, and an unlisted mt:3:* market is skipped rather than
+    # guessed at by name.
+    #
+    # Everything here is REGULATION. Lider prices no incl-OT hockey market at
+    # all in the list tier — no "Winner (OT)", no "Total (OT)" — which is why
+    # the book contributes nothing to the FT (incl-OT) comparison and shows up
+    # only against Pinnacle's period 6.
+    "mt:3:500":  ("moneyline", "REG", 3, None),   # 'Result' — 3 outcomes
+    "mt:3:502":  ("total", "REG", 2, None),       # 'Total'
+    "mt:3:607":  ("spread", "REG", 2, None),      # 'Handicap'
+    "mt:3:697":  ("total", "P1", 2, None),        # '1st Period - Total'
+    "mt:3:741":  ("total", "P2", 2, None),        # '2nd Period - Total'
+    "mt:3:792":  ("total", "P3", 2, None),        # '3rd Period - Total'
+    "mt:3:694":  ("spread", "P1", 2, None),       # '1st Period - Hadicap' (sic)
+    "mt:3:734":  ("spread", "P2", 2, None),       # '2nd Period - Hadicap' (sic)
+    "mt:3:789":  ("spread", "P3", 2, None),       # '3rd Period - Handicap'
+    # ── deliberately absent ─────────────────────────────────────────────────
+    # mt:3:503 Double Chance, mt:3:538 Both Teams To Score, mt:3:662/663/664
+    #   per-period BTTS — no representation in Odds.
+    # mt:3:699/700, 743/744, 793/794 — SIX ids sharing three names ("1st
+    #   Period", "2nd Period", "3rd Period"), two per period, both 3-way. One
+    #   of each pair is presumably the period result and the other a double
+    #   chance, but the feed does not say which and the prices alone did not
+    #   separate them. Pinnacle's period moneyline is 2-way regardless, so
+    #   there is nothing to pair a 3-way against; left out until named.
 }
 
 _HTFT_CELLS = ("1/1", "1/X", "1/2", "X/1", "X/X", "X/2", "2/1", "2/X", "2/2")
@@ -194,6 +235,18 @@ def _odds(value) -> float | None:
     """Decimal odds, or None if missing/suspended (<= 1.0)."""
     v = _to_float(value)
     return v if v is not None and v > 1.0 else None
+
+
+def _names_classified(sport_name: str) -> bool:
+    """May this sport fall back to the NAME classifier for unlisted markets?
+
+    No for ice hockey. `_classify_market` reads a bare "Result" as a 2-way
+    moneyline, which is exactly what Lider calls hockey's 3-way regulation
+    result — a mapping that is wrong in the dangerous direction (see the
+    mt:3:* block in _DETAIL_TYPES). With names off, the typeId allowlist is
+    the entire hockey mapping and an unlisted market is skipped.
+    """
+    return sport_name != "icehockey"
 
 
 def _DETAIL_TYPES_FOR(sport_name: str) -> bool:
@@ -268,8 +321,8 @@ def _parse_match(
         hit = _DETAIL_TYPES.get(type_id)
         if hit is not None:
             market_type, period, n_way, team_side = hit
-        elif detail:
-            continue            # allowlist-only on the detail payload
+        elif detail or not _names_classified(sport_name):
+            continue            # allowlist-only (detail payload, and hockey)
         else:
             cls = _classify_market(tp.get("name", ""))
             if cls is None:
@@ -469,6 +522,10 @@ async def fetch_liderbet_tennis() -> list[Odds]:
 
 async def fetch_liderbet_americanfootball() -> list[Odds]:
     return await fetch_liderbet("americanfootball")
+
+
+async def fetch_liderbet_icehockey() -> list[Odds]:
+    return await fetch_liderbet("icehockey")
 
 
 if __name__ == "__main__":   # smoke: python -m src.scrapers.liderbet [sport]

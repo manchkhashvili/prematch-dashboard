@@ -345,7 +345,10 @@ const KIND_LABEL = {
   htft_combo: "HT/FT combo",
   htft_fair: "HT/FT fair (model)",
   tennis_set_match: "tennis: set vs match",
-  ot_vs_regulation: "am. football: OT vs regulation",
+  // Both sports post a regulation market and an incl-OT one and tie them by
+  // arithmetic; hockey does it across REG and FT, AF within one period.
+  ot_vs_regulation: "OT vs regulation",
+  ot_monotone: "hockey: incl-OT below regulation",
   betlive_flip: "betlive: favourite flip",
   betlive_ot_fold: "betlive: OT-fold",
   soccer_htft: "soccer HT/FT (soft)",
@@ -400,6 +403,10 @@ const KIND_UNIT = {
   // ot_vs_regulation severity is how far P(win incl OT) sits outside the
   // [P(win reg), P(win reg)+P(tie)] box, or the coin-flip gap inside it — pp.
   ot_vs_regulation: "pp",
+  // ot_monotone severity is how far the REGULATION goal ladder sits ABOVE the
+  // incl-overtime one at the same line. The true bound is zero — overtime only
+  // adds goals — so any positive value is the size of the contradiction, in pp.
+  ot_monotone: "pp",
   // Both Lider combo kinds are a straight return on outlay: combo_cover is the
   // locked profit on a full cover, combo_dominance is how much more the
   // superset pays than the subset sitting inside it. Both %.
@@ -541,8 +548,13 @@ document.getElementById("cons-kind-grid").addEventListener("change", syncAlertCf
 // leave market/side/line/odds for whichever leg you decide to take. Guessing a
 // market_type here would silently put a wrong leg on a real bet.
 const BET_SIDES   = new Set(["home", "away", "draw", "over", "under"]);
-const BET_PERIODS = new Set(["FT", "H1", "Q1", "Q2", "Q3", "Q4"]);
-const BET_SPORTS  = new Set(["basketball", "soccer", "tennis", "americanfootball"]);
+// REG is ice hockey's 60 minutes and FT the game including overtime and the
+// shootout — two different bets, so both belong here and neither substitutes
+// for the other on a prefilled slip. P1..P3 are the three hockey periods.
+const BET_PERIODS = new Set(["FT", "H1", "Q1", "Q2", "Q3", "Q4",
+                             "REG", "P1", "P2", "P3"]);
+const BET_SPORTS  = new Set(["basketball", "soccer", "tennis", "americanfootball",
+                             "icehockey"]);
 // Only kinds where every leg of the check lives in ONE market type.
 const KIND_MARKET = {
   favourite_flip: "moneyline",
@@ -552,6 +564,10 @@ const KIND_MARKET = {
   basketball_fav: "moneyline",
   soccer_identity: "moneyline",
   total_additivity: "total",
+  // ot_monotone compares the two goal ladders; ot_vs_regulation compares the
+  // two moneylines. Only the second sits in one market type.
+  ot_vs_regulation: "moneyline",
+  ot_monotone: "total",
 };
 
 function buildConsistencyBetUrl(f) {

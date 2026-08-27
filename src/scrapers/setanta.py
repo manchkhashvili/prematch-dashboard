@@ -104,7 +104,7 @@ DETAIL_HOURS = float(os.environ.get("SETANTA_DETAIL_HOURS", "24"))
 MAIN_PROFILE = "pro_main_period"
 
 SPORT_CODE = {"soccer": "F", "basketball": "B", "tennis": "T",
-              "americanfootball": "AF"}
+              "americanfootball": "AF", "icehockey": "H"}
 
 # (marketType, sport) → (market_type, n_way). period comes from _PERIOD.
 _MARKET = {
@@ -125,6 +125,34 @@ _MARKET = {
     # 2-way, so it is deliberately absent from this table.
     "AF": {1: ("moneyline", 2), 5: ("total", 2), 4: ("spread", 2),
            7: ("team_total", 2)},
+    # Ice hockey (2026-08-27, 51 events / 9 tournaments). This is the first
+    # sport where BOTH moneyline codes appear on the same period, and they are
+    # different markets:
+    #   mt 1  outcomes {0, 3}      2-way, INCLUDING overtime and the shootout
+    #   mt 2  outcomes {0, 1, 3}   3-way, REGULATION (the tie is a real leg)
+    # Verified by the overtime box rather than by shape alone — implied
+    # P(win in OT | tied after 60) over 86 (event, side) pairs came out median
+    # 0.500, p10 0.484, p90 0.516, with zero arithmetically impossible values.
+    # See _FULL_GAME_PERIOD for how the two are kept apart, since the feed
+    # files them under the same period int.
+    #
+    # mt 3 ({8,9,10} — double chance) and mt 6 ({6,7}) are left out: no slot
+    # in Odds for the first, unidentified for the second.
+    "H":  {1: ("moneyline", 2), 2: ("moneyline", 3), 5: ("total", 2),
+           4: ("spread", 2), 7: ("team_total", 2)},
+}
+
+# Sport → {marketType: period}, applied ONLY to the feed's period 0 and only
+# where the market type alone decides which full-game market it is.
+#
+# Hockey needs it because Setanta files its regulation 3-way and its incl-OT
+# 2-way under the same period int, and they settle differently: the 3-way is
+# the 60 minutes, the 2-way is the game as it finishes. Everything else at
+# period 0 — spread, total, team total — sits with the 3-way at REG, which is
+# also where Pinnacle keeps its hockey spreads and totals (period 6; its
+# period 0 prices no spread or total at all).
+_FULL_GAME_PERIOD: dict[str, dict[int, str]] = {
+    "H": {1: "FT"},
 }
 # feed period code → v1 Period, per sport (see module docstring)
 _PERIOD = {
@@ -136,6 +164,11 @@ _PERIOD = {
     # period 4010 totals sit at 28.5 (a half) while period 1 totals sit at
     # 10.5 (a quarter). Mapping 1→H1 here would price a quarter as a half.
     "AF": {0: "FT", 4010: "H1", 1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"},
+    # Hockey: 0 is the whole game (REG unless _FULL_GAME_PERIOD overrides it
+    # for the incl-OT moneyline), and 1..3 are the three PERIODS, not halves
+    # or quarters. Confirmed by the lines: period totals sit at 1.5 against
+    # the full game's 5.5, which is a third of a game and not a half.
+    "H":  {0: "REG", 1: "P1", 2: "P2", 3: "P3"},
 }
 # outcomeType → canonical selection key
 _OUT_ML = {0: "home", 1: "draw", 3: "away"}
@@ -437,6 +470,11 @@ def _parse_markets(markets, events, sport, sport_code, fetched_at) -> list[Odds]
         period = periods.get(key.get("period"))
         if period is None:
             continue
+        # A market type that names its own full-game period (hockey's incl-OT
+        # moneyline) overrides the period int, which cannot tell the two apart.
+        if key.get("period") == 0:
+            period = _FULL_GAME_PERIOD.get(sport_code, {}).get(
+                key.get("marketType"), period)
         ev = events.get(key.get("eventId"))
         if ev is None:
             continue
@@ -594,6 +632,10 @@ async def fetch_setanta_basketball() -> list[Odds]:
 
 async def fetch_setanta_tennis() -> list[Odds]:
     return await fetch_setanta("tennis")
+
+
+async def fetch_setanta_icehockey() -> list[Odds]:
+    return await fetch_setanta("icehockey")
 
 
 async def fetch_setanta_americanfootball() -> list[Odds]:

@@ -77,6 +77,29 @@ ML_SPREAD_GAP_PP = 5.0     # ml vs spread win-prob gap (clean game: <=0.5pp)
 PICKEM_LOCK_PCT = 0.3      # min locked % for a pickem_arb row
 _PICKEM_MAX_SKEW_SEC = 120.0  # both legs must come from the same fetch
 TOTAL_ADD_PTS = 5.0        # period totals vs parent sum (clean game: ~0.5pt)
+# ...and 5.0 is a BASKETBALL number: five points on a ~220-point total is 2 %.
+# The same constant on ice hockey would be five goals against a ~5.5-goal
+# regulation total, i.e. the sum of the three periods would have to be roughly
+# double or roughly zero before it flagged. A threshold in the units of the
+# sport's own total has to move with the sport.
+#
+# HONEST LABEL: the hockey number below is NOT calibrated against observed
+# violations, because the check has never had a chance to run. CrystalBet
+# publishes exactly ONE rung on each per-period goal ladder ("1st Period -
+# Total Goals*" and friends), and a ladder centre needs two rungs bracketing
+# 50 % — so across the whole collected history, 0 of 349 events priced all
+# four ladders. 1.0 goal is scaled off the board's own line spacing (period
+# rungs sit at 1.5, the regulation ladder at 5.5) and is deliberately loose;
+# it exists so the check is correct if CB ever widens those ladders, not
+# because it has been tuned on anything.
+#
+# Soccer sits in the same trap and is deliberately LEFT ALONE here: its FT
+# total is ~2.5 goals, so H1+H2-vs-FT has been effectively muted by the 5.0
+# basketball constant since it shipped. Fixing that changes what an existing
+# sport puts on the board and belongs in its own pass, not in a hockey one.
+TOTAL_ADD_PTS_BY_SPORT: dict[str, float] = {
+    "icehockey": 1.0,
+}
 DECISIVE_PROB = 0.06       # |P-0.5| past this = a "decisive" favourite (~1.8/2.05)
 EXTREME_PP = 6.0           # quarter |P-0.5| exceeding FT's by this many pp
 HTFT_GAP_PCT = 2.0         # htft combo bound violations smaller than this % are
@@ -98,7 +121,38 @@ HTFT_ODDS_MAX = 4.5
 # soccer (1X2 + HT/FT), and tennis (set winners vs match winner — see
 # set_vs_match below; tennis detail pages carry 15 markets that are all
 # functions of the same four best-of-3 outcomes).
-CONSISTENCY_SPORTS = ("basketball", "soccer", "tennis", "americanfootball")
+CONSISTENCY_SPORTS = ("basketball", "soccer", "tennis", "americanfootball",
+                      "icehockey")
+
+# ── what ice hockey does and does not contribute here ────────────────────────
+# Hockey is the cleanest board on the dashboard, and that is a finding rather
+# than a gap. Measured over the whole collected CrystalBet history (349 events
+# with full detail pages, plus the live board):
+#
+#     ladder monotonicity        0 violations in 4 866 rungs / 86 events
+#     overtime box (below/above) 0 violations in  85 events pricing both MLs
+#     incl-OT ladder dominance   0 violations in 924 shared rungs / 49 events
+#     coin-flip point estimate   max 1.81pp against an 8.0pp threshold
+#
+# The reason is visible in that last number: CrystalBet does not price its
+# incl-OT hockey moneyline independently at all. It derives it from the
+# regulation 1X2 with a flat even overtime — implied P(win in OT | tied after
+# 60) came out median 0.500, p10 0.477, p90 0.524 across 170 (event, side)
+# pairs. Two markets computed from one number cannot contradict each other, so
+# no CB-internal check can find anything in them.
+#
+# The checks below are still wired, for two reasons. They are exact identities
+# that cost a comparison each, and the same class of check DOES fire on a
+# comparable board — American football's ot_vs_regulation flagged 3 of 50 pairs
+# on its first live run. Hockey's board is also 30-of-47 preseason friendlies
+# today and multiplies when the NHL season opens.
+#
+# Where hockey actually pays is the cross-book grid, not here: seven books now
+# price its regulation market, verified against Pinnacle at 0.27-1.79pp median
+# devigged gap. Pinnacle, unlike CrystalBet, DOES adjust the overtime
+# conditional for team strength (p10 0.433, p90 0.567), so CB's flat coin flip
+# is systematically wrong on mismatched teams — which the ordinary +EV path
+# picks up now that the sport is wired, without needing a detector of its own.
 
 # ot_vs_regulation (American football): CB prices the SAME game twice at full
 # time — a 3-way REGULATION result ("Main result": 1 / X / 2, the tie leg
@@ -142,6 +196,15 @@ OT_BOX_PP = 3.0
 # same board: p90 3.29, max 7.36 — so 8.0 fires on nothing ordinary and exists
 # to catch a pair that stays inside the box while still disagreeing wildly.
 OT_COINFLIP_PP = 8.0
+# ot_monotone (ice hockey): how far the regulation goal ladder may sit ABOVE
+# the incl-overtime one at the same line before flagging. The true bound is
+# zero — overtime cannot remove goals — so anything positive is a contradiction
+# and the threshold is pure devig slack, the two ladders carrying independent
+# vig. Measured over 924 shared rungs on 49 events: not one had the regulation
+# side higher, and the incl-OT side ran +2.4pp above it on median (+5-6pp mid-
+# ladder), which is what ~0.2 of an overtime goal looks like. 3.0pp therefore
+# sits well past anything the board does when it is behaving.
+OT_MONOTONE_PP = 3.0
 
 # set_vs_match: how far the per-set win probability implied by the MATCH price
 # may sit from the one the book posts on the FIRST SET, in percentage points.
@@ -381,6 +444,36 @@ def _pickem_locks(period_odds: dict, per: str, min_pct: float = 0.3) -> list[tup
     return out
 
 
+def _ot_ladder(period_mkts: dict[str, list[Odds]], market_type: str,
+               team_side: Optional[str]) -> dict[float, float]:
+    """{line: devigged P(over)} for one goal ladder.
+
+    Used by ice hockey's ot_monotone check to lay the regulation ladder against
+    the incl-overtime one rung for rung. Devigged rather than raw, because the
+    two ladders carry independent vig and a raw comparison would report the vig
+    difference as a contradiction.
+
+    Every rung is kept, not just the main section: the whole point is to compare
+    the SAME line across two ladders, and dropping alt-lines would throw away
+    most of the overlap.
+    """
+    out: dict[float, float] = {}
+    for o in period_mkts.get(market_type, []):
+        if o.line is None or o.team_side != team_side:
+            continue
+        if "over" not in o.selections or "under" not in o.selections:
+            continue
+        try:
+            po, _ = devig_2way(o.selections["over"], o.selections["under"])
+        except (ValueError, ZeroDivisionError):
+            continue
+        if 0.0 < po < 1.0:
+            # Two rungs can share a line across sections; keep the first, which
+            # is the page's own primary ordering.
+            out.setdefault(o.line, po)
+    return out
+
+
 def _build_period_view(period_odds: dict[str, list[Odds]]) -> _PeriodView:
     v = _PeriodView()
     ml = period_odds.get("moneyline")
@@ -456,6 +549,7 @@ def find_consistency_flags(
     ht_set_match_pp: float = SET_MATCH_PP,
     ot_box_pp: float = OT_BOX_PP,
     ot_coinflip_pp: float = OT_COINFLIP_PP,
+    ot_monotone_pp: float = OT_MONOTONE_PP,
 ) -> list[ConsistencyFlag]:
     """Find CB-internal contradictions across markets/periods. See module docs."""
     # Group: event_id -> period -> market_type -> [Odds]
@@ -524,12 +618,15 @@ def find_consistency_flags(
             vv = views.get(p)
             return vv.total_center if vv else None
         for parent, kids in (("FT", ("H1", "H2")), ("H1", ("Q1", "Q2")),
-                             ("H2", ("Q3", "Q4")), ("FT", ("Q1", "Q2", "Q3", "Q4"))):
+                             ("H2", ("Q3", "Q4")), ("FT", ("Q1", "Q2", "Q3", "Q4")),
+                             # hockey: three periods make the regulation game.
+                             # Not FT — the incl-OT total is a different number.
+                             ("REG", ("P1", "P2", "P3"))):
             pv = tc(parent)
             kv = [tc(k) for k in kids]
             if pv is not None and all(x is not None for x in kv):
                 diff = sum(kv) - pv
-                if abs(diff) >= total_add_pts:
+                if abs(diff) >= TOTAL_ADD_PTS_BY_SPORT.get(m.sport, total_add_pts):
                     mk("total_additivity", f"{'+'.join(kids)} vs {parent}",
                        f"total: {'+'.join(kids)}={sum(kv):.1f} vs {parent}={pv:.1f} "
                        f"(off by {diff:+.1f} pts)", abs(diff))
@@ -604,6 +701,76 @@ def find_consistency_flags(
                                    f"favourite but the first set is priced at "
                                    f"{ps*100:.0f}% — {gap:.0f}pp apart on the same "
                                    f"quantity", gap)
+
+        # 4c-bis. ICE HOCKEY: the same overtime identity, one period apart.
+        #
+        # Hockey posts its two full-game moneylines under DIFFERENT periods,
+        # not the same one: the 3-way regulation result is REG (60 minutes,
+        # where a tie is a real outcome) and the 2-way winner is FT (the game
+        # as it settles, overtime and shootout included). So the AF loop below,
+        # which reads both shapes out of a single period view, finds nothing
+        # here — the pair has to be assembled across REG and FT.
+        #
+        # Same arithmetic, and it is arithmetic rather than a model: you cannot
+        # win in overtime without first drawing in regulation.
+        if m.sport == "icehockey":
+            reg, ftv = views.get("REG"), views.get("FT")
+            if reg is not None and ftv is not None:
+                p, d, q = reg.ml_phome3, reg.ml_pdraw3, ftv.ml_phome
+                if p is not None and d is not None and q is not None:
+                    floor_pp = (p - q) * 100.0
+                    ceil_pp = (q - (p + d)) * 100.0
+                    if floor_pp >= ot_box_pp:
+                        mk("ot_vs_regulation", "REG vs FT",
+                           f"home wins {p*100:.0f}% in regulation but only "
+                           f"{q*100:.0f}% including overtime and the shootout — "
+                           f"overtime cannot take away a regulation win "
+                           f"({floor_pp:.0f}pp below the floor)", floor_pp)
+                    elif ceil_pp >= ot_box_pp:
+                        mk("ot_vs_regulation", "REG vs FT",
+                           f"home wins {q*100:.0f}% including overtime, more than "
+                           f"winning ({p*100:.0f}%) or drawing ({d*100:.0f}%) in "
+                           f"regulation combined — impossible even winning every "
+                           f"overtime ({ceil_pp:.0f}pp above the ceiling)", ceil_pp)
+                    else:
+                        gap = abs(q - (p + d / 2.0)) * 100.0
+                        if gap >= ot_coinflip_pp:
+                            mk("ot_vs_regulation", "REG vs FT",
+                               f"regulation 1X2 ({p*100:.0f}/{d*100:.0f}/"
+                               f"{(1-p-d)*100:.0f}) implies {(p+d/2)*100:.0f}% "
+                               f"including overtime if the extra period were even, "
+                               f"but the incl-OT winner is priced at {q*100:.0f}% "
+                               f"({gap:.0f}pp apart)", gap)
+
+            # 4c-ter. The incl-OT goal ladder must DOMINATE the regulation one.
+            #
+            # Overtime only ever adds goals, so at every line
+            #     P(over N incl OT)  >=  P(over N regulation)
+            # exactly, with no tolerance for a model. The book publishes both
+            # ladders on the same page — "Total Goals*" and "Total Goals(incl.
+            # overtime and penalties)" — so this is its own arithmetic checked
+            # against itself, at up to 11 rungs and both team totals per event.
+            #
+            # The puck line is deliberately NOT checked this way: overtime is
+            # sudden death and is only reached from a tie, so the overtime goal
+            # always makes a ONE-goal win and winning by 2+ including overtime
+            # is the same event as winning by 2+ in regulation. CB prices those
+            # two ladders identically on 300 of 300 rungs, correctly.
+            for mtype in ("total", "team_total"):
+                for team in (None, "home", "away"):
+                    reg_l = _ot_ladder(periods.get("REG", {}), mtype, team)
+                    ot_l = _ot_ladder(periods.get("FT", {}), mtype, team)
+                    for line in sorted(set(reg_l) & set(ot_l)):
+                        gap = (reg_l[line] - ot_l[line]) * 100.0
+                        if gap >= ot_monotone_pp:
+                            what = (f"{team} team total" if team else "total")
+                            mk("ot_monotone", "REG vs FT",
+                               f"{what} {line:g}: regulation P(over)="
+                               f"{reg_l[line]*100:.0f}% but including overtime "
+                               f"only {ot_l[line]*100:.0f}% — overtime can only "
+                               f"ADD goals, so the incl-OT price can never be "
+                               f"the shorter of the two ({gap:.0f}pp backwards)",
+                               gap)
 
         # 4d. AMERICAN FOOTBALL: the incl-OT winner vs the regulation 1X2.
         #

@@ -323,6 +323,20 @@ def _find_pin_match(cb: Odds, pin_list: list[Odds]) -> Odds | None:
 
     Basketball Odds have submarket=None and team_side=None on both sides,
     so the new equality checks are no-ops for Phase 1 data (None == None).
+
+    Phase 3.3 (ice hockey): the SELECTION SHAPE is part of the key too. Until
+    hockey arrived, every sport agreed with Pinnacle on how many ways a market
+    ran — basketball 2, soccer 3 — so a 3-way could never meet a 2-way here.
+    Hockey breaks that: books price a 3-way regulation result and a 2-way
+    incl-OT winner for the same game, and Pinnacle's opening-period moneyline
+    is 2-way while several books' is 3-way.
+
+    Pairing across that gap fails silently and in the worse direction, because
+    `_fair_pairs` branches on PINNACLE's shape: a CB 3-way meeting a Pinnacle
+    2-way gets devigged as 2-way and the CB regulation home price — which
+    carries a tie it can lose to — is scored against a fair price that has no
+    tie in it. Every event then shows the tie probability as edge. Requiring
+    the shapes to agree costs nothing where they already do.
     """
     candidates = [
         p for p in pin_list
@@ -330,6 +344,7 @@ def _find_pin_match(cb: Odds, pin_list: list[Odds]) -> Odds | None:
         and p.period == cb.period
         and p.submarket == cb.submarket
         and p.team_side == cb.team_side
+        and set(p.selections) == set(cb.selections)
         and _lines_match(cb.line, p.line, cb.market_type)
     ]
     if not candidates:

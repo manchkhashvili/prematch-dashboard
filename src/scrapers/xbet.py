@@ -62,7 +62,12 @@ TIMEOUT = 15
 MAX_WORKERS = 8
 ENUM_TTL = 1800.0            # champ/board enumeration cache (fixtures churn slowly)
 
-SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4, "americanfootball": 13}
+# Ice hockey is 2 — identified from the league names the id returns (NHL,
+# Champions Hockey League, Club Friendlies, KHL: 170 games in 27 champs on
+# 2026-08-27), because the /GetSportsShortZip catalogue comes back empty on
+# this endpoint and a positional guess from another book would be a guess.
+SPORT_ID = {"basketball": 3, "soccer": 1, "tennis": 4, "americanfootball": 13,
+            "icehockey": 2}
 
 # Energy budget (2026-07-11, the "PC runs hot" fix): pricing the WHOLE board
 # every cycle was ~4,400 GetGameZip calls + ~60 MB JSON parse per 2 min across
@@ -108,6 +113,9 @@ SUBGAME_PERIODS = {
     "americanfootball": {"1 Half": "H1", "1st quarter": "Q1",
                          "2nd quarter": "Q2", "3rd quarter": "Q3",
                          "4th quarter": "Q4"},
+    # Hockey ships three periods, not halves or quarters — panel names read
+    # straight off the SG list on all 18 sampled fixtures.
+    "icehockey": {"1st period": "P1", "2nd period": "P2", "3rd period": "P3"},
 }
 
 # ── DNS pin (ported from live probe; see module docstring) ───────────────────
@@ -336,6 +344,25 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
                 rows.append(_mk(game, sport, "moneyline", "FT",
                                 {"home": ml[1], "draw": ml[2], "away": ml[3]},
                                 fetched_at=fetched_at))
+        elif sport == "icehockey":
+            # The only book here that ships BOTH full-game moneylines, so both
+            # are emitted and the periods keep them apart:
+            #   G=1   T1/T2/T3   3-way, REGULATION (a tie is a real outcome)
+            #   G=101 T401/402   2-way, incl. overtime and shootout
+            # Which is which was verified rather than read off the shape: the
+            # overtime box (a win incl-OT requires either a regulation win or a
+            # regulation tie) held on all 54 (event, side) pairs sampled, with
+            # implied P(win in OT | tied) median 0.500, p10 0.443, p90 0.557.
+            three = {o.get("T"): _price(o) for o in ge.get(1, []) if o.get("P") is None}
+            if three.get(1) and three.get(2) and three.get(3):
+                rows.append(_mk(game, sport, "moneyline", "REG",
+                                {"home": three[1], "draw": three[2], "away": three[3]},
+                                fetched_at=fetched_at))
+            two = {o.get("T"): _price(o) for o in ge.get(101, []) if o.get("P") is None}
+            if two.get(401) and two.get(402):
+                rows.append(_mk(game, sport, "moneyline", "FT",
+                                {"home": two[401], "away": two[402]},
+                                fetched_at=fetched_at))
         elif sport in ("basketball", "americanfootball"):   # G=101 T401/402
             # American football uses basketball's incl-OT 2-way ML code, not
             # soccer's G=1 1X2 — verified 2026-08-12 across 30 AF fixtures
@@ -352,27 +379,36 @@ def _parse_zip(val: dict, game: dict, sport: str, period: str,
                                 {"home": ml[1], "away": ml[3]},
                                 fetched_at=fetched_at))
 
-    if sport in ("basketball", "soccer", "tennis", "americanfootball"):
+    # Hockey's full-game spread and total are REGULATION (Pinnacle prices no
+    # spread or total at all on its incl-OT period 0), so the period label for
+    # this sport's whole-game rows is REG. Sub-period rows keep the period they
+    # were fetched under. The distinction is invisible at |line| >= 1.5, where
+    # sudden death makes the two conventions the same bet, and 1xbet offers no
+    # half-goal hockey handicap at all — its ladder runs -5.5..+2.5 with no
+    # ±0.5 rung — so only the integer lines can ever disagree.
+    full_game = "REG" if sport == "icehockey" and period == "FT" else period
+
+    if sport in ("basketball", "soccer", "tennis", "americanfootball", "icehockey"):
         # tennis: G=17 = GAMES total (1.45pp median vs Lider 'Total', n=41),
         # G=2 = GAMES handicap side-signed (0.99pp, n=64) — verified 2026-07-11
         # by name+time pairing vs Lider (1xbet has no SR ids).
         for line, (h, a) in _spread_rows(ge.get(2, [])).items():
-            rows.append(_mk(game, sport, "spread", period,
+            rows.append(_mk(game, sport, "spread", full_game,
                             {"home": h, "away": a}, line=line, fetched_at=fetched_at))
         for line, (o_, u) in _ou_map(ge.get(17, []), 9, 10).items():
-            rows.append(_mk(game, sport, "total", period,
+            rows.append(_mk(game, sport, "total", full_game,
                             {"over": o_, "under": u}, line=line, fetched_at=fetched_at))
 
     # team totals: T11-14 (not 9/10!). American football ships the same codes
     # (G=15 T11/12 home, G=62 T13/14 away) and Pinnacle prices the counterpart,
     # so unlike basketball these rows have a match partner.
-    if sport in ("basketball", "americanfootball"):
+    if sport in ("basketball", "americanfootball", "icehockey"):
         for line, (o_, u) in _ou_map(ge.get(15, []), 11, 12).items():
-            rows.append(_mk(game, sport, "team_total", period,
+            rows.append(_mk(game, sport, "team_total", full_game,
                             {"over": o_, "under": u}, line=line,
                             team_side="home", fetched_at=fetched_at))
         for line, (o_, u) in _ou_map(ge.get(62, []), 13, 14).items():
-            rows.append(_mk(game, sport, "team_total", period,
+            rows.append(_mk(game, sport, "team_total", full_game,
                             {"over": o_, "under": u}, line=line,
                             team_side="away", fetched_at=fetched_at))
 
@@ -485,11 +521,16 @@ async def fetch_xbet_americanfootball(*, concurrency: int = 10) -> list[Odds]:
     return await asyncio.to_thread(_fetch_sport_sync, "americanfootball", True)
 
 
+async def fetch_xbet_icehockey(*, concurrency: int = 10) -> list[Odds]:
+    return await asyncio.to_thread(_fetch_sport_sync, "icehockey", True)
+
+
 if __name__ == "__main__":   # smoke: python -m src.scrapers.xbet [sport]
     import sys
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     sport = sys.argv[1] if len(sys.argv) > 1 else "basketball"
     fn = {"basketball": fetch_xbet_basketball, "soccer": fetch_xbet_soccer,
+          "icehockey": fetch_xbet_icehockey,
           "tennis": fetch_xbet_tennis,
           "americanfootball": fetch_xbet_americanfootball}[sport]
     odds = asyncio.run(fn())

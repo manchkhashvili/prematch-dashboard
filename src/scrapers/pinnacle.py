@@ -85,6 +85,11 @@ SPORT_ID_TENNIS = 33  # verify on first live run — adjust if Pinnacle ships te
 # Confirmed 2026-08-12 from /0.1/sports: id 15, 393 matchups, leagues
 # NCAA / NFL / NFL Pre Season / Canadian Football.
 SPORT_ID_AMERICANFOOTBALL = 15
+# Pinnacle calls it "Hockey"; there is no separate ice/field split (field hockey
+# is id 13 and prices nothing). 47 matchups on 2026-08-27 across 8 leagues,
+# 30 of them World Club Friendlies — the board multiplies once the NHL season
+# opens in late September.
+SPORT_ID_ICEHOCKEY = 19
 
 # Per-sport Referer mostly cosmetic — Pinnacle's WAF doesn't enforce it
 # strictly — but matches what a real user would send. Other headers shared.
@@ -116,6 +121,39 @@ LEAGUE_SKIP = (
 # not in PERIOD_MAP so the filter `period_int not in PERIOD_MAP` skips it.
 PERIOD_MAP: dict[int, str] = {0: "FT", 1: "H1"}
 
+# ...except the ints are NOT sport-agnostic, which the board only reveals once a
+# sport with a regulation/overtime split arrives. For hockey:
+#
+#   period 0   full game INCLUDING overtime and the shootout — moneyline only
+#   period 6   REGULATION, the 60 minutes — 3-way ML, spread, total, team_total
+#   period 1   1st period (there is no period 2 or 3 on the prematch board)
+#
+# So the shared map would (a) read period 1 as "first half", a thing hockey does
+# not have, and (b) drop period 6 entirely for want of an entry — and period 6
+# is where the sport is: 129 spreads, 115 totals, 39 three-way moneylines and 26
+# team totals on the live board 2026-08-27, against 32 moneylines at period 0.
+# Silently discarding 63 % of Pinnacle's hockey board.
+#
+# Which int is regulation was verified, not assumed, because guessing it wrong
+# produces WRONG rows rather than missing ones — a 60-minute total scored
+# against a full-game one on every event. Overtime cannot be reached except
+# through a regulation tie, so the two moneylines are boxed:
+#
+#     P(win reg)  <=  P(win incl OT)  <=  P(win reg) + P(tie)
+#
+# Across all 64 (event, side) pairs on the board that price both: zero
+# violations in either direction, and the implied P(win in OT | tied after 60)
+# came out with median 0.502 (p10 0.433, p90 0.567). That conditional has to be
+# a coin flip, and no wrong period assignment produces one by accident.
+PERIOD_MAP_BY_SPORT: dict[str, dict[int, str]] = {
+    "icehockey": {0: "FT", 6: "REG", 1: "P1", 2: "P2", 3: "P3"},
+}
+
+
+def period_map_for(sport_name: str) -> dict[int, str]:
+    """The period int → Period mapping for one sport, defaulting to the shared one."""
+    return PERIOD_MAP_BY_SPORT.get(sport_name, PERIOD_MAP)
+
 # Allowed market types — Phase 2 added "team_total" for soccer Home/Away
 # Team Total. Kept as a UNION across sports for back-compat with any
 # external code importing it. Per-sport gating happens via
@@ -137,6 +175,11 @@ ALLOWED_MARKET_TYPES_BY_SPORT: dict[str, set[str]] = {
     # (incl. overtime)" / "AwayTeam Total (incl. overtime)", so both legs of
     # the pair exist and the rows are matchable rather than phantom.
     "americanfootball": {"moneyline", "spread", "total", "team_total"},
+    # Phase 3.3 — ice hockey. All four, and team_total earns its place the same
+    # way AF's did: Pinnacle ships 26 side=home/away entries at period 6 and CB
+    # prices "Home Team Total" / "Away Team total*" on 89 events, so both legs
+    # of the pair exist.
+    "icehockey": {"moneyline", "spread", "total", "team_total"},
 }
 
 
@@ -393,6 +436,23 @@ async def fetch_pinnacle_americanfootball(*, concurrency: int = 10) -> list[Odds
     )
 
 
+async def fetch_pinnacle_icehockey(*, concurrency: int = 10) -> list[Odds]:
+    """Fetch all prematch ice-hockey Odds.
+
+    The sport with two full-game markets. Period 6 is REGULATION and carries
+    the 3-way moneyline, the puck line, totals and team totals; period 0 is the
+    same game INCLUDING overtime and the shootout and carries the 2-way
+    moneyline only; period 1 is the opening period. See PERIOD_MAP_BY_SPORT for
+    how that was verified and what merging the two would cost.
+
+    No child matchups — the hockey board carries zero `parentId` entries, so
+    the corners/games folding path is inert here as it is for AF.
+    """
+    return await _fetch_pinnacle_for_sport(
+        SPORT_ID_ICEHOCKEY, "icehockey", concurrency=concurrency,
+    )
+
+
 # ── Per-league failure tracker (keys are (sport_id, league_id) tuples) ────────
 def _league_in_cooldown(key: tuple[int, int]) -> bool:
     until = _skip_until.get(key)
@@ -480,7 +540,8 @@ def _build_odds_for_league(
         if info is None:
             continue
         period_int = mkt.get("period")
-        if period_int not in PERIOD_MAP:
+        period_map = period_map_for(sport_name)
+        if period_int not in period_map:
             continue
         mtype = (mkt.get("type") or "").lower()
 
@@ -606,7 +667,7 @@ def _build_odds_for_league(
                 home=info["home"],
                 away=info["away"],
                 market_type=mtype,
-                period=PERIOD_MAP[period_int],
+                period=period_map[period_int],
                 selections=selections,
                 fetched_at=fetched_at,
                 line=line,

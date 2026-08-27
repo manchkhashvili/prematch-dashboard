@@ -73,7 +73,7 @@ SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_s
 # which no book toggle reaches. Switching a sport off is the only way to stop
 # ALL of its work without a restart; SPORTS= still decides what exists at boot,
 # and a sport not enabled there simply never appears here.
-SPORTS = ("basketball", "soccer", "tennis", "americanfootball")
+SPORTS = ("basketball", "soccer", "tennis", "americanfootball", "icehockey")
 
 # Cadence knobs: key -> (default_factory, min_sec, max_sec)
 CADENCES: dict[str, tuple] = {

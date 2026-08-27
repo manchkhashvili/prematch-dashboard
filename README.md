@@ -82,12 +82,12 @@ python main.py --once --min-edge 5
 
 ```bash
 # All sports in list-only mode — lightest config, ~30 s/cycle
-SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list python main.py
+SPORTS=basketball:list,soccer:list,tennis:list,americanfootball:list,icehockey:full python main.py
 
 # Basketball + American football with full detail expansion, the rest list-only.
 # AF is affordable in full mode: ~180 games, ~80 s for a whole-board detail sweep
 # (tennis is 500+ games, hence list).
-SPORTS=basketball:full,soccer:list,tennis:list,americanfootball:full python main.py
+SPORTS=basketball:full,soccer:list,tennis:list,americanfootball:full,icehockey:full python main.py
 
 # Basketball only, full
 SPORTS=basketball python main.py
