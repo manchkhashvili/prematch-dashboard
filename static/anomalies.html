@@ -35,6 +35,10 @@
       Min % off
       <input type="number" id="min-pct" value="0.5" step="0.5" min="0" />
     </label>
+    <label title="Hide findings whose bettable leg pays more than this. Longshots are where a book's margin is worst — measured across both boards, the effective margin runs ~16% on outcomes above 40% implied probability and 68-238% below 5%. A flag at 40.0 is noise, not opportunity. Blank or 0 = no cap. Rows that name no single price are always kept.">
+      Max odds
+      <input type="number" id="max-odds" step="1" min="0" placeholder="off" />
+    </label>
     <label class="alert-controls" title="Show handicap (spread) ladders only; hide totals.">
       <input type="checkbox" id="spread-only" />
       Spread only
@@ -84,6 +88,11 @@
           <input type="number" id="lad-alert-step" step="0.5" min="0" placeholder="off" />
           <span class="kind-unit">pts</span>
         </div>
+        <div class="cfg-row">
+          <label for="lad-alert-max-odds" title="Never chime when the flagged rung pays more than this, whatever the other criteria say. Unlike the boxes above this is a VETO, not another way to fire.">Never above odds</label>
+          <input type="number" id="lad-alert-max-odds" step="1" min="0" placeholder="off" />
+          <span class="kind-unit">dec</span>
+        </div>
       </fieldset>
 
       <fieldset id="cons-alert-set">
@@ -97,6 +106,11 @@
         <div class="cfg-row">
           <label for="cons-alert-default">Default severity ≥</label>
           <input type="number" id="cons-alert-default" step="0.5" min="0" />
+        </div>
+        <div class="cfg-row">
+          <label for="cons-alert-max-odds" title="Never chime when the leg you would back pays more than this. A veto, not another way to fire: it overrides every per-check threshold below. Checks that name no single price are unaffected.">Never above odds</label>
+          <input type="number" id="cons-alert-max-odds" step="1" min="0" placeholder="off" />
+          <span class="kind-unit">dec</span>
         </div>
         <details>
           <summary class="cfg-note" style="cursor:pointer;">Per-check thresholds</summary>
@@ -173,8 +187,42 @@ let meta = {};
 let rows = [];
 const minPctInput = document.getElementById("min-pct");
 const spreadOnly = document.getElementById("spread-only");
+const maxOddsInput = document.getElementById("max-odds");
 minPctInput.addEventListener("change", fetchAndRender);
 spreadOnly.addEventListener("change", fetchAndRender);
+// Persist the odds cap: it is a standing preference about what counts as an
+// opportunity, not a per-visit tweak, and retyping it every page load is how
+// a filter stops getting used.
+const MAX_ODDS_KEY = "anom_max_odds";
+try {
+  const saved = localStorage.getItem(MAX_ODDS_KEY);
+  if (saved !== null) maxOddsInput.value = saved;
+} catch (e) {}
+maxOddsInput.addEventListener("change", () => {
+  try { localStorage.setItem(MAX_ODDS_KEY, maxOddsInput.value.trim()); } catch (e) {}
+  fetchAndRender();
+});
+
+/* The odds cap, applied to both tables.
+ *
+ * A row is dropped only when it names a price ABOVE the cap. A row that names
+ * no price at all is kept: several consistency checks describe a relationship
+ * rather than one bettable leg, and silently hiding those would turn a noise
+ * filter into a coverage hole.
+ */
+function oddsCap() {
+  const v = parseFloat(maxOddsInput.value);
+  return isNaN(v) || v <= 0 ? null : v;
+}
+function ladderWithinCap(r, cap) {
+  if (cap === null) return true;
+  const o = [r.odds_lo, r.odds_hi].filter(x => x != null);
+  return o.length === 0 || Math.max(...o) <= cap;
+}
+function consWithinCap(f, cap) {
+  if (cap === null) return true;
+  return f.odds == null || f.odds <= cap;
+}
 
 // Scan-refresh chime toggle (read by the shared alerts.js). Default ON.
 const scanAlert = document.getElementById("scan-alert");
@@ -269,12 +317,17 @@ async function fetchAndRender() {
   try {
     const [res] = await Promise.all([fetch(url), Marks.load()]);
     const j = await res.json();
-    meta = j; rows = j.anomalies || [];
+    const cap = oddsCap();
+    meta = j;
+    rows = (j.anomalies || []).filter(r => ladderWithinCap(r, cap));
+    const cons = (j.consistency || []).filter(f => consWithinCap(f, cap));
+    meta.hidden_by_odds = (j.anomalies || []).length - rows.length
+                        + (j.consistency || []).length - cons.length;
     render();
-    renderConsistency(j.consistency || []);
+    renderConsistency(cons);
     // Two tables on this page — BOTH need binding or the Mark button renders
     // but does nothing on whichever one was missed.
-    const rerender = () => { render(); renderConsistency(j.consistency || []); };
+    const rerender = () => { render(); renderConsistency(cons); };
     Marks.bind(document.getElementById("anom-body"), rerender);
     Marks.bind(document.getElementById("cons-body"), rerender);
   } catch (e) {
@@ -319,6 +372,11 @@ const LAD_STEP    = "anom_ladder_alert_step";
 const CONS_ON     = "anom_cons_alert_enabled";
 const CONS_DEF    = "anom_cons_alert_default";
 const CONS_KINDS  = "anom_cons_alert_kinds";
+// Odds vetoes (2026-08-27). Longshots are where the book's margin is worst, so
+// a flag on a 40.0 leg is noise however big its severity looks. These GATE the
+// other criteria rather than joining them.
+const LAD_MAXODDS  = "anom_ladder_alert_max_odds";
+const CONS_MAXODDS = "anom_cons_alert_max_odds";
 
 // Severity means a different quantity per check, so the panel labels each one.
 // Verified against the code that builds the flag, not guessed:
@@ -369,6 +427,8 @@ const ladDelta = document.getElementById("lad-alert-delta");
 const ladStep  = document.getElementById("lad-alert-step");
 const consOn   = document.getElementById("cons-alert-on");
 const consDef  = document.getElementById("cons-alert-default");
+const ladMaxOdds  = document.getElementById("lad-alert-max-odds");
+const consMaxOdds = document.getElementById("cons-alert-max-odds");
 
 // Defaults chosen to line up with what the tables already highlight: the % off
 // column goes bold at 10, and consClass() goes bold at severity 12.
@@ -378,6 +438,8 @@ ladDelta.value  = lsGet(LAD_DELTA, "");
 ladStep.value   = lsGet(LAD_STEP, "");
 consOn.checked  = lsGet(CONS_ON, "0") === "1";
 consDef.value   = lsGet(CONS_DEF, "12");
+ladMaxOdds.value  = lsGet(LAD_MAXODDS, "");
+consMaxOdds.value = lsGet(CONS_MAXODDS, "");
 
 function renderKindGrid() {
   const cfg = loadKindCfg();
@@ -418,6 +480,8 @@ function syncAlertCfg() {
   lsSet(LAD_PCT, ladPct.value.trim());
   lsSet(LAD_DELTA, ladDelta.value.trim());
   lsSet(LAD_STEP, ladStep.value.trim());
+  lsSet(LAD_MAXODDS, ladMaxOdds.value.trim());
+  lsSet(CONS_MAXODDS, consMaxOdds.value.trim());
   lsSet(CONS_ON, consOn.checked ? "1" : "0");
   lsSet(CONS_DEF, consDef.value.trim());
   saveKindCfg(readKindGrid());
@@ -563,8 +627,12 @@ function render() {
     scanInfo += ` · scanned ${c.games} games / ${c.ladders} ladders / ${c.rungs} rungs`;
     if (c.games_without_ladder) scanInfo += ` (${c.games_without_ladder} w/o ladder)`;
   }
+  // Say how many rows the odds cap removed. A filter that hides rows without
+  // saying so reads as a scan that found nothing.
+  const hidden = meta.hidden_by_odds
+    ? ` · ${meta.hidden_by_odds} hidden by max odds` : "";
   document.getElementById("row-count").textContent =
-    `${rows.length} anomaly${rows.length === 1 ? "" : "ies"}${scanInfo}`;
+    `${rows.length} anomaly${rows.length === 1 ? "" : "ies"}${hidden}${scanInfo}`;
 
   if (!meta.enabled) {
     // Switchable at runtime since 2026-07-26 — point at the Config tab rather

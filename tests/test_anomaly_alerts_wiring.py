@@ -31,6 +31,11 @@ SHARED_KEYS = [
     "anom_cons_alert_enabled",
     "anom_cons_alert_default",
     "anom_cons_alert_kinds",
+    # Odds vetoes (2026-08-27). Same failure mode as every key above: a typo
+    # leaves the panel saving a cap that nothing enforces, and the user sees
+    # longshot chimes they thought they had switched off.
+    "anom_ladder_alert_max_odds",
+    "anom_cons_alert_max_odds",
 ]
 
 

@@ -532,7 +532,20 @@ def _mask_prob(mask, atom_p):
 
 
 # ── flags ───────────────────────────────────────────────────────────────────
-def _flag(kind, home, away, league, eid, detail, severity, start=None, periods="FT"):
+def _flag(kind, home, away, league, eid, detail, severity, start=None,
+          periods="FT", odds=None):
+    """One flag row.
+
+    `odds` is the price of the leg a bettor would actually back — the long side
+    of a duplicate, the superset of a containment, the cell being covered. It
+    exists so the dashboard can filter on it: a flag whose bettable leg pays 40
+    is a longshot, and longshots are where the book's margin is worst (measured
+    on the movement store: 16 % margin above 40 % implied probability, 68 % at
+    2-5 %). Filtering them out removes noise rather than opportunity.
+
+    Kept as a NUMBER rather than left to be scraped back out of `detail`,
+    because the detail is prose and a price is data.
+    """
     return {
         "book": "liderbet", "sport": "soccer", "kind": kind,
         "match_label": f"{home} — {away}", "home": home, "away": away,
@@ -541,6 +554,7 @@ def _flag(kind, home, away, league, eid, detail, severity, start=None, periods="
         "periods": periods,
         "detail": f"[liderbet] {detail}", "severity": round(severity, 1),
         "outcome": None,
+        "odds": round(float(odds), 3) if odds is not None else None,
     }
 
 
@@ -588,7 +602,7 @@ def analyse_match(g, home, away, league, eid, start=None,
                     f"{per} line {line:g}: the same outcome is priced twice — "
                     f"'{hi_lab}' @ {hi_v:g} vs '{lo_lab}' @ {lo_v:g} ({gap:.1f}% apart); "
                     f"model fair {1.0 / p:.2f}, so the long side is EV {ev:+.1f}%",
-                    ev, start, periods=per))
+                    ev, start, periods=per, odds=hi_v))
         if atom_p is not None:
             for m, v, lab, _ex in _dedup(raw):
                 if m in covered:
@@ -603,7 +617,7 @@ def analyse_match(g, home, away, league, eid, start=None,
                         "combo_fair", home, away, league, eid,
                         f"{per} line {line:g}: '{lab}' @ {v:g} vs model fair "
                         f"{1.0 / p:.2f} (P={p:.3f}) — EV {ev:+.1f}%",
-                        ev, start, periods=per))
+                        ev, start, periods=per, odds=v))
         bl = total_bets(g, per, line)
         if len(bl) < 2:
             continue
@@ -615,7 +629,8 @@ def analyse_match(g, home, away, league, eid, start=None,
                 out.append(_flag(
                     "combo_cover", home, away, league, eid,
                     f"{per} line {line:g}: {legs} — outlay {got[0]:.4f}, "
-                    f"locked {edge:.2f}%", edge, start, periods=per))
+                    f"locked {edge:.2f}%", edge, start, periods=per,
+                    odds=max(o for _l, o in got[1])))
         # A containment row invites you to back the SUPERSET, so the superset
         # has to be worth backing. Without that gate the check fires on pairs
         # where both prices are bad and the gap is just one of them being
@@ -637,7 +652,7 @@ def analyse_match(g, home, away, league, eid, start=None,
                 f"{per} line {line:g}: '{la}' @ {oa:g} is contained in "
                 f"'{lb}' @ {ob:g} — the superset pays {gain:.2f}% more, and is "
                 f"EV {ev_sup:+.1f}% against model fair {1.0 / p_sup:.2f}",
-                ev_sup, start, periods=per))
+                ev_sup, start, periods=per, odds=ob))
     hb = htft_bets(g)
     if len(hb) >= 4:
         got = min_cover(hb, H_FULL, 9)
@@ -647,13 +662,14 @@ def analyse_match(g, home, away, league, eid, start=None,
                 legs = "  +  ".join(f"{l} @ {o:g}" for l, o in got[1])
                 out.append(_flag("combo_cover", home, away, league, eid,
                                  f"HT/FT grid: {legs} — outlay {got[0]:.4f}, "
-                                 f"locked {edge:.2f}%", edge, start, periods="HT/FT"))
+                                 f"locked {edge:.2f}%", edge, start, periods="HT/FT",
+                                 odds=max(o for _l, o in got[1])))
         for la, oa, lb, ob, gain in containment(hb):
             if gain >= min_dom:
                 out.append(_flag("combo_dominance", home, away, league, eid,
                                  f"HT/FT: '{la}' @ {oa:g} is contained in '{lb}' "
                                  f"@ {ob:g} — the superset pays {gain:.2f}% more",
-                                 gain, start, periods="HT/FT"))
+                                 gain, start, periods="HT/FT", odds=ob))
     return out
 
 

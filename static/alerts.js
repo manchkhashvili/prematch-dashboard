@@ -103,6 +103,11 @@
   const CONS_ON     = "anom_cons_alert_enabled";
   const CONS_DEF    = "anom_cons_alert_default";
   const CONS_KINDS  = "anom_cons_alert_kinds";
+  // Odds vetoes (2026-08-27). Written by the same panel; see the note there.
+  // These are NOT another way to fire — they gate everything else, because a
+  // longshot flag is noise no matter how large its severity is.
+  const LAD_MAXODDS  = "anom_ladder_alert_max_odds";
+  const CONS_MAXODDS = "anom_cons_alert_max_odds";
   const LAD_SEEN_KEY    = "anom_ladder_seen_v1";
   const LAD_SEEDED_KEY  = "anom_ladder_seeded";
   const CONS_SEEN_KEY   = "anom_cons_seen_v1";
@@ -778,7 +783,25 @@
 
   // OR across the filled criteria, exactly as the panel describes it. Every
   // criterion blank → nothing fires (rather than everything).
+  /* The odds veto, shared by both feeds.
+   *
+   * Returns false only when the row names a price ABOVE the cap. A row with no
+   * price is never vetoed: several consistency checks describe a relationship
+   * rather than one bettable leg, and silently muting those would turn a noise
+   * filter into a coverage hole.
+   */
+  function withinOddsCap(odds, key) {
+    const cap = cfgNum(key);
+    if (cap === null || cap <= 0) return true;
+    if (odds === null || odds === undefined) return true;
+    return odds <= cap;
+  }
+
   function ladderPasses(r) {
+    // Veto first: it overrides every criterion below, so an expensive rung
+    // cannot chime by clearing one of them.
+    const o = [r.odds_lo, r.odds_hi].filter(x => x != null);
+    if (o.length && !withinOddsCap(Math.max.apply(null, o), LAD_MAXODDS)) return false;
     const pct = cfgNum(LAD_PCT), delta = cfgNum(LAD_DELTA), step = cfgNum(LAD_STEP);
     if (pct   !== null && r.pct   != null && r.pct   >= pct)   return true;
     if (delta !== null && r.delta != null && r.delta >= delta) return true;
@@ -787,6 +810,7 @@
   }
 
   function consPasses(f, kindCfg, dflt) {
+    if (!withinOddsCap(f.odds, CONS_MAXODDS)) return false;
     const k = kindCfg[f.kind] || {};
     if (k.on === false) return false;               // check silenced
     const bar = (k.sev === null || k.sev === undefined) ? dflt : k.sev;
@@ -908,6 +932,7 @@
   // fine. tests/test_anomaly_alerts_logic.py drives these under node.
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { ladderPasses, consPasses, evaluateFeed, cfgNum,
+                       withinOddsCap, LAD_MAXODDS, CONS_MAXODDS,
                        ladderKey, consKey, RE_ALERT_FACTOR,
                        readLayers, normaliseGates, matchingLayers,
                        effectiveStep, oppQueryFloor, passesGates,

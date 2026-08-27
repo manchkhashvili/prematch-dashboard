@@ -183,3 +183,54 @@ def test_endpoint_does_no_pinnacle_enrichment():
 def test_empty_state_is_a_clean_empty_feed():
     j = _get()
     assert j["ladders"] == [] and j["consistency"] == []
+
+
+# ── every scan that can fill the tab must reach the alert feed too ───────────
+# The Lider combo scan was wired into /api/anomalies and NOT into the alert
+# feed. So its flags were on screen, configurable in the alert grid, and
+# incapable of ever firing — 81 of the 97 flags on the board when this was
+# found. A settings panel that can configure a feed which never emits is worse
+# than no panel, because it says otherwise.
+
+def _lider_flag(**kw):
+    base = {"book": "liderbet", "sport": "soccer", "kind": "combo_duplicate",
+            "match_label": "A — B", "book_event_id": "E1", "periods": "FT",
+            "outcome": None, "severity": 30.0, "odds": 6.5}
+    base.update(kw)
+    return base
+
+
+def test_lider_combo_flags_reach_the_alert_feed(monkeypatch):
+    monkeypatch.setattr(app, "_lider_combo_flags", [_lider_flag()])
+    rows = app._consistency_alert_rows()
+    assert any(r["kind"] == "combo_duplicate" for r in rows), \
+        "lider combo flags are on the tab but invisible to alerts"
+
+
+def test_the_alert_row_carries_the_bettable_price(monkeypatch):
+    """Without it the client cannot gate on odds, which is the whole point of
+    the veto: a flag on a 40.0 leg is noise however big its severity."""
+    monkeypatch.setattr(app, "_lider_combo_flags", [_lider_flag(odds=6.5)])
+    row = next(r for r in app._consistency_alert_rows()
+               if r["kind"] == "combo_duplicate")
+    assert row["odds"] == 6.5
+
+
+def test_a_flag_without_a_price_still_reaches_the_feed(monkeypatch):
+    """`odds` is optional — checks that name a relationship rather than one leg
+    must not be dropped on the way to the client."""
+    monkeypatch.setattr(app, "_lider_combo_flags", [_lider_flag(odds=None)])
+    row = next(r for r in app._consistency_alert_rows()
+               if r["kind"] == "combo_duplicate")
+    assert row["odds"] is None
+
+
+def test_the_feed_reports_enabled_when_only_the_lider_scan_is_on(monkeypatch):
+    """The client bails on `enabled: false` before reading its own rows, so a
+    scan missing from this disjunction can never fire even once its flags are
+    in the feed."""
+    from src import runtime_config
+    monkeypatch.setattr(runtime_config, "is_on",
+                        lambda group, name: name == "lider_combo")
+    feed = asyncio.run(app.api_anomalies_alerts())
+    assert feed["enabled"] is True

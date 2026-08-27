@@ -76,9 +76,10 @@ def test_a_missing_field_on_the_row_does_not_fire():
 
 # ── consistency: per-check bar, default inheritance, silencing ───────────────
 
-def cons_passes(flag: dict, kinds: dict, default):
+def cons_passes(flag: dict, kinds: dict, default, cfg: dict | None = None):
     return run_js(
-        f"out = A.consPasses({json.dumps(flag)}, {json.dumps(kinds)}, {json.dumps(default)});")
+        f"out = A.consPasses({json.dumps(flag)}, {json.dumps(kinds)}, {json.dumps(default)});",
+        {"anom_cons_alert_max_odds": "20"} if cfg is None else cfg)
 
 
 F = {"kind": "htft_combo", "severity": 9.0}
@@ -203,3 +204,63 @@ def test_consistency_key_separates_outcomes_of_the_same_check():
     a = run_js(f"out = A.consKey({json.dumps({**base, 'outcome': '1/1'})});")
     b = run_js(f"out = A.consKey({json.dumps({**base, 'outcome': '2/2'})});")
     assert a != b
+
+
+# ── the odds veto (2026-08-27) ───────────────────────────────────────────────
+# The owner's complaint: "most of the liderbet anomalies are 40+ odds which is
+# noise not opportunity". Longshots are where a book's margin is worst — the
+# movement store measures ~16 % above 40 % implied probability against 68-238 %
+# below 5 % — so a flag on a 40.0 leg is noise however large its severity. The
+# veto GATES the other criteria rather than joining them, which is the part
+# most likely to be got wrong.
+
+def test_a_long_price_cannot_chime_by_clearing_another_criterion():
+    """The whole point: severity is huge, the leg pays 45, and it stays silent."""
+    assert cons_passes({"kind": "combo_duplicate", "severity": 99.0, "odds": 45.0},
+                       {}, 5) is False
+    assert ladder_passes({"pct": 99.0, "odds_lo": 45.0, "odds_hi": 50.0},
+                         {"anom_ladder_alert_pct": "5",
+                          "anom_ladder_alert_max_odds": "20"}) is False
+
+
+def test_a_short_price_still_chimes_normally():
+    assert cons_passes({"kind": "combo_duplicate", "severity": 9.0, "odds": 3.4},
+                       {}, 5) is True
+    assert ladder_passes({"pct": 9.0, "odds_lo": 1.9, "odds_hi": 2.1},
+                         {"anom_ladder_alert_pct": "5",
+                          "anom_ladder_alert_max_odds": "20"}) is True
+
+
+def test_a_row_that_names_no_price_is_never_vetoed():
+    """Several checks describe a relationship rather than one bettable leg.
+    Muting those would turn a noise filter into a coverage hole."""
+    assert cons_passes({"kind": "ml_vs_spread", "severity": 9.0}, {}, 5) is True
+    assert cons_passes({"kind": "ml_vs_spread", "severity": 9.0, "odds": None},
+                       {}, 5) is True
+
+
+def test_a_blank_cap_vetoes_nothing():
+    """Blank means off, consistent with every other box on the panel."""
+    assert cons_passes({"kind": "combo_duplicate", "severity": 9.0, "odds": 500.0},
+                       {}, 5, cfg={}) is True
+
+
+def test_zero_is_treated_as_off_not_as_veto_everything():
+    """0 in a "max" box reads as "no cap" — the opposite reading would silence
+    the entire feed from a stray keystroke."""
+    assert run_js('out = A.withinOddsCap(45.0, "anom_cons_alert_max_odds");',
+                  {"anom_cons_alert_max_odds": "0"}) is True
+
+
+def test_the_cap_is_inclusive():
+    assert run_js('out = A.withinOddsCap(20.0, "anom_cons_alert_max_odds");',
+                  {"anom_cons_alert_max_odds": "20"}) is True
+    assert run_js('out = A.withinOddsCap(20.01, "anom_cons_alert_max_odds");',
+                  {"anom_cons_alert_max_odds": "20"}) is False
+
+
+def test_the_ladder_veto_uses_the_longer_of_the_two_rungs():
+    """A pair straddling the cap is still a longshot bet on one side."""
+    assert ladder_passes({"pct": 99.0, "odds_lo": 2.0, "odds_hi": 60.0},
+                         {"anom_ladder_alert_pct": "5",
+                          "anom_ladder_alert_max_odds": "20"}) is False

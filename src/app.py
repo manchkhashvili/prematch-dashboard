@@ -1518,6 +1518,11 @@ def _consistency_to_dict(f, book: str = "cb") -> dict:
         "start_time": f.start_time.isoformat() if f.start_time else None,
         "kind": f.kind, "periods": f.periods, "detail": f.detail,
         "severity": f.severity, "outcome": f.outcome,
+        # Present so every consistency row has the key, whatever built it.
+        # Checks that identify one bettable leg set it; the rest leave it None
+        # and the odds filter treats them as unfilterable rather than dropping
+        # them, because "no price" is not "a bad price".
+        "odds": getattr(f, "odds", None),
     }
 
 
@@ -2853,11 +2858,20 @@ def _ladder_alert_rows() -> list[dict]:
 
 
 def _consistency_alert_rows() -> list[dict]:
-    """Compact consistency rows for the alert poller, most severe first."""
+    """Compact consistency rows for the alert poller, most severe first.
+
+    `_lider_combo_flags` belongs here and was missing until 2026-08-27. The
+    Anomalies TAB has always included it (see api_anomalies), so the Lider combo
+    checks were visible on screen, configurable in the alert grid, and silently
+    incapable of ever firing — 81 of the 97 flags on the board at the time. A
+    feed that a settings panel can configure but never emits is worse than no
+    feed, because the panel says otherwise.
+    """
     extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
     book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
     src = (_recent_consistency + _betlive_consistency + _soft_scan_flags
-           + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons)
+           + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
+           + _lider_combo_flags)
     out = [{
         "book": f.get("book") or "cb",
         "sport": f.get("sport"),
@@ -2867,6 +2881,9 @@ def _consistency_alert_rows() -> list[dict]:
         "periods": f.get("periods"),
         "outcome": f.get("outcome"),
         "severity": f.get("severity"),
+        # The price of the leg you would actually back, so the client can gate
+        # on it. None where the check does not identify a single bettable leg.
+        "odds": f.get("odds"),
     } for f in src]
     out.sort(key=lambda r: (r["severity"] or 0.0), reverse=True)
     return out[:ALERT_FEED_CAP]
@@ -2886,10 +2903,15 @@ async def api_anomalies_alerts() -> dict:
     its seen-set anyway. The server just hands over the compact rows.
     """
     return {
+        # Every scan that can put a row in the feed has to be able to make this
+        # true, or the client bails before reading its own rows. `lider_combo`
+        # was missing, so with only that scan enabled the poller returned early
+        # and nothing could ever fire.
         "enabled": (runtime_config.is_on("scans", "anomaly")
                     or runtime_config.is_on("scans", "anomaly_extra")
                     or runtime_config.is_on("scans", "betlive_anomaly")
-                    or runtime_config.is_on("scans", "soft_scan")),
+                    or runtime_config.is_on("scans", "soft_scan")
+                    or runtime_config.is_on("scans", "lider_combo")),
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "ladders": _ladder_alert_rows(),
         "consistency": _consistency_alert_rows(),
