@@ -193,12 +193,20 @@ const BOOK_SLOT = { crystalbet: "cb" };  // state slot name differs for CB
 const SPORT_LABEL = {
   basketball: "Basketball", soccer: "Soccer",
   tennis: "Tennis", americanfootball: "American football",
+  icehockey: "Ice hockey",
 };
+// What each sport COSTS, so the switch can be used without guessing. A sport
+// toggle stops that sport at every book — CrystalBet, Pinnacle, 1xbet and the
+// four soft books — plus its ladder scans.
 const SPORT_DESC = {
   basketball: "CB ladder scan runs the whole board here (~30 games).",
   soccer: "By far the heaviest — ~1700 games in view, a 13.6 MB list panel per cycle.",
   tennis: "~170 games in the scan horizon; expands at ~1.9s each.",
   americanfootball: "Weekly slots, so the 7-day horizon usually leaves ~20 games.",
+  icehockey: "Needs FULL detail (the incl-OT moneyline is detail-page only): "
+           + "~23s per CB price cycle + ~13s per anomaly sweep, ~37 games in "
+           + "the 7-day horizon. Ships OFF — switch on when the NHL season "
+           + "opens; the preseason board priced no +EV leg at all.",
 };
 
 let META = {}, CFG = {};

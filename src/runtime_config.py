@@ -75,6 +75,20 @@ SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_s
 # and a sport not enabled there simply never appears here.
 SPORTS = ("basketball", "soccer", "tennis", "americanfootball", "icehockey")
 
+# Sports that ship OFF and must be switched on deliberately.
+#
+# Adding a sport to _ALL_SPORTS makes it part of the default board, so anyone
+# running `python main.py` with no SPORTS= gets it on the next restart without
+# having asked. Ice hockey is what made that visible: it landed on a box that
+# was already saturated, and a fifth full-detail sport cost ~23 s per CB price
+# cycle plus ~13 s per anomaly sweep on top of everything else, on a board
+# whose best CB-vs-Pinnacle leg was -3.6 % (i.e. nothing to price).
+#
+# A new sport should be something you turn ON when you want it, not something
+# that quietly turns itself on. Once the toggle is set either way in the Config
+# tab the stored value wins and this default stops applying.
+SPORTS_DEFAULT_OFF = frozenset({"icehockey"})
+
 # Cadence knobs: key -> (default_factory, min_sec, max_sec)
 CADENCES: dict[str, tuple] = {
     "pinnacle_poll_sec":   (lambda: _env_int("PINNACLE_POLL_SEC", 60), 15, 3600),
@@ -169,10 +183,11 @@ def _defaults() -> dict[str, Any]:
             "setanta":    _env_on("SETANTA"),
             "xbet":       _env_on("XBET"),
         },
-        # Default ON for every sport: the switch is a way to stop work you are
-        # already doing, not a second gate you must remember to open. What runs
-        # at boot is still decided by SPORTS=.
-        "sports": {s: True for s in SPORTS},
+        # Default ON for every established sport: the switch is a way to stop
+        # work you are already doing, not a second gate you must remember to
+        # open. What runs at boot is still decided by SPORTS=. The exception is
+        # SPORTS_DEFAULT_OFF — a newly added sport must not enrol itself.
+        "sports": {s: s not in SPORTS_DEFAULT_OFF for s in SPORTS},
         "scans": {
             "anomaly":         _env_on("ANOMALY_SCAN"),
             "anomaly_extra":   _env_on("ANOMALY_SCAN"),   # rode ANOMALY_SCAN before
@@ -260,9 +275,16 @@ def book_on(book: str) -> bool:
 
 
 def sport_on(sport: str) -> bool:
-    """Is this sport switched on? Unknown sports are ON — a sport the store has
-    never heard of must not be silently disabled by a typo in SPORTS=."""
-    return bool(load().get("sports", {}).get(sport, True))
+    """Is this sport switched on?
+
+    Unknown sports are ON — a sport the store has never heard of must not be
+    silently disabled by a typo in SPORTS=. The exception is SPORTS_DEFAULT_OFF,
+    where the point is precisely that a sport nobody has opted into stays off:
+    an existing config store written before the sport existed has no key for it,
+    so the fallback is the only thing that decides.
+    """
+    return bool(load().get("sports", {}).get(
+        sport, sport not in SPORTS_DEFAULT_OFF))
 
 
 def sport_active(sport: str) -> bool:

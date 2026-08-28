@@ -42,18 +42,27 @@ def store(tmp_path, monkeypatch):
 
 # ── the store ────────────────────────────────────────────────────────────────
 
-def test_every_sport_defaults_on(store):
+def test_every_established_sport_defaults_on(store):
     """The switch stops work you are already doing; it is not a second gate you
-    must remember to open. SPORTS= still decides what runs at boot."""
-    assert store.get()["sports"] == {s: True for s in store.SPORTS}
+    must remember to open. SPORTS= still decides what runs at boot.
+
+    The one exception is SPORTS_DEFAULT_OFF — a sport added AFTER the board was
+    settled must not enrol itself onto everyone's machine on the next restart.
+    See test_a_new_sport_ships_off_rather_than_turning_itself_on.
+    """
+    assert store.get()["sports"] == {
+        s: s not in store.SPORTS_DEFAULT_OFF for s in store.SPORTS}
     for s in store.SPORTS:
+        if s in store.SPORTS_DEFAULT_OFF:
+            continue
         assert store.sport_on(s) is True
 
 
 def test_toggling_one_sport_leaves_the_others_alone(store):
     store.update({"sports": {"soccer": False}})
     assert store.sport_on("soccer") is False
-    assert all(store.sport_on(s) for s in store.SPORTS if s != "soccer")
+    assert all(store.sport_on(s) for s in store.SPORTS
+               if s != "soccer" and s not in store.SPORTS_DEFAULT_OFF)
 
 
 def test_the_setting_persists_across_a_reload(store):
@@ -148,3 +157,66 @@ def test_the_config_page_renders_the_section():
     assert 'id="sports"' in html
     assert 'toggleRow("sports"' in html
     assert "SPORT_LIVE" in html
+
+
+# ── a new sport must not enrol itself, and must say what it costs ────────────
+
+def test_a_new_sport_ships_off_rather_than_turning_itself_on(store):
+    """Adding a sport to `_ALL_SPORTS` makes it part of the default board.
+
+    Ice hockey is what made that visible: it landed on a saturated box and cost
+    a fifth full-detail CB sweep (~23 s per price cycle, ~13 s per anomaly
+    sweep) for a board whose best CB-vs-Pinnacle leg was -3.6 % — nothing to
+    price. Someone running `python main.py` with no SPORTS= had not asked for
+    any of that.
+    """
+    assert "icehockey" in rc.SPORTS_DEFAULT_OFF
+    assert rc.sport_on("icehockey") is False
+    for established in ("basketball", "soccer", "tennis", "americanfootball"):
+        assert rc.sport_on(established) is True, established
+
+
+def test_an_explicit_choice_beats_the_default(store):
+    """The default only decides while nobody has chosen. Once the toggle is set
+    in the Config tab, the stored value wins — including switching it back off
+    for a sport that defaults on."""
+    rc.update({"sports": {"icehockey": True}})
+    assert rc.sport_on("icehockey") is True
+    rc.update({"sports": {"icehockey": False}})
+    assert rc.sport_on("icehockey") is False
+    rc.update({"sports": {"soccer": False}})
+    assert rc.sport_on("soccer") is False
+
+
+def test_an_unknown_sport_is_still_on(store):
+    """A typo in SPORTS= must not silently disable a sport. Only the explicit
+    default-off list flips that."""
+    assert rc.sport_on("quidditch") is True
+
+
+def test_every_sport_has_a_label_and_a_cost_in_the_config_tab():
+    """The switch is unusable if a sport renders as a bare key with no cost.
+
+    `toggleRow` falls back to the raw key when SPORT_LABEL has no entry, so a
+    newly added sport appears as `icehockey` with no help text — a control the
+    owner cannot make a decision with. This is the guard for the NEXT sport.
+    """
+    html = (Path(A.__file__).resolve().parent.parent / "static" / "config.html").read_text()
+    labels = _js_object_keys(html, "const SPORT_LABEL")
+    descs = _js_object_keys(html, "const SPORT_DESC")
+    for sport in rc.SPORTS:
+        assert sport in labels, f"{sport} has no SPORT_LABEL — renders as a bare key"
+        assert sport in descs, f"{sport} has no SPORT_DESC — no cost stated"
+
+
+def _js_object_keys(html: str, decl: str) -> set[str]:
+    """Keys of a `const NAME = { ... };` object literal in the page source.
+
+    Two keys can share a line (`basketball: "Basketball", soccer: "Soccer",`),
+    so this matches every `word:` that follows a brace, comma or line start
+    rather than only the first on each line.
+    """
+    import re
+    start = html.index(decl)
+    end = html.index("};", start)
+    return set(re.findall(r"[{,\n]\s*(\w+)\s*:", html[start:end]))
