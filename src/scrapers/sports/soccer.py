@@ -518,6 +518,9 @@ _RE_HTFT_EXCLUDE = re.compile(r"\band\b|&|correct|exact|\btotal\b|score|goals")
 # `2nd Half - Draw No Bet***` — a 3-way scoreline derivative, and a different
 # bet — cannot slip in on the trailing asterisks.
 _RE_DNB = re.compile(r"^(?:1st\s*half\s*-\s*)?draw no bet$")
+# "First Team To Score" — 3-way over {1, 0, 2} where 0 is "nobody scores".
+# CB ships it on ~105 of the collected soccer events.
+_RE_FTS = re.compile(r"^first team to score$")
 
 
 def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
@@ -556,6 +559,8 @@ def classify_market_title_permissive(title: str) -> Optional[MarketClassificatio
     norm = _normalize_title(title)
     if _RE_HTFT_TITLE.match(norm) and not _RE_HTFT_EXCLUDE.search(norm):
         return MarketClassification(market_type="htft", period="FT")
+    if _RE_FTS.match(norm):
+        return MarketClassification(market_type="fts", period="FT", n_way=3)
     if _RE_DNB.match(norm):
         # 2-way, and the labels are a bare "1"/"2" — which is why this is a
         # moneyline and not a spread at line 0: cb_detail's spread parser

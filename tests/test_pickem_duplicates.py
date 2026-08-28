@@ -220,3 +220,74 @@ def test_the_new_kinds_alert_by_default():
     for kind in ("pickem_duplicate", "pickem_dominance"):
         assert f"{kind}:" in labels, f"{kind} is not in the alert grid"
         assert f'"{kind}"' not in off, f"{kind} would never chime"
+
+
+# ── fts_vs_ml, and the odds band ─────────────────────────────────────────────
+
+FTS_BOARD = [
+    _o("moneyline", "FT", {"home": 2.90, "draw": 4.05, "away": 1.90},
+       section="Main result"),
+    _o("fts", "FT", {"home": 1.80, "none": 17.1, "away": 1.95},
+       section="First Team To Score"),
+]
+
+
+def test_first_team_to_score_flags_a_favourite_flip():
+    """GKS Wikielec v Concordia Elblag: the 1X2 makes home a 2.90 underdog and
+    First Team To Score makes it the 1.80 favourite to open the scoring."""
+    f = _kinds(FTS_BOARD).get("fts_vs_ml")
+    assert f is not None, "the flip was not detected"
+    assert f.outcome == "home"
+    assert f.odds == 1.8
+    assert "underdog" in f.detail and "open the scoring" in f.detail
+
+
+def test_it_needs_the_moneyline_side_to_be_decisive():
+    """A bare flip is usually two near-coin-flips landing either side of 0.500.
+    Measured over 90 events: bare flip fires on 3.3 %, flip-plus-decisive on
+    1.1 %. Two of those three bare flips had the 1X2 within 3pp of even."""
+    rows = [
+        _o("moneyline", "FT", {"home": 2.55, "draw": 3.40, "away": 2.60},
+           section="Main result"),          # home 49.5 % — not decisive
+        _o("fts", "FT", {"home": 1.90, "none": 17.0, "away": 1.95},
+           section="First Team To Score"),  # home 50.6 % — the other side of even
+    ]
+    assert "fts_vs_ml" not in _kinds(rows)
+
+
+def test_it_stays_quiet_when_the_two_markets_agree():
+    """The normal shape, and the measured one: FTS is a SHRUNK version of the
+    1X2 (median -0.050), so agreement is the default."""
+    rows = [
+        _o("moneyline", "FT", {"home": 2.90, "draw": 4.05, "away": 1.90},
+           section="Main result"),
+        _o("fts", "FT", {"home": 2.30, "none": 17.1, "away": 1.62},
+           section="First Team To Score"),
+    ]
+    assert "fts_vs_ml" not in _kinds(rows)
+
+
+def test_nobody_scores_cannot_beat_the_whole_draw():
+    """The one EXACT bound the pair has: 0-0 is one way to draw. Violated 0
+    times in 90 events, so it is there for the day the book slips."""
+    rows = [
+        _o("moneyline", "FT", {"home": 2.90, "draw": 12.0, "away": 1.90},
+           section="Main result"),          # draw only ~7 %
+        _o("fts", "FT", {"home": 2.30, "none": 3.5, "away": 1.62},
+           section="First Team To Score"),  # nobody-scores ~26 %
+    ]
+    f = _kinds(rows).get("fts_vs_ml")
+    assert f is not None and "one way to draw" in f.detail
+
+
+def test_every_flag_that_names_a_bet_carries_its_price():
+    """The odds band on the tab reads `odds`, and ConsistencyFlag had no such
+    field — so every consistency row was exempt from a filter the panel showed
+    as applying to it. Checks that name no single leg stay None on purpose."""
+    flags = {f.kind: f for f in C.find_consistency_flags(_rows() + FTS_BOARD[1:])}
+    for kind in ("pickem_duplicate", "pickem_dominance"):
+        assert flags[kind].odds is not None, f"{kind} carries no price"
+        assert flags[kind].odds > 1.0
+    assert flags["ml_vs_spread"].odds is None, (
+        "ml_vs_spread describes a relationship between markets, not one leg — "
+        "giving it a price would make the band hide it for the wrong reason")

@@ -50,7 +50,10 @@ Source     = Literal["crystalbet", "pinnacle", "xbet", "liderbet", "betlive", "c
 # "htft" = the 9-way Halftime/Fulltime combo market (selections keyed "1/1",
 # "1/X", ..., "2/2"). Captured only by the permissive (anomaly-scan) classifier
 # for CB-internal consistency checks — never matched against Pinnacle.
-MarketType = Literal["moneyline", "spread", "total", "team_total", "htft"]
+# "fts" = First Team To Score, a 3-way over {home, none, away}. It is NOT a
+# moneyline: its middle leg is "nobody scores" (P(0-0)), not a draw, so filing
+# it as one would feed a 0-0 price into every check that reads a 1X2.
+MarketType = Literal["moneyline", "spread", "total", "team_total", "htft", "fts"]
 Period     = Literal["FT", "H1", "Q1", "Q2", "Q3", "Q4", "REG", "P1", "P2", "P3"]
 Submarket  = Literal["corners", "bookings"]
 TeamSide   = Literal["home", "away"]

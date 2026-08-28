@@ -107,7 +107,9 @@
   // These are NOT another way to fire — they gate everything else, because a
   // longshot flag is noise no matter how large its severity is.
   const LAD_MAXODDS  = "anom_ladder_alert_max_odds";
+  const LAD_MINODDS  = "anom_ladder_alert_min_odds";
   const CONS_MAXODDS = "anom_cons_alert_max_odds";
+  const CONS_MINODDS = "anom_cons_alert_min_odds";
   const LAD_SEEN_KEY    = "anom_ladder_seen_v1";
   const LAD_SEEDED_KEY  = "anom_ladder_seeded";
   const CONS_SEEN_KEY   = "anom_cons_seen_v1";
@@ -797,11 +799,23 @@
     return odds <= cap;
   }
 
+  /* The floor, and the other half of the band. Noise is at BOTH ends: a 40.0
+   * longshot sits where the book's margin is 238 %, and a 1.02 clears any
+   * percentage threshold trivially while being worth nothing to stake. A row
+   * that names no price is exempt from both, same as the cap. */
+  function aboveOddsFloor(odds, key) {
+    const floor = cfgNum(key);
+    if (floor === null || floor <= 0) return true;
+    if (odds === null || odds === undefined) return true;
+    return odds >= floor;
+  }
+
   function ladderPasses(r) {
     // Veto first: it overrides every criterion below, so an expensive rung
     // cannot chime by clearing one of them.
     const o = [r.odds_lo, r.odds_hi].filter(x => x != null);
     if (o.length && !withinOddsCap(Math.max.apply(null, o), LAD_MAXODDS)) return false;
+    if (o.length && !aboveOddsFloor(Math.max.apply(null, o), LAD_MINODDS)) return false;
     const pct = cfgNum(LAD_PCT), delta = cfgNum(LAD_DELTA), step = cfgNum(LAD_STEP);
     if (pct   !== null && r.pct   != null && r.pct   >= pct)   return true;
     if (delta !== null && r.delta != null && r.delta >= delta) return true;
@@ -817,6 +831,7 @@
 
   function consPasses(f, kindCfg, dflt) {
     if (!withinOddsCap(f.odds, CONS_MAXODDS)) return false;
+    if (!aboveOddsFloor(f.odds, CONS_MINODDS)) return false;
     const k = kindCfg[f.kind] || {};
     if (k.on === false) return false;               // check silenced
     // Diagnostics stay silent until switched on deliberately. `k.on === true`
@@ -941,7 +956,8 @@
   // fine. tests/test_anomaly_alerts_logic.py drives these under node.
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { ladderPasses, consPasses, evaluateFeed, cfgNum,
-                       withinOddsCap, LAD_MAXODDS, CONS_MAXODDS,
+                       withinOddsCap, aboveOddsFloor,
+                       LAD_MAXODDS, CONS_MAXODDS, LAD_MINODDS, CONS_MINODDS,
                        ladderKey, consKey, RE_ALERT_FACTOR,
                        readLayers, normaliseGates, matchingLayers,
                        effectiveStep, oppQueryFloor, passesGates,

@@ -273,6 +273,17 @@ class ConsistencyFlag:
     # stable identity across scans even though `detail` carries live odds —
     # app.py keys first_seen carry-over on (kind, event, periods, outcome).
     outcome: Optional[str] = None
+    # The PRICE this flag is about — the leg you would actually back. Added
+    # 2026-08-29 so the odds band on the Anomalies tab can reach consistency
+    # rows at all: the band shipped reading `odds`, and ConsistencyFlag had no
+    # such field, so every one of these rows was exempt from a filter the panel
+    # showed as applying to them.
+    #
+    # None where the check names no single bettable leg — ml_vs_spread and
+    # total_additivity describe a relationship between markets, not a bet. Rows
+    # with no price are never filtered out, because muting them would turn a
+    # noise filter into a coverage hole.
+    odds: Optional[float] = None
 
     @property
     def match_label(self) -> str:
@@ -367,6 +378,93 @@ def _main_section(rows: list[Odds]) -> list[Odds]:
         by_section.setdefault(o.section, []).append(o)
     return max(by_section.values(), key=len)
 
+
+
+def _fts_vs_ml(period_odds: dict, per: str,
+               decisive: float = DECISIVE_PROB) -> list[tuple]:
+    """First Team To Score against the 1X2: who is the stronger side?
+
+    Owner asked for this after GKS Wikielec v Concordia Elblag, where the 1X2
+    made the home side a 2.90 underdog and First Team To Score made it the
+    2 @1.80 favourite to open the scoring.
+
+    IT IS A CORRELATION, NOT AN IDENTITY, and the rest of this file is
+    identities — so the trigger is chosen to match what the relationship can
+    actually support. Measured over the 90 collected events pricing both,
+    comparing P(home first | someone scores) against P(home | no draw):
+
+        median -0.050   p10 -0.131   p90 +0.104   max |0.174|
+
+    The median is the shape working as it should: scoring first is a SHRUNK
+    version of winning, because a team can score first and still lose. But the
+    deciles are +-0.12 wide, so the magnitude of the gap is worthless as a
+    trigger — a threshold clearing that noise sits near 0.17 and fires on
+    nothing, and anything lower fires on everything.
+
+    What IS interpretable is a FAVOURITE FLIP: the 1X2 makes a side a clear
+    underdog and FTS makes it favourite to score first. Rates over the same 90:
+
+        bare flip (opposite sides of 0.500)          3   3.3%
+        flip + 1X2 decisive by 0.06                  1   1.1%   <- this
+        flip + BOTH decisive by 0.06                 0   0.0%
+        |gap| >= 0.15 (magnitude only)               4   4.4%
+
+    A bare flip is mostly two near-coin-flips landing either side of 0.500 and
+    means nothing, so the 1X2 side must be a decisive favourite — the same
+    0.06 bar `favourite_flip` already uses. Requiring BOTH sides decisive kills
+    it: the FTS side is usually near even, which is the whole point (a clear
+    underdog has no business being favoured to open the scoring at all).
+
+    The one exact bound this pair has — P(nobody scores) is P(0-0) and cannot
+    exceed P(draw) — is checked too. It was violated 0 times in 90 events.
+    """
+    ml3 = fts = None
+    for o in period_odds.get("moneyline", []):
+        if {"home", "draw", "away"} <= set(o.selections):
+            ml3 = o.selections
+            break
+    for o in period_odds.get("fts", []):
+        if {"home", "none", "away"} <= set(o.selections):
+            fts = o.selections
+            break
+    if not ml3 or not fts:
+        return []
+    try:
+        inv = [1.0 / ml3[k] for k in ("home", "draw", "away")]
+        s_ = sum(inv)
+        ph, pd, pa = (v / s_ for v in inv)
+        jnv = [1.0 / fts[k] for k in ("home", "none", "away")]
+        t_ = sum(jnv)
+        fh, fn, fa = (v / t_ for v in jnv)
+    except (ZeroDivisionError, KeyError):
+        return []
+    if ph + pa <= 0 or fh + fa <= 0:
+        return []
+
+    out: list[tuple] = []
+
+    # The exact leg first: "nobody scores" IS 0-0, which is one way to draw.
+    if fn - pd >= 0.03:
+        out.append((
+            f"{per}: nobody-scores is priced at {fn*100:.0f}% but the 1X2 makes "
+            f"the whole DRAW only {pd*100:.0f}% — 0-0 is one way to draw, so it "
+            f"cannot be the more likely of the two",
+            (fn - pd) * 100.0, "none", fts["none"],
+        ))
+
+    x = ph / (ph + pa)              # 1X2: home strength, draw removed
+    y = fh / (fh + fa)              # FTS: home strength, "nobody" removed
+    if (x - 0.5) * (y - 0.5) < 0 and abs(x - 0.5) >= decisive:
+        under, first = ("home", "home") if x < 0.5 else ("away", "away")
+        side = "home" if y > 0.5 else "away"
+        out.append((
+            f"{per}: the 1X2 makes {under} the underdog at "
+            f"{x*100:.0f}% to win (draw removed), but First Team To Score makes "
+            f"it the {y*100:.0f}% favourite to open the scoring — the two "
+            f"markets disagree about which side is stronger",
+            abs(y - x) * 100.0, side, fts[side],
+        ))
+    return out
 
 
 def _pickem_dominance(period_odds: dict, per: str,
@@ -629,7 +727,7 @@ def _pickem_locks(period_odds: dict, per: str, min_pct: float = 0.3) -> list[tup
             f"the pick'em pushes on the draw, so the outlay is {outlay:.4f} "
             f"(naive {naive:.4f}), locking {profit:.2f}%. "
             f"Stakes {x/outlay:.3f} / {y/outlay:.3f} / {z/outlay:.3f} per unit.",
-            profit, f"pickem_{side}"))
+            profit, f"pickem_{side}", P))
     return out
 
 
@@ -756,12 +854,13 @@ def find_consistency_flags(
         m = meta[eid]
         views = {per: _build_period_view(mkts) for per, mkts in periods.items()}
 
-        def mk(kind, per_label, detail, severity, outcome=None):
+        def mk(kind, per_label, detail, severity, outcome=None, odds=None):
             flags.append(ConsistencyFlag(
                 sport=m.sport, league=m.league, home=m.home, away=m.away,
                 start_time=m.start_time, event_id=eid,
                 kind=kind, periods=per_label, detail=detail,
                 severity=round(severity, 2), outcome=outcome,
+                odds=round(float(odds), 3) if odds is not None else None,
             ))
 
         # 1. ML vs spread win-prob (per period)
@@ -783,20 +882,31 @@ def find_consistency_flags(
         #     "no arb", while the push-aware outlay is 0.9842 = +1.61% locked.
         for per, mkts in periods.items():
             for flag in _pickem_locks(mkts, per, min_pct=pickem_lock_pct):
-                mk("pickem_arb", per, flag[0], flag[1], outcome=flag[2])
+                mk("pickem_arb", per, flag[0], flag[1],
+                   outcome=flag[2], odds=flag[3])
 
         # 1c. the same bet quoted twice. Draw No Bet and an Asian Handicap 0.0
         #     rung settle identically, so the better side of each is a cover
         #     with no losing branch. See _pickem_duplicates.
         for per, mkts in periods.items():
             for flag in _pickem_duplicates(mkts, per, min_pct=pickem_lock_pct):
-                mk("pickem_duplicate", per, flag[0], flag[1], outcome=flag[2])
+                mk("pickem_duplicate", per, flag[0], flag[1],
+                   outcome=flag[2], odds=flag[3])
 
         # 1d. the 0.0 rung longer than the 1X2 on the same side — impossible,
         #     and checked on RAW prices so no devig choice can affect it.
         for per, mkts in periods.items():
             for flag in _pickem_dominance(mkts, per, min_pct=pickem_lock_pct):
-                mk("pickem_dominance", per, flag[0], flag[1], outcome=flag[2])
+                mk("pickem_dominance", per, flag[0], flag[1],
+                   outcome=flag[2], odds=flag[3])
+
+        # 1e. First Team To Score vs the 1X2. The only CORRELATION in this
+        #     file — see _fts_vs_ml for why the trigger is a favourite flip
+        #     rather than a size, and what the relationship measures at.
+        for per, mkts in periods.items():
+            for flag in _fts_vs_ml(mkts, per):
+                mk("fts_vs_ml", per, flag[0], flag[1],
+                   outcome=flag[2], odds=flag[3])
 
         # 2. favourite flip across periods (vs FT)
         ft = views.get("FT")
@@ -1042,7 +1152,7 @@ def find_consistency_flags(
                            f"{who} leg (H1 @{l_h1:g} / FT @{l_ft:g}) — the combo "
                            f"can never be more likely than one leg alone "
                            f"(off by {short_pct:.0f}%)", short_pct,
-                           outcome=combo_key)
+                           outcome=combo_key, odds=c)
                         continue
                     # correlation-adjusted fair: the naive product (l_h1 × l_ft)
                     # over-states the fair odds — conditioning on the HT lead
@@ -1061,7 +1171,7 @@ def find_consistency_flags(
                            f"@{l_ft:g}) — {long_pct:.0f}% too generous; conditioning "
                            f"on the HT lead shortens the FT leg, so fair sits below "
                            f"the {l_h1 * l_ft:.2f} independent product", long_pct,
-                           outcome=combo_key)
+                           outcome=combo_key, odds=c)
 
         # 6. HT/FT vs the bivariate-normal fair model (basketball only —
         #    sigma/rho are calibrated to basketball margins)

@@ -36,6 +36,10 @@ SHARED_KEYS = [
     # longshot chimes they thought they had switched off.
     "anom_ladder_alert_max_odds",
     "anom_cons_alert_max_odds",
+    # The floor (2026-08-29). Owner: "most of them are 1.02 1.05 7-8 odds and
+    # they are noise". The cap only ever handled one end of that.
+    "anom_ladder_alert_min_odds",
+    "anom_cons_alert_min_odds",
 ]
 
 

@@ -161,6 +161,29 @@ def _parse_ml_3way(snatches) -> Optional[dict[str, float]]:
 _RE_HTFT_LABEL = re.compile(r"^([12Xx])\s*/\s*([12Xx])$")
 
 
+def _parse_fts(snatches) -> Optional[dict[str, float]]:
+    """Parse First Team To Score: labels "1" / "0" / "2".
+
+    The middle leg is "nobody scores", which CB labels `0` — the same character
+    a spread would use for its line, which is why this needs its own parser
+    rather than riding the 3-way moneyline one (that reads `X`).
+    """
+    want = {"1": "home", "0": "none", "2": "away"}
+    sels: dict[str, float] = {}
+    for snatch in snatches:
+        pair = _bt_pair(snatch)
+        if pair is None:
+            continue
+        label, odds_text = pair
+        side = want.get(label.strip())
+        if side is None:
+            continue
+        odds = _safe_float(odds_text)
+        if odds is not None:
+            sels[side] = odds
+    return sels if {"home", "none", "away"} <= set(sels) else None
+
+
 def _parse_htft(snatches) -> Optional[dict[str, float]]:
     """
     Parse the 9-way Halftime/Fulltime combo: labels "1/1", "1/X", ..., "2/2"
@@ -349,6 +372,21 @@ def parse_detail_page(
                 league=league, start_time=start_time,
                 submarket=cls.submarket, team_side=None,
                 section=title,
+            )
+            if odds is not None:
+                ranked.append((cls.variant_rank, odds))
+
+        elif cls.market_type == "fts":
+            sels = _parse_fts(snatches)
+            if sels is None:
+                continue
+            odds = _build_odds(
+                home=home, away=away, sport_name=sport_name,
+                market_type="fts", period=cls.period,
+                selections=sels, line=None,
+                fetched_at=fetched_at, event_id=event_id,
+                league=league, start_time=start_time,
+                submarket=cls.submarket, team_side=None, section=title,
             )
             if odds is not None:
                 ranked.append((cls.variant_rank, odds))
