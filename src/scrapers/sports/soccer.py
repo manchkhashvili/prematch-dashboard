@@ -425,7 +425,26 @@ _SKIP_PATTERNS: tuple[re.Pattern[str], ...] = (
 _RULES: list[tuple[re.Pattern[str], str, str, int, Optional[str], Optional[str]]] = [
     # ── PARENT match, FT ──
     (re.compile(r"^(?:1x2|main result)$"),                       "moneyline",  "FT", 3, None, None),
+    # CrystalBet ships the SAME 2-way Asian ladder under two different titles,
+    # and until 2026-08-29 only one of them was read. Whole-board census:
+    #
+    #     "Handicap"        1 666 events   labels "1 (-1.5)"   -> classified
+    #     "Asian Handicap"    196 events   labels "1(0.0)"     -> INVISIBLE
+    #
+    # That is 10.5 % of the soccer board with no handicap coverage at all — not
+    # just for the anomaly checks but for the +EV/arbs matching against
+    # Pinnacle, which never saw a spread row for those events.
+    #
+    # On exactly those 196 events "Handicap" means something else: a 3-way
+    # EUROPEAN handicap with scoreline labels ("1 (0:2)" / "X (0:2)" /
+    # "2 (0:2)"). It still matches the rule below, but harmlessly — the spread
+    # label parser requires the "1 (-1.5)" numeric form and reads nothing from
+    # "0:2", so those events emit no spread rather than a wrong one. Left that
+    # way deliberately: on the other 1 666 events "Handicap" IS the Asian
+    # ladder, so the title alone cannot disambiguate and the label shape
+    # already does it correctly.
     (re.compile(r"^handicap$"),                                  "spread",     "FT", 2, None, None),
+    (re.compile(r"^asian handicap$"),                            "spread",     "FT", 2, None, None),
     (re.compile(r"^total goals$"),                               "total",      "FT", 2, None, None),
     (re.compile(r"^home team total$"),                           "team_total", "FT", 2, None, "home"),
     (re.compile(r"^away team total$"),                           "team_total", "FT", 2, None, "away"),
@@ -495,17 +514,53 @@ _RE_HTFT_TITLE = re.compile(r"^(?:half\s*time\s*/\s*full\s*time|ht\s*/\s*ft)\b")
 _RE_HTFT_EXCLUDE = re.compile(r"\band\b|&|correct|exact|\btotal\b|score|goals")
 
 
-def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
-    """Strict soccer classification PLUS the Halftime/Fulltime combo, for the
-    anomaly scanner's HT/FT checks (htft_combo, htft_fair, soft_scan).
+# "Draw no bet" / "1st Half - Draw No Bet". Anchored at both ends so CB's
+# `2nd Half - Draw No Bet***` — a 3-way scoreline derivative, and a different
+# bet — cannot slip in on the trailing asterisks.
+_RE_DNB = re.compile(r"^(?:1st\s*half\s*-\s*)?draw no bet$")
 
-    The strict/+EV path SKIPS Halftime/Fulltime (not matchable against Pinnacle);
-    here we capture it as market_type 'htft' so the engine can compare the 1/1
-    (and 2/2) combo to its FT and 1st-half legs. Every other in-scope market (FT
-    1X2, 1st-half result, handicaps, totals) falls through to the strict rules."""
+
+def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
+    """Strict soccer classification PLUS the markets that are unmatchable
+    against Pinnacle but perfectly checkable against CrystalBet's own board.
+
+    Two of them:
+
+    * **Halftime/Fulltime**, captured as market_type 'htft' so the engine can
+      compare the 1/1 (and 2/2) combo to its FT and 1st-half legs.
+
+    * **Draw No Bet**, as a 2-way moneyline. The strict path hard-skips it
+      because Pinnacle ships DNB as an unstructured `type=special` with nothing
+      to pair against — a correct decision for the +EV pipeline, and the wrong
+      one to inherit here, because the consistency engine never touches
+      Pinnacle. It checks CB against itself, and there a market's matchability
+      is beside the point.
+
+      What that blindness cost, found by the owner on the live board
+      (Resovia Rzeszow v KKP Bydgoszcz W, 2026-08-29): CB posted
+
+          Draw no bet         1 @ 1.55   2 @ 2.10
+          Asian Handicap 0.0  1 @ 1.20   2 @ 3.50
+
+      Those are the SAME BET — both void on the draw — quoted 17pp apart, and
+      the better side of each covers the game for 1/1.55 + 1/3.50 = 0.9309:
+      **+7.4 % with no losing branch**, since the draw voids both legs and
+      returns the stake. The scanner could not see it, because half of it was
+      a market it never read. See `_pickem_duplicates` in consistency.py.
+
+    Everything else (FT 1X2, 1st-half result, handicaps, totals) falls through
+    to the strict rules.
+    """
     if not title:
         return None
     norm = _normalize_title(title)
     if _RE_HTFT_TITLE.match(norm) and not _RE_HTFT_EXCLUDE.search(norm):
         return MarketClassification(market_type="htft", period="FT")
+    if _RE_DNB.match(norm):
+        # 2-way, and the labels are a bare "1"/"2" — which is why this is a
+        # moneyline and not a spread at line 0: cb_detail's spread parser
+        # requires the "1 (-1.5)" form and would read nothing here.
+        return MarketClassification(
+            market_type="moneyline", n_way=2,
+            period="H1" if norm.startswith("1st") else "FT")
     return classify_market_title(title)

@@ -65,7 +65,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from src import htft_model
 from src.models import Odds
@@ -369,6 +369,166 @@ def _main_section(rows: list[Odds]) -> list[Odds]:
 
 
 
+def _pickem_dominance(period_odds: dict, per: str,
+                      min_pct: float = 0.3) -> list[tuple]:
+    """A 0.0 rung can never be the LONGER price on the same side as the 1X2.
+
+    The 0.0 handicap VOIDS the draw; the 1X2 LOSES to it. Same side, same win
+    condition, and one of them hands your stake back where the other keeps it —
+    so the 0.0 rung is a strictly better bet and its price must be strictly
+    shorter. On fair prices the ratio is exact:
+
+        AH0(side) / X12(side)  ==  1 - P(draw)
+
+    A ratio at or above 1.0 is the book offering the better bet at the longer
+    price. There is nothing to model and nothing to devig: this compares RAW
+    prices you can actually take, so it is immune to the devig choice that
+    every probability-space check here depends on.
+
+    Owner found the first one (Resovia Rzeszow v KKP Bydgoszcz W, 2026-08-29):
+    1X2 away @3.10 against Asian Handicap 0.0 away @3.50, a ratio of **1.129**
+    where the 1X2's own P(draw) of 0.227 says it should be 0.773.
+
+    CALIBRATION, whole collected board: 2 993 (event, period) pairs price both,
+    5 986 sides. The ratio ran p10 0.558, median 0.688, p90 0.771, **max
+    0.978** — and the residual against each event's own 1 - P(draw) sat at a
+    median +0.003. **Zero** sides reached 1.0. So the bound needs no slack: it
+    is exact, it is measured never to be approached, and the case above clears
+    it by 15 %.
+    """
+    ml3 = pick = None
+    ml_at = pick_at = None
+    for o in period_odds.get("moneyline", []):
+        if {"home", "draw", "away"} <= set(o.selections):
+            ml3, ml_at = o.selections, o.fetched_at
+            break
+    for o in period_odds.get("spread", []):
+        if (o.line is not None and abs(o.line) < 1e-6
+                and {"home", "away"} <= set(o.selections)):
+            pick, pick_at = o.selections, o.fetched_at
+            break
+    if not ml3 or not pick:
+        return []
+    if ml_at is not None and pick_at is not None:
+        try:
+            if abs((ml_at - pick_at).total_seconds()) > _PICKEM_MAX_SKEW_SEC:
+                return []
+        except (TypeError, AttributeError):
+            pass
+    try:
+        inv = sum(1.0 / ml3[k] for k in ("home", "draw", "away"))
+        p_draw = (1.0 / ml3["draw"]) / inv
+    except (ZeroDivisionError, KeyError):
+        return []
+
+    out: list[tuple] = []
+    for side in ("home", "away"):
+        a, m = pick.get(side), ml3.get(side)
+        if not a or not m or a <= 1.0 or m <= 1.0:
+            continue
+        ratio = a / m
+        if ratio < 1.0:
+            continue
+        excess = (ratio - 1.0) * 100.0
+        if excess < min_pct:
+            continue
+        out.append((
+            f"{per}: the 0.0 handicap {side} @{a:g} is LONGER than the 1X2 "
+            f"{side} @{m:g} (ratio {ratio:.3f}), but the 0.0 rung voids the "
+            f"draw where the 1X2 loses to it — the better bet cannot be the "
+            f"longer price. The 1X2's own P(draw)={p_draw*100:.0f}% puts the "
+            f"ratio at {1-p_draw:.3f}. Take the 0.0 rung: same win, stake back "
+            f"on the draw, and {excess:.1f}% better odds",
+            excess, side, a,
+        ))
+    return out
+
+
+def _pickem_duplicates(period_odds: dict, per: str,
+                       min_pct: float = 0.3) -> list[tuple]:
+    """Draw No Bet and an Asian Handicap 0.0 rung are THE SAME BET.
+
+    Both void on the draw and settle on "who wins, given it is not drawn", so a
+    book quoting both is quoting one market twice. Take the better price on each
+    side and the two quotes cover the game between them; when that costs less
+    than 1.0 it is a locked position with **no losing branch at all** — the draw
+    voids both legs and returns the stake.
+
+    Found by the owner on the live board (Resovia Rzeszow v KKP Bydgoszcz W,
+    2026-08-29), where CrystalBet posted
+
+        Draw no bet         1 @ 1.55   2 @ 2.10   -> P(home | no draw) 57.5 %
+        Asian Handicap 0.0  1 @ 1.20   2 @ 3.50   -> P(home | no draw) 74.5 %
+
+        best of each: 1/1.55 + 1/3.50 = 0.9309  ->  +7.4 % locked
+
+    HOW OFTEN, measured over the whole collected board before this was written:
+    1 414 events price both markets, and they normally agree to a **median
+    0.1pp** (p90 0.4pp) — as two quotes of one bet should. Ten sat 5pp+ apart,
+    one 10pp+, and exactly one locked, at +0.40 %.
+
+    So it is rare, and that sample understates it in a way worth naming: it is
+    built from each event's LAST seen prices, which skew late and settled, and
+    it cannot contain the case above at all — a live mid-morning board on an
+    obscure women's league, which is exactly where a book's automation is
+    loosest. The owner found +7.4 % by eye on a market the scanner was not even
+    reading. 1-in-1414 is a floor, not the rate.
+
+    Unlike `ml_vs_spread`, which reports the same disagreement and names no bet,
+    this returns the position: both prices, both sides, and the locked return.
+    """
+    quotes: list[tuple[str, dict, Any]] = []
+    for o in period_odds.get("moneyline", []):
+        # Only an explicit Draw No Bet. A plain 2-way moneyline is NOT the same
+        # bet as a 0.0 rung in every sport — basketball has no draw to void, and
+        # American football's 2-way winner includes overtime while its 0.0
+        # spread pushes on a regulation tie. The section title is what makes
+        # this specific rather than a shape coincidence.
+        if "draw no bet" in (o.section or "").lower() and set(o.selections) == {"home", "away"}:
+            quotes.append(("draw-no-bet", o.selections, o.fetched_at))
+    for o in period_odds.get("spread", []):
+        if (o.line is not None and abs(o.line) < 1e-6
+                and {"home", "away"} <= set(o.selections)):
+            quotes.append(("handicap 0.0", o.selections, o.fetched_at))
+    if len(quotes) < 2:
+        return []
+
+    # SAME INSTANT ONLY, for the reason _pickem_locks documents at length: two
+    # prices captured minutes apart are not a position you can take.
+    stamps = [q[2] for q in quotes if q[2] is not None]
+    if len(stamps) >= 2:
+        try:
+            if (max(stamps) - min(stamps)).total_seconds() > _PICKEM_MAX_SKEW_SEC:
+                return []
+        except (TypeError, AttributeError):
+            pass
+
+    out: list[tuple] = []
+    for side, other in (("home", "away"), ("away", "home")):
+        best = max(quotes, key=lambda q: q[1].get(side) or 0.0)
+        best_other = max(quotes, key=lambda q: q[1].get(other) or 0.0)
+        if best[0] == best_other[0]:
+            continue                 # one market is better on both sides: no cross
+        a, b = best[1].get(side), best_other[1].get(other)
+        if not a or not b or a <= 1.0 or b <= 1.0:
+            continue
+        cost = 1.0 / a + 1.0 / b
+        if cost >= 1.0:
+            continue
+        profit = (1.0 / cost - 1.0) * 100.0
+        if profit < min_pct:
+            continue
+        out.append((
+            f"{per}: {best[0]} {side} @{a:g} + {best_other[0]} {other} @{b:g} — "
+            f"the same bet quoted twice (both void on the draw), and the two "
+            f"quotes cover the game for {cost:.4f}: +{profit:.2f}% locked, with "
+            f"the draw returning both stakes",
+            profit, side, min(a, b),
+        ))
+        break                        # one cross per period; the mirror is the same position
+    return out
+
+
 def _pickem_locks(period_odds: dict, per: str, min_pct: float = 0.3) -> list[tuple]:
     """Locked positions across a 3-way moneyline and a pick'em (line-0) rung.
 
@@ -595,6 +755,19 @@ def find_consistency_flags(
         for per, mkts in periods.items():
             for flag in _pickem_locks(mkts, per, min_pct=pickem_lock_pct):
                 mk("pickem_arb", per, flag[0], flag[1], outcome=flag[2])
+
+        # 1c. the same bet quoted twice. Draw No Bet and an Asian Handicap 0.0
+        #     rung settle identically, so the better side of each is a cover
+        #     with no losing branch. See _pickem_duplicates.
+        for per, mkts in periods.items():
+            for flag in _pickem_duplicates(mkts, per, min_pct=pickem_lock_pct):
+                mk("pickem_duplicate", per, flag[0], flag[1], outcome=flag[2])
+
+        # 1d. the 0.0 rung longer than the 1X2 on the same side — impossible,
+        #     and checked on RAW prices so no devig choice can affect it.
+        for per, mkts in periods.items():
+            for flag in _pickem_dominance(mkts, per, min_pct=pickem_lock_pct):
+                mk("pickem_dominance", per, flag[0], flag[1], outcome=flag[2])
 
         # 2. favourite flip across periods (vs FT)
         ft = views.get("FT")

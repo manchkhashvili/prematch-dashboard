@@ -339,6 +339,12 @@ async function fetchAndRender() {
 const KIND_LABEL = {
   ml_vs_spread: "ML vs handicap",
   pickem_arb: "pick'em lock (push-aware)",
+  // Both compare markets that settle IDENTICALLY — a 0.0 handicap and a Draw
+  // No Bet both void on the draw — so neither needs a model. Unlike
+  // ml_vs_spread, which reports the same disagreement and names no bet, these
+  // two name the position.
+  pickem_duplicate: "same bet, two prices (0.0 vs DNB)",
+  pickem_dominance: "0.0 rung longer than the 1X2",
   favourite_flip: "favourite flip",
   total_additivity: "period totals",
   quarter_ml_extreme: "quarter ML extreme",
@@ -392,6 +398,9 @@ const KIND_UNIT = {
   ml_vs_spread: "pp", favourite_flip: "pp",
   // pickem_arb severity is the locked return on outlay, not a probability gap.
   pickem_arb: "%", total_additivity: "pts",
+  // pickem_duplicate severity is the locked return on outlay; pickem_dominance
+  // is how much better the 0.0 rung's price is than the 1X2 it strictly beats.
+  pickem_duplicate: "%", pickem_dominance: "%",
   quarter_ml_extreme: "pp", htft_combo: "%", htft_fair: "%",
   betlive_flip: "pp", betlive_ot_fold: "pp", soccer_htft: "%",
   basketball_fav: "pp", soccer_fair: "%", soccer_identity: "pp",
@@ -592,6 +601,8 @@ const KIND_MARKET = {
   // two moneylines. Only the second sits in one market type.
   ot_vs_regulation: "moneyline",
   ot_monotone: "total",
+  // The bet is the 0.0 handicap rung itself.
+  pickem_dominance: "spread",
 };
 
 function buildConsistencyBetUrl(f) {
