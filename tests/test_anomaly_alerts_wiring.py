@@ -209,3 +209,32 @@ def test_a_default_off_kind_is_still_listed_and_labelled():
     labels = set(re.findall(r"^\s{2}(\w+):\s*\"", _block(PAGE_T, "const KIND_LABEL"), re.M))
     for kind in _default_off(PAGE_T):
         assert kind in labels, f"{kind} is silenced AND unlabelled — invisible"
+
+
+# ── the tab's odds bands, one per table ──────────────────────────────────────
+
+def test_each_table_has_its_own_odds_band_on_the_tab():
+    """A ladder rung and a consistency flag have different odds profiles — a
+    rung deep in a handicap ladder legitimately sits at 1.05, while a
+    consistency flag there is noise. One shared band could only ever be right
+    for one of the two tables."""
+    for el in ("lad-min-odds", "lad-max-odds", "cons-min-odds", "cons-max-odds"):
+        assert f'id="{el}"' in PAGE_T, f"{el} input is missing from the page"
+    for key in ("anom_lad_min_odds", "anom_lad_max_odds",
+                "anom_cons_min_odds", "anom_cons_max_odds"):
+        assert f'"{key}"' in PAGE_T, f"{key} is never persisted"
+
+
+def test_the_two_bands_are_applied_to_different_tables():
+    """The failure this guards against is a copy-paste that filters both tables
+    by the same band while the page shows two controls."""
+    assert "ladderWithinCap(r, ladBand.cap, ladBand.floor)" in PAGE_T
+    assert "consWithinCap(f, consBand.cap, consBand.floor)" in PAGE_T
+
+
+def test_an_existing_shared_setting_is_migrated_not_dropped():
+    """The band shipped as one shared pair. Splitting it must not silently
+    reset someone's filter to 'off'."""
+    assert "anom_max_odds" in PAGE_T and "anom_min_odds" in PAGE_T, (
+        "the legacy keys are gone, so an existing setting is lost on upgrade")
+    assert "LEGACY_MAX" in PAGE_T and "LEGACY_MIN" in PAGE_T

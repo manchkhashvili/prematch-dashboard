@@ -35,11 +35,13 @@
       Min % off
       <input type="number" id="min-pct" value="0.5" step="0.5" min="0" />
     </label>
-    <label title="Hide findings whose bettable leg pays more than this. Longshots are where a book's margin is worst — measured across both boards, the effective margin runs ~16% on outcomes above 40% implied probability and 68-238% below 5%. A flag at 40.0 is noise, not opportunity. Blank or 0 = no cap. Rows that name no single price are always kept.">
-      Max odds
-      <input type="number" id="max-odds" step="1" min="0" placeholder="off" />
-      <label for="min-odds" title="Hide rows whose bettable leg pays LESS than this. Short prices (1.02, 1.05) clear every percentage threshold trivially and are not worth a stake; this is the other half of the band. Rows that name no single price are never hidden.">Min odds</label>
-      <input type="number" id="min-odds" step="0.01" min="0" placeholder="off" />
+    <label title="Ladder rungs only. Hide rungs whose price is below this. A rung deep in a handicap ladder legitimately sits at 1.05, so this band is set separately from the consistency one. Blank or 0 = off.">
+      Rung odds ≥
+      <input type="number" id="lad-min-odds" step="0.01" min="0" placeholder="off" />
+    </label>
+    <label title="Ladder rungs only. Hide rungs paying more than this. Longshots are where a book's margin is worst — measured across both boards, the effective margin runs ~16% on outcomes above 40% implied probability and 68-238% below 5%. A rung at 40.0 is noise, not opportunity.">
+      ≤
+      <input type="number" id="lad-max-odds" step="1" min="0" placeholder="off" />
     </label>
     <label class="alert-controls" title="Show handicap (spread) ladders only; hide totals.">
       <input type="checkbox" id="spread-only" />
@@ -155,6 +157,16 @@
 
   <h2 class="section-title" style="margin:18px 0 6px;font-size:1.05em;">
     Consistency flags
+    <span class="controls" style="display:inline-flex;font-weight:normal;margin-left:10px;">
+      <label title="Consistency flags only. Hide flags whose bettable leg pays less than this. A 1.02 clears every percentage threshold trivially and is worth nothing to stake. Flags that name no single price — ml_vs_spread, total_additivity — are never hidden.">
+        odds ≥
+        <input type="number" id="cons-min-odds" step="0.01" min="0" placeholder="off" />
+      </label>
+      <label title="Consistency flags only. Hide flags whose bettable leg pays more than this.">
+        ≤
+        <input type="number" id="cons-max-odds" step="1" min="0" placeholder="off" />
+      </label>
+    </span>
     <span class="hint" style="font-weight:normal;">
       — CB contradicts itself across markets/periods (ML vs handicap, period totals
       vs full, quarter MLs vs full), plus betlive favourite-flips (incl-OT 2-way
@@ -193,31 +205,51 @@ let meta = {};
 let rows = [];
 const minPctInput = document.getElementById("min-pct");
 const spreadOnly = document.getElementById("spread-only");
-const maxOddsInput = document.getElementById("max-odds");
-const minOddsInput = document.getElementById("min-odds");
+// Separate bands per table (2026-08-29). A ladder rung and a consistency flag
+// have different odds profiles — a rung deep in a handicap ladder is legitimately
+// at 1.05, while a consistency flag there is noise — so one shared band could
+// only ever be wrong for one of them.
+const ladMinInput  = document.getElementById("lad-min-odds");
+const ladMaxInput  = document.getElementById("lad-max-odds");
+const consMinInput = document.getElementById("cons-min-odds");
+const consMaxInput = document.getElementById("cons-max-odds");
 minPctInput.addEventListener("change", fetchAndRender);
 spreadOnly.addEventListener("change", fetchAndRender);
 // Persist the odds cap: it is a standing preference about what counts as an
 // opportunity, not a per-visit tweak, and retyping it every page load is how
 // a filter stops getting used.
-const MAX_ODDS_KEY = "anom_max_odds";
-const MIN_ODDS_KEY = "anom_min_odds";
-try {
-  const saved = localStorage.getItem(MAX_ODDS_KEY);
-  if (saved !== null) maxOddsInput.value = saved;
-} catch (e) {}
-maxOddsInput.addEventListener("change", () => {
-  try { localStorage.setItem(MAX_ODDS_KEY, maxOddsInput.value.trim()); } catch (e) {}
-  fetchAndRender();
-});
-try {
-  const savedMin = localStorage.getItem(MIN_ODDS_KEY);
-  if (savedMin !== null) minOddsInput.value = savedMin;
-} catch (e) {}
-minOddsInput.addEventListener("change", () => {
-  try { localStorage.setItem(MIN_ODDS_KEY, minOddsInput.value.trim()); } catch (e) {}
-  fetchAndRender();
-});
+const BAND_KEYS = {
+  ladMin:  "anom_lad_min_odds",  ladMax:  "anom_lad_max_odds",
+  consMin: "anom_cons_min_odds", consMax: "anom_cons_max_odds",
+};
+// One-time migration off the shared pair, so an existing setting is not lost
+// the first time this loads — it seeds BOTH bands rather than guessing which
+// table it was meant for.
+const LEGACY_MAX = "anom_max_odds", LEGACY_MIN = "anom_min_odds";
+const BAND_INPUTS = {
+  ladMin: ladMinInput, ladMax: ladMaxInput,
+  consMin: consMinInput, consMax: consMaxInput,
+};
+for (const [name, el] of Object.entries(BAND_INPUTS)) {
+  const key = BAND_KEYS[name];
+  try {
+    let saved = localStorage.getItem(key);
+    if (saved === null) {
+      const legacy = localStorage.getItem(name.endsWith("Min") ? LEGACY_MIN : LEGACY_MAX);
+      if (legacy !== null) { saved = legacy; localStorage.setItem(key, legacy); }
+    }
+    if (saved !== null) el.value = saved;
+  } catch (e) {}
+  el.addEventListener("change", () => {
+    try { localStorage.setItem(key, el.value.trim()); } catch (e) {}
+    fetchAndRender();
+  });
+}
+function bandOf(minEl, maxEl) {
+  const lo = parseFloat(minEl.value), hi = parseFloat(maxEl.value);
+  return { floor: isNaN(lo) || lo <= 0 ? null : lo,
+           cap:   isNaN(hi) || hi <= 0 ? null : hi };
+}
 
 /* The odds cap, applied to both tables.
  *
@@ -226,18 +258,9 @@ minOddsInput.addEventListener("change", () => {
  * rather than one bettable leg, and silently hiding those would turn a noise
  * filter into a coverage hole.
  */
-function oddsCap() {
-  const v = parseFloat(maxOddsInput.value);
-  return isNaN(v) || v <= 0 ? null : v;
-}
-/* The other half of the band. Noise sits at BOTH ends: a 40.0 longshot lives
- * where the book's margin is 238 %, and a 1.02 clears any percentage threshold
- * trivially while being worth nothing to stake. Rows that name no price are
- * exempt from both ends, for the same reason as the cap. */
-function oddsFloor() {
-  const v = parseFloat(minOddsInput.value);
-  return isNaN(v) || v <= 0 ? null : v;
-}
+/* Noise sits at BOTH ends: a 40.0 longshot lives where the book's margin is
+ * 238 %, and a 1.02 clears any percentage threshold trivially while being worth
+ * nothing to stake. Rows that name no price are exempt from both ends. */
 function inOddsBand(odds, cap, floor) {
   if (odds == null) return true;
   if (cap !== null && odds > cap) return false;
@@ -349,10 +372,11 @@ async function fetchAndRender() {
   try {
     const [res] = await Promise.all([fetch(url), Marks.load()]);
     const j = await res.json();
-    const cap = oddsCap(), floor = oddsFloor();
+    const ladBand  = bandOf(ladMinInput,  ladMaxInput);
+    const consBand = bandOf(consMinInput, consMaxInput);
     meta = j;
-    rows = (j.anomalies || []).filter(r => ladderWithinCap(r, cap, floor));
-    const cons = (j.consistency || []).filter(f => consWithinCap(f, cap, floor));
+    rows = (j.anomalies || []).filter(r => ladderWithinCap(r, ladBand.cap, ladBand.floor));
+    const cons = (j.consistency || []).filter(f => consWithinCap(f, consBand.cap, consBand.floor));
     meta.hidden_by_odds = (j.anomalies || []).length - rows.length
                         + (j.consistency || []).length - cons.length;
     render();
