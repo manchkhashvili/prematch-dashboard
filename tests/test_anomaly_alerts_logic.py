@@ -107,7 +107,11 @@ def test_unticking_a_check_silences_it_regardless_of_severity():
 
 
 def test_other_checks_are_unaffected_by_one_being_silenced():
-    other = {"kind": "ml_vs_spread", "severity": 9.0}
+    # Deliberately a kind that alerts by DEFAULT. ml_vs_spread used to stand in
+    # here and stopped being a valid stand-in once it was demoted to a
+    # diagnostic (ALERT_DEFAULT_OFF) — it would then fail for its own reason
+    # rather than the one under test.
+    other = {"kind": "pickem_arb", "severity": 9.0}
     kinds = {"htft_combo": {"on": False}}
     assert cons_passes(other, kinds, 8) is True
 
@@ -234,9 +238,19 @@ def test_a_short_price_still_chimes_normally():
 def test_a_row_that_names_no_price_is_never_vetoed():
     """Several checks describe a relationship rather than one bettable leg.
     Muting those would turn a noise filter into a coverage hole."""
-    assert cons_passes({"kind": "ml_vs_spread", "severity": 9.0}, {}, 5) is True
-    assert cons_passes({"kind": "ml_vs_spread", "severity": 9.0, "odds": None},
+    assert cons_passes({"kind": "pickem_arb", "severity": 9.0}, {}, 5) is True
+    assert cons_passes({"kind": "pickem_arb", "severity": 9.0, "odds": None},
                        {}, 5) is True
+
+
+def test_a_diagnostic_stays_silent_until_switched_on():
+    """ml_vs_spread names no bet by construction and converted 0 of 2 over the
+    whole collected history, so it must not chime unasked — but an explicit
+    tick in the panel has to beat the default."""
+    row = {"kind": "ml_vs_spread", "severity": 99.0}
+    assert cons_passes(row, {}, 5) is False
+    assert cons_passes(row, {"ml_vs_spread": {"on": True}}, 5) is True
+    assert cons_passes(row, {"ml_vs_spread": {"on": False}}, 5) is False
 
 
 def test_a_blank_cap_vetoes_nothing():

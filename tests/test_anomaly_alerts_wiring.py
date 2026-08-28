@@ -165,3 +165,43 @@ def test_blank_threshold_means_off_not_zero():
     i = ALERTS_T.index("function cfgNum")
     body = ALERTS_T[i:ALERTS_T.index("\n  }", i)]
     assert 'return null' in body and '=== ""' in body
+
+
+# ── diagnostics that must not chime by default ───────────────────────────────
+
+def _default_off(text: str) -> set[str]:
+    """Parse `const ALERT_DEFAULT_OFF = new Set([...])` out of a page/script."""
+    import re
+    m = re.search(r"ALERT_DEFAULT_OFF\s*=\s*new Set\(\[(.*?)\]\)", text, re.S)
+    assert m, "ALERT_DEFAULT_OFF not found"
+    return set(re.findall(r'"([^"]+)"', m.group(1)))
+
+
+def test_the_two_default_off_sets_are_identical():
+    """The panel draws the checkbox from its copy; alerts.js decides the chime.
+
+    A kind in one set and not the other gives the exact failure this file
+    exists to prevent — a control that shows one state and behaves as another.
+    """
+    assert _default_off(PAGE_T) == _default_off(ALERTS_T)
+
+
+def test_ml_vs_spread_is_a_diagnostic_not_an_alert():
+    """It names no bet by construction, and measurement backs that up.
+
+    Over the whole collected CrystalBet history — 2 147 events, 1 709 pricing
+    both the 1X2 and a line-0 pick'em rung — it produced 2 flags and 0 locks.
+    Its bettable sibling pickem_arb is what should chime.
+    """
+    off = _default_off(PAGE_T)
+    assert "ml_vs_spread" in off
+    assert "pickem_arb" not in off, "the check that IS a bet must keep alerting"
+
+
+def test_a_default_off_kind_is_still_listed_and_labelled():
+    """Silenced is not hidden. The row stays on the tab and in the alert grid so
+    it can be switched on, and a book contradicting itself stays visible."""
+    import re
+    labels = set(re.findall(r"^\s{2}(\w+):\s*\"", _block(PAGE_T, "const KIND_LABEL"), re.M))
+    for kind in _default_off(PAGE_T):
+        assert kind in labels, f"{kind} is silenced AND unlabelled — invisible"

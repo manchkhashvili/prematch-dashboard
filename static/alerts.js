@@ -809,10 +809,19 @@
     return false;
   }
 
+  // Must stay identical to ALERT_DEFAULT_OFF in anomalies.html — the panel
+  // draws the checkbox from its copy and this decides whether the chime fires,
+  // so a kind in one set and not the other either alerts on something the grid
+  // shows as off, or shows as on and never sounds.
+  const ALERT_DEFAULT_OFF = new Set(["ml_vs_spread"]);
+
   function consPasses(f, kindCfg, dflt) {
     if (!withinOddsCap(f.odds, CONS_MAXODDS)) return false;
     const k = kindCfg[f.kind] || {};
     if (k.on === false) return false;               // check silenced
+    // Diagnostics stay silent until switched on deliberately. `k.on === true`
+    // (an explicit tick in the panel) beats the default, same as the grid.
+    if (k.on === undefined && ALERT_DEFAULT_OFF.has(f.kind)) return false;
     const bar = (k.sev === null || k.sev === undefined) ? dflt : k.sev;
     if (bar === null || bar === undefined || isNaN(bar)) return false;
     return f.severity != null && f.severity >= bar;

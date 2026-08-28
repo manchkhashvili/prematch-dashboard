@@ -448,12 +448,36 @@ consDef.value   = lsGet(CONS_DEF, "12");
 ladMaxOdds.value  = lsGet(LAD_MAXODDS, "");
 consMaxOdds.value = lsGet(CONS_MAXODDS, "");
 
+// Checks that are DIAGNOSTICS, not opportunities — listed and shown on the
+// tab, but not chiming unless you deliberately switch them on.
+//
+// ml_vs_spread earns its place here by measurement. It names no bet by
+// construction: it says the 1X2 and the pick'em (line-0) rung disagree, not
+// which one is wrong or how to take it. Its bettable sibling is pickem_arb,
+// which prices the same three legs push-aware and only fires when the cover
+// genuinely locks. Measured over the whole collected CrystalBet history
+// (2 147 events, 1 709 of them pricing BOTH markets):
+//
+//     soccer            1 745 events / 1 572 eligible -> 2 flags, 0 locks
+//     american football   201 events /   103 eligible -> 0 flags
+//     basketball           76 events /    34 eligible -> 0 flags
+//     ice hockey          125 events /     0 eligible  (ladder starts at 1.5)
+//
+//     conversion to a bet: 0 of 2. Largest gap ever seen: 6pp.
+//
+// So it fires on ~0.1 % of eligible events and has never once produced
+// something to bet. Keep it visible — a book contradicting itself is worth
+// knowing — but it should not compete for attention with rows that ARE bets.
+const ALERT_DEFAULT_OFF = new Set(["ml_vs_spread"]);
+
 function renderKindGrid() {
   const cfg = loadKindCfg();
   const grid = document.getElementById("cons-kind-grid");
   grid.innerHTML = Object.keys(KIND_LABEL).map(k => {
     const c = cfg[k] || {};
-    const on = c.on !== false;                       // default: alert on
+    // Default ON, except for the diagnostics above. An explicit choice in
+    // this grid always wins — untick/tick is stored and beats the default.
+    const on = c.on === undefined ? !ALERT_DEFAULT_OFF.has(k) : c.on !== false;
     const sev = (c.sev === null || c.sev === undefined) ? "" : c.sev;
     return `
       <label title="Untick to never alert on this check">
