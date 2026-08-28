@@ -163,6 +163,41 @@ def test_dominance_reads_raw_prices_so_no_devig_choice_can_move_it():
     assert still.severity > base.severity            # 1X2 shorter -> ratio worse
 
 
+def test_dominance_covers_the_draw_no_bet_too_not_just_the_handicap():
+    """GKS Wikielec v Concordia Elblag, 2026-08-29.
+
+    Its 0.0 rung was perfectly coherent (2.30/1.45 against a 2.90/4.05/1.90
+    1X2, ratio 0.793) while the DRAW NO BET was not: away @1.95 against the
+    1X2's @1.90, ratio 1.026. Both markets void the draw, so both carry the
+    same bound — checking only the handicap missed this board entirely.
+
+    Calibration for the DNB arm, 218 sides: ratio p10 0.712, median 0.774
+    (the theoretical 1 - P(draw)), p90 0.840, and one violation.
+    """
+    rows = [
+        _o("moneyline", "FT", {"home": 2.90, "draw": 4.05, "away": 1.90},
+           section="Main result"),
+        _o("moneyline", "FT", {"home": 1.65, "away": 1.95}, section="Draw no bet"),
+        _o("spread", "FT", {"home": 2.30, "away": 1.45}, line=0.0,
+           section="Asian Handicap"),
+    ]
+    f = _kinds(rows).get("pickem_dominance")
+    assert f is not None, "the DNB violation was not detected"
+    assert f.outcome == "away"
+    assert "draw-no-bet" in f.detail
+    assert "1.026" in f.detail
+
+
+def test_a_coherent_draw_no_bet_stays_quiet():
+    """The normal case: DNB comfortably shorter than the 1X2 on both sides."""
+    rows = [
+        _o("moneyline", "FT", {"home": 2.90, "draw": 4.05, "away": 1.90},
+           section="Main result"),
+        _o("moneyline", "FT", {"home": 2.25, "away": 1.48}, section="Draw no bet"),
+    ]
+    assert "pickem_dominance" not in _kinds(rows)
+
+
 def test_dominance_needs_all_three_legs_of_the_moneyline():
     """Without the draw price there is no P(draw) to quote, and the check would
     be asserting a bound it cannot explain."""

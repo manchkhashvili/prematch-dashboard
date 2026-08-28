@@ -385,36 +385,58 @@ def _pickem_dominance(period_odds: dict, per: str,
     prices you can actually take, so it is immune to the devig choice that
     every probability-space check here depends on.
 
-    Owner found the first one (Resovia Rzeszow v KKP Bydgoszcz W, 2026-08-29):
-    1X2 away @3.10 against Asian Handicap 0.0 away @3.50, a ratio of **1.129**
-    where the 1X2's own P(draw) of 0.227 says it should be 0.773.
+    Applies to EVERY market that voids the draw — the 0.0 handicap rung and the
+    Draw No Bet alike. Two live cases, and each was invisible to a check that
+    looked at only one of them:
 
-    CALIBRATION, whole collected board: 2 993 (event, period) pairs price both,
-    5 986 sides. The ratio ran p10 0.558, median 0.688, p90 0.771, **max
-    0.978** — and the residual against each event's own 1 - P(draw) sat at a
-    median +0.003. **Zero** sides reached 1.0. So the bound needs no slack: it
-    is exact, it is measured never to be approached, and the case above clears
-    it by 15 %.
+        Resovia Rzeszow v KKP Bydgoszcz W   0.0 rung away @3.50 vs 1X2 @3.10
+                                            ratio 1.129 (expected 0.773)
+        GKS Wikielec v Concordia Elblag     DNB away @1.95 vs 1X2 @1.90
+                                            ratio 1.026, while its 0.0 rung was
+                                            perfectly coherent at 0.793
+
+    CALIBRATION, whole collected board.
+
+      0.0 handicap vs 1X2 — 2 993 (event, period) pairs, 5 986 sides:
+        ratio p10 0.558, median 0.688, p90 0.771, max 0.978; residual against
+        each event's own 1 - P(draw) a median +0.003. ZERO sides reached 1.0.
+
+      Draw No Bet vs 1X2 — 109 events, 218 sides:
+        ratio p10 0.712, median 0.774, p90 0.840, max 1.127. ONE violation, and
+        it is Cheltenham v Gwalia United — the same board that produced the
+        only historical pickem_duplicate lock, caught here a second way.
+
+    The DNB median of 0.774 lands on the theoretical 1 - P(draw) almost exactly,
+    which is the relation stated as a number. The bound needs no slack: it is
+    exact, and both live cases clear 1.0 outright.
     """
-    ml3 = pick = None
-    ml_at = pick_at = None
+    ml3 = ml_at = None
     for o in period_odds.get("moneyline", []):
         if {"home", "draw", "away"} <= set(o.selections):
             ml3, ml_at = o.selections, o.fetched_at
             break
+    if not ml3:
+        return []
+
+    # EVERY market that voids the draw, not just the handicap rung. Both are
+    # the same bet and both carry the same bound; checking only one of them
+    # missed GKS Wikielec v Concordia Elblag, where the 0.0 rung was coherent
+    # (ratio 0.793) and the DRAW NO BET was not (away @1.95 against the 1X2's
+    # @1.90, ratio 1.026).
+    voiders: list[tuple[str, dict, Any]] = []
     for o in period_odds.get("spread", []):
         if (o.line is not None and abs(o.line) < 1e-6
                 and {"home", "away"} <= set(o.selections)):
-            pick, pick_at = o.selections, o.fetched_at
+            voiders.append(("0.0 handicap", o.selections, o.fetched_at))
             break
-    if not ml3 or not pick:
+    for o in period_odds.get("moneyline", []):
+        if ("draw no bet" in (o.section or "").lower()
+                and set(o.selections) == {"home", "away"}):
+            voiders.append(("draw-no-bet", o.selections, o.fetched_at))
+            break
+    if not voiders:
         return []
-    if ml_at is not None and pick_at is not None:
-        try:
-            if abs((ml_at - pick_at).total_seconds()) > _PICKEM_MAX_SKEW_SEC:
-                return []
-        except (TypeError, AttributeError):
-            pass
+
     try:
         inv = sum(1.0 / ml3[k] for k in ("home", "draw", "away"))
         p_draw = (1.0 / ml3["draw"]) / inv
@@ -422,25 +444,32 @@ def _pickem_dominance(period_odds: dict, per: str,
         return []
 
     out: list[tuple] = []
-    for side in ("home", "away"):
-        a, m = pick.get(side), ml3.get(side)
-        if not a or not m or a <= 1.0 or m <= 1.0:
-            continue
-        ratio = a / m
-        if ratio < 1.0:
-            continue
-        excess = (ratio - 1.0) * 100.0
-        if excess < min_pct:
-            continue
-        out.append((
-            f"{per}: the 0.0 handicap {side} @{a:g} is LONGER than the 1X2 "
-            f"{side} @{m:g} (ratio {ratio:.3f}), but the 0.0 rung voids the "
-            f"draw where the 1X2 loses to it — the better bet cannot be the "
-            f"longer price. The 1X2's own P(draw)={p_draw*100:.0f}% puts the "
-            f"ratio at {1-p_draw:.3f}. Take the 0.0 rung: same win, stake back "
-            f"on the draw, and {excess:.1f}% better odds",
-            excess, side, a,
-        ))
+    for label, quote, at in voiders:
+        if ml_at is not None and at is not None:
+            try:
+                if abs((ml_at - at).total_seconds()) > _PICKEM_MAX_SKEW_SEC:
+                    continue
+            except (TypeError, AttributeError):
+                pass
+        for side in ("home", "away"):
+            a, m = quote.get(side), ml3.get(side)
+            if not a or not m or a <= 1.0 or m <= 1.0:
+                continue
+            ratio = a / m
+            if ratio < 1.0:
+                continue
+            excess = (ratio - 1.0) * 100.0
+            if excess < min_pct:
+                continue
+            out.append((
+                f"{per}: the {label} {side} @{a:g} is LONGER than the 1X2 "
+                f"{side} @{m:g} (ratio {ratio:.3f}), but the {label} voids the "
+                f"draw where the 1X2 loses to it — the better bet cannot be the "
+                f"longer price. The 1X2's own P(draw)={p_draw*100:.0f}% puts the "
+                f"ratio at {1-p_draw:.3f}. Take the {label}: same win, stake back "
+                f"on the draw, and {excess:.1f}% better odds",
+                excess, side, a,
+            ))
     return out
 
 
