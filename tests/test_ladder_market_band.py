@@ -345,24 +345,26 @@ def test_the_price_path_is_untouched(monkeypatch):
 
 # ── gradual: cheapest first, published as it goes ────────────────────────────
 
-def test_ordering_is_by_yield_then_cheapest_not_kickoff(monkeypatch):
-    """Owner: "can it go with low numbers to high and push that anomalies/flags
-    gradually". Ascending market count still holds — but only as a tie-break
-    inside a yield rank, because straight cheapest-first spends the budget on
-    the games with nothing to check (0-50 markets: 0/6 carry an HT/FT grid).
+def test_ordering_is_cheapest_first_not_kickoff(monkeypatch):
+    """Owner: "go from lowest markets to highest".
 
-    Either way it replaces soonest-kickoff-first: with the ceiling on, every
-    game in scope expands in roughly the same time, so the cost spread the
-    kickoff ordering protected against no longer exists."""
+    Plain ascending market count. A yield-rank band used to come first, and it
+    was measured and right for the checks that existed then — it counted HT/FT
+    grids and ladder rungs, which thin boards do not carry. The pick'em family
+    changed that: it needs a 1X2, a Draw No Bet and one 0.0 rung, three markets
+    a 39-market board has, so cheap is no longer a proxy for empty.
+
+    This also replaces soonest-kickoff-first: with the ceiling on, every game
+    in scope expands in roughly the same time, so the cost spread the kickoff
+    ordering protected against no longer exists."""
     CB._ladder_sweep_seen.clear()
     games = [_G(0, 480, hours=1), _G(1, 60, hours=9), _G(2, 300, hours=5)]
     _, expanded = _run(monkeypatch, games, min_markets=0, max_markets=500,
                        start_within_hours=48)
-    assert expanded == ["E0", "E1", "E2"], (
-        "E0 (480) is the only game in the productive 300-900 band so it leads "
-        "despite being the dearest; E1 (60) and E2 (300) share the 50-300 rank "
-        "and fall back to cheapest-first. Kickoff order would have been "
-        "E0,E2,E1 (hours 1,5,9), so this also shows kickoff is not the key.")
+    assert expanded == ["E1", "E2", "E0"], (
+        "ascending market count: E1 (60), E2 (300), E0 (480). Kickoff order "
+        "would have been E0,E2,E1 (hours 1,5,9), so this also shows kickoff "
+        "is not the key.")
     CB._ladder_sweep_seen.clear()
 
 
@@ -501,33 +503,48 @@ def test_the_sweep_position_is_reported(monkeypatch):
 
 # ── order by what a pass can find, not just how many it can touch ────────────
 
-def test_the_productive_band_is_expanded_first(monkeypatch):
-    """Straight cheapest-first was a mistake: the cheapest games are the ones
-    with nothing to check. From the live census, 0-50 markets carries an HT/FT
-    grid in 0/6 games while 300-900 carries one in 6/6 — so a truncated pass
-    was spending its whole budget on games that cannot produce an htft flag."""
+def test_the_cheap_bands_are_expanded_first(monkeypatch):
+    """The reversal, and the measurement behind it.
+
+    Live soccer census, 18 games expanded per band — cost, whether the pick'em
+    markets are present, and whether any pick'em flag came out:
+
+        band       games  s/game  has 1X2+0.0  pickem flags  band cost
+        0-50         155    0.16       6/18         0/18         24s
+        50-300       186    0.19      18/18         2/18         36s
+        300-900     1009    0.42      15/18         0/18        426s
+        900-2000     215    0.51      17/18         0/18        110s
+        2000+        303    2.14      17/18         0/18        650s
+
+    The 50-300 band carries the markets on every game, produced the only flags,
+    and costs 36 seconds for all 186 — yet the old ranking put it third, behind
+    1 224 games. The 2000+ band cost eleven times as much per game and found
+    nothing. The owner's +7.4 % lock sat in the band ranked LAST.
+    """
     CB._ladder_sweep_seen.clear()
     games = [_G(0, 30), _G(1, 120), _G(2, 400), _G(3, 1200), _G(4, 5000)]
     _, expanded = _run(monkeypatch, games, min_markets=0, max_markets=0)
-    assert expanded == ["E2", "E3", "E1", "E4", "E0"], (
-        "productive band (300-900) first, then 900-2000, then 50-300, then "
-        "2000+, and the yield-less 0-50 band last")
+    assert expanded == ["E0", "E1", "E2", "E3", "E4"], (
+        "ascending market count, cheapest first — the two cheap bands land in "
+        "the first pass instead of an hour into the sweep")
     CB._ladder_sweep_seen.clear()
 
 
-def test_cheapest_first_still_applies_within_a_rank(monkeypatch):
-    """The owner asked for low-to-high and that still holds where it does not
-    cost coverage — it is a tie-break inside the productive band."""
+def test_the_dearest_board_is_expanded_last(monkeypatch):
+    """2000+ markets cost 2.14 s/game against 0.19 for the 50-300 band, so a
+    pass that leads with them covers far fewer games of every kind."""
     CB._ladder_sweep_seen.clear()
-    games = [_G(0, 850), _G(1, 320), _G(2, 500)]
+    games = [_G(0, 850), _G(1, 320), _G(2, 5000), _G(3, 500)]
     _, expanded = _run(monkeypatch, games, min_markets=0, max_markets=0)
-    assert expanded == ["E1", "E2", "E0"]
+    assert expanded == ["E1", "E3", "E0", "E2"]
     CB._ladder_sweep_seen.clear()
 
 
-def test_nothing_is_skipped_by_the_ranking(monkeypatch):
-    """Ranking is ordering, not filtering — the band does the filtering and the
-    sweep cursor still guarantees every game is reached."""
+def test_nothing_is_skipped_by_the_ordering(monkeypatch):
+    """Ordering is not filtering — the band does the filtering and the sweep
+    cursor still guarantees every game is reached. This is what makes
+    cheapest-first safe for the HT/FT and ladder checks the old ranking was
+    protecting: rich boards arrive LATER in a sweep, never not at all."""
     CB._ladder_sweep_seen.clear()
     games = [_G(i, n) for i, n in enumerate((30, 120, 400, 1200, 5000))]
     odds, expanded = _run(monkeypatch, games, min_markets=0, max_markets=0)

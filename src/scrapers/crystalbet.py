@@ -534,46 +534,6 @@ _last_price_cycle: dict[str, dict] = {}
 _ladder_sweep_seen: dict[str, set[str]] = {}
 
 
-def _yield_rank(game: Any) -> int:
-    """Order a truncated ladder pass by what it can actually FIND.
-
-    Straight cheapest-first was a mistake of mine. It maximises games per pass,
-    which is what "push flags gradually" seemed to ask for — but the cheapest
-    games are precisely the ones with nothing to check. From the live band
-    census, counting games that carry an HT/FT grid and the ladder rungs a
-    monotonicity check can use:
-
-        markets     htft    rungs   rungs/sec   rank
-        300-900      6/6       29        38.8     0   <- best value
-        900-2000     6/6       29        19.9     1
-        50-300       2/6       10        14.3     2
-        2000+        6/6       43        13.8     3
-        0-50         0/6        0         0.0     4   <- nothing to find
-
-    So a budget that stopped after N games was spending itself on the 0-50 and
-    50-300 bands and expanding almost nothing with an HT/FT grid in it. Measured
-    on the owner's own 12 h / 500-market slice: 70 games in scope, 50 of them
-    carrying a grid, and 13 htft_combo flags waiting in there — none of which a
-    cheapest-first prefix would reach first.
-
-    Ranks are only a TIE-BREAK ordering; nothing is skipped, and the sweep
-    cursor still guarantees every game is reached. Cheapest-first still applies
-    WITHIN a rank, which keeps a pass productive.
-    """
-    n = game.market_count
-    if n is None:
-        return 2            # unknown cost, unknown yield — with the middle
-    if n <= 50:
-        return 4
-    if n <= 300:
-        return 2
-    if n <= 900:
-        return 0
-    if n <= 2000:
-        return 1
-    return 3
-
-
 def _get_sport_lock(sport_id: int) -> asyncio.Lock:
     """Return (creating if needed) the per-sport refresh lock."""
     if sport_id not in _sport_locks:
@@ -1496,15 +1456,63 @@ async def _fetch_for_sport(
             #
             # ...and UNSEEN-THIS-SWEEP sorts before all of that, so successive
             # passes advance through the board instead of re-expanding the same
-            # prefix (see _ladder_sweep_seen). Cheapest-first still orders
-            # within the unseen set, which is what keeps a pass productive.
+            # prefix (see _ladder_sweep_seen).
+            #
+            # ── CHEAPEST-FIRST, and why it came back (2026-08-29) ────────────
+            # This used to sort by a `_yield_rank` band before market count. That
+            # ranking was measured, and correct for the checks that existed when
+            # it was written — it counted HT/FT grids and the ladder rungs a
+            # monotonicity check can use:
+            #
+            #     markets     htft   rungs  rungs/sec  rank
+            #     300-900      6/6      29       38.8    0   <- best value
+            #     900-2000     6/6      29       19.9    1
+            #     50-300       2/6      10       14.3    2
+            #     2000+        6/6      43       13.8    3
+            #     0-50         0/6       0        0.0    4   <- "nothing to find"
+            #
+            # The pick'em family (pickem_arb, pickem_duplicate, pickem_dominance)
+            # broke that. Those need THREE markets — a 1X2, a Draw No Bet and one
+            # 0.0 handicap rung — so a thin board is not a board with nothing to
+            # find, it is the cheapest possible place to find something. Fresh
+            # census of the live soccer board, 18 games expanded per band:
+            #
+            #     rank  band       games  s/game  has 1X2+0.0  pickem flags  band cost
+            #     4     0-50         155    0.16       6/18         0/18         24s
+            #     2     50-300       186    0.19      18/18         2/18         36s
+            #     0     300-900     1009    0.42      15/18         0/18        426s
+            #     1     900-2000     215    0.51      17/18         0/18        110s
+            #     3     2000+        303    2.14      17/18         0/18        650s
+            #
+            # The 50-300 band carries the markets on EVERY game, produced the only
+            # flags in the sample, and the whole band costs 36 seconds — yet it
+            # sorted third, behind 1 224 games. Meanwhile the 2000+ band costs
+            # 2.14 s/game, eleven times the price, and found nothing. The owner's
+            # +7.4 % lock (Resovia Rzeszow v KKP Bydgoszcz W, 39 markets) sat in
+            # the band ranked LAST, behind 1 712 games, reached ~68 minutes into a
+            # sweep.
+            #
+            # So: plain ascending market count. Both cheap bands — 341 games, ~60 s
+            # — now land in the first pass instead of an hour in.
+            #
+            # This does NOT starve the HT/FT and ladder checks the old ranking was
+            # protecting. `_ladder_sweep_seen` already guarantees every game in
+            # scope is reached within a sweep; the order decides WHEN a game is
+            # seen, never WHETHER. The rich boards now arrive later in the sweep
+            # rather than not at all — and they were never the constraint, since a
+            # pass that spends 200 s on 2000-market fixtures covers fewer games of
+            # every kind.
+            #
+            # Games with no badge still sort LAST: unknown cost, and CB omits the
+            # badge when every extra market is locked, so there is usually nothing
+            # to expand there anyway.
             seen = _ladder_sweep_seen.setdefault(sport_name, set())
             in_scope = {g.event_id for g in games}
             if seen and in_scope and in_scope <= seen:
                 log.info("CB %s ladder sweep complete (%d games covered) — "
                          "starting a new one", sport_name, len(seen))
                 seen.clear()
-            games.sort(key=lambda g: (g.event_id in seen, _yield_rank(g),
+            games.sort(key=lambda g: (g.event_id in seen,
                                       g.market_count if g.market_count is not None
                                       else 10 ** 9,
                                       g.start_time or fetched_at))
