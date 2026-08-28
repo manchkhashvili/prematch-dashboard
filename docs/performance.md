@@ -502,3 +502,61 @@ non-deterministic and several existing tests do exactly that.
 **Monitoring is load.** My own watcher polled `/api/anomalies` — the same
 matching — every two minutes for hours while "measuring". Any probe against a
 single-threaded app is part of the experiment.
+
+
+## Sweep order: cheapest first, and the day "nothing to find" stopped being true
+
+**2026-08-29.** The ladder sweep used to sort by a `_yield_rank` band before
+market count. That ranking was measured and correct for the checks that existed
+when it was written — it counted HT/FT grids and the ladder rungs a
+monotonicity check can use:
+
+| markets | htft | rungs | rungs/sec | rank |
+|---|---|---|---|---|
+| 300–900 | 6/6 | 29 | 38.8 | 0 ← best value |
+| 900–2000 | 6/6 | 29 | 19.9 | 1 |
+| 50–300 | 2/6 | 10 | 14.3 | 2 |
+| 2000+ | 6/6 | 43 | 13.8 | 3 |
+| 0–50 | 0/6 | 0 | 0.0 | 4 ← "nothing to find" |
+
+The **pick'em family** broke that premise. `pickem_arb`, `pickem_duplicate` and
+`pickem_dominance` need three markets — a 1X2, a Draw No Bet and one 0.0
+handicap rung — so a thin board is not a board with nothing in it. It is the
+cheapest possible place to find something.
+
+Fresh census of the live soccer board, 18 games expanded per band:
+
+| band | games | s/game | has 1X2 + 0.0 | **pick'em flags** | whole band |
+|---|---|---|---|---|---|
+| 0–50 | 155 | 0.16 | 6/18 | 0/18 | 24s |
+| **50–300** | **186** | **0.19** | **18/18** | **2/18** | **36s** |
+| 300–900 | 1009 | 0.42 | 15/18 | 0/18 | 426s |
+| 900–2000 | 215 | 0.51 | 17/18 | 0/18 | 110s |
+| 2000+ | 303 | **2.14** | 17/18 | 0/18 | 650s |
+
+The 50–300 band carries the markets on **every** game, produced the **only**
+flags in the sample, and the whole band costs **36 seconds** — and it sorted
+third, behind 1 224 games. The 2000+ band cost **eleven times** as much per
+game and found nothing.
+
+The case that forced it: the owner's +7.4 % lock (Resovia Rzeszów v KKP
+Bydgoszcz W, **39 markets**) sat in the band ranked *last*, behind **1 712
+games**, reached ~68 minutes into a sweep. It never appeared on the tab.
+
+**Now: plain ascending market count.** Both cheap bands — 341 games, ~60s —
+land in the first pass instead of an hour in.
+
+This does **not** starve the checks the old ranking protected.
+`_ladder_sweep_seen` already guarantees every game in scope is reached within a
+sweep, so order decides *when* a game is seen, never *whether*. The rich boards
+arrive later rather than not at all — and they were never the constraint, since
+a pass that spends 200s on 2000-market fixtures covers fewer games of every
+kind.
+
+### A measurement trap worth remembering
+
+The per-pass `progress` counter is **not** coverage. It resets every sweep, so
+watching it go `100/1509` then `75/1506` looks like the scan going backwards.
+Coverage is `cost[sport]`: `expanded` + `cached`. On the same board that showed
+`done 75/1506`, actual coverage was `expanded 125 + cached 1138 = 1263 of 1507`
+— **84 %**, not 5 %.

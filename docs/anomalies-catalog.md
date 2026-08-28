@@ -73,6 +73,122 @@ totals summed within 0.5pt).
   measured on the whole live board, **169 of 177 events carry a 2-way ML and 71
   carry a 0.0 spread rung** — so the check runs on 71 events and produced its
   first real flag.
+- **Demoted to a diagnostic 2026-08-29 (`ALERT_DEFAULT_OFF`).** It names no bet
+  by construction — it says the 1X2 and the pick'em rung disagree, not which is
+  wrong or how to take it. Conversion measured over the whole collected board,
+  2 147 events with 1 709 pricing both markets: **2 flags, 0 locks.** Still
+  listed, still on the tab; it no longer chimes unless switched on, because its
+  bettable siblings (B10/B11) fire on the same games.
+- Its soccer coverage was also a lie until 2026-08-29: `Draw no bet` was
+  hard-skipped and the 0.0 rung was missing on 196 events (see B10). With those
+  closed it went from 2 flags to 15, and 3 of 11 on the live board had a
+  bettable sibling — a **27 %** conversion, not 0.
+
+### B10. `pickem_duplicate` — the same bet quoted twice · **BETTABLE, no losing branch**
+A Draw No Bet and an Asian Handicap **0.0** rung are the *same bet*: both void
+on the draw and settle on "who wins, given it is not drawn". A book quoting
+both is quoting one market at two prices, and the better side of each covers
+the game between them. When that costs under 1.0 it is locked with **no losing
+branch at all** — the draw voids both legs and returns the stake.
+
+Found by the owner on the live board (Resovia Rzeszów v KKP Bydgoszcz W,
+2026-08-29):
+
+```
+Draw no bet         1 @ 1.55   2 @ 2.10   ->  P(home | no draw) 57.5 %
+Asian Handicap 0.0  1 @ 1.20   2 @ 3.50   ->  P(home | no draw) 74.5 %
+
+best of each: 1/1.55 + 1/3.50 = 0.9309  ->  +7.4 % locked
+```
+
+**Calibration.** 1 414 events price both, and they normally agree to a median
+**0.1pp** (p90 0.4) — as two quotes of one bet should. Ten sat 5pp+ apart, one
+10pp+, and exactly one locked, at +0.40 %. That rate is a **floor, not the
+rate**: the sample is built from each event's LAST prices, which skew late and
+settled, and cannot contain the case above — a live mid-morning board in an
+obscure women's league, which is where a book's automation is loosest.
+
+**Two holes had to be closed before it could fire at all**, and neither was an
+anomaly bug:
+1. `^draw no bet` was hard-skipped for soccer, correctly for the +EV pipeline
+   (Pinnacle ships DNB as an unstructured `type=special`, unmatchable) and
+   wrongly inherited here — the consistency engine never touches Pinnacle.
+2. CrystalBet ships the same Asian ladder under **two titles**: `Handicap` on
+   1 666 events and `Asian Handicap` on **196**, and only the first was
+   classified. That was 10.5 % of the soccer board with no handicap coverage
+   at all — in the anomaly scan *and* the Pinnacle matching, which never saw a
+   spread row for those events. Closing it recovered 924 rows.
+
+### B11. `pickem_dominance` — the better bet at the longer price · **BETTABLE**
+Every market that **voids** the draw — the 0.0 rung and the Draw No Bet alike —
+beats the 1X2 on the same side: same win condition, and one hands the stake
+back where the other keeps it. So its price must be strictly **shorter**, and
+on fair prices the ratio is exact:
+
+```
+voider(side) / 1X2(side)  ==  1 − P(draw)
+```
+
+A ratio at or above 1.0 is the book offering the better bet at the longer
+price. There is nothing to model and nothing to devig — it compares **raw
+prices you can take**, which makes it the only check in this file immune to the
+devig choice everything else depends on.
+
+**Calibration.**
+
+| pair | events / sides | ratio p10 · median · p90 · max | violations |
+|---|---|---|---|
+| 0.0 rung vs 1X2 | 2 993 / 5 986 | 0.558 · 0.688 · 0.771 · **0.978** | **0** |
+| Draw No Bet vs 1X2 | 109 / 218 | 0.712 · **0.774** · 0.840 · 1.127 | **1** |
+
+The DNB median lands on the theoretical `1 − P(draw)` almost exactly. The bound
+needs no slack: it is exact and measured never to be approached.
+
+Two live cases, each invisible to a check that looked at only one voider:
+
+```
+Resovia Rzeszów v KKP Bydgoszcz W   0.0 rung away @3.50 vs 1X2 @3.10  ratio 1.129
+GKS Wikielec v Concordia Elbląg     DNB      away @1.95 vs 1X2 @1.90  ratio 1.026
+                                    ...while its 0.0 rung was fine at 0.793
+```
+
+### B12. `fts_vs_ml` — First Team To Score vs the 1X2 · **the only CORRELATION here**
+Everything else in Family B is an identity. This one is not, and the trigger is
+chosen to match what the relationship can actually support.
+
+Measured over the 90 collected events pricing both, comparing
+`P(home first | someone scores)` against `P(home | no draw)`:
+
+```
+median −0.050   p10 −0.131   p90 +0.104   max |0.174|
+```
+
+The median is the shape working: scoring first is a **shrunk** version of
+winning, because a team can score first and lose. But the deciles are ±0.12
+wide, so the **size** of the gap is useless as a trigger — a threshold clearing
+that noise sits near 0.17 and fires on nothing.
+
+What is interpretable is a favourite **flip**:
+
+| rule | fires | rate |
+|---|---|---|
+| bare flip (opposite sides of 0.500) | 3 | 3.3 % |
+| **flip + 1X2 decisive by 0.06** | **1** | **1.1 %** ← shipped |
+| flip + BOTH decisive by 0.06 | 0 | 0.0 % |
+| \|gap\| ≥ 0.15 (magnitude only) | 4 | 4.4 % |
+
+A bare flip is mostly two near-coin-flips landing either side of 0.500.
+Requiring both sides decisive kills it — the FTS side is usually near even,
+which is the point: a clear underdog has no business being favoured to open the
+scoring at all. So the 1X2 side must be decisive by `DECISIVE_PROB = 0.06`, the
+bar `favourite_flip` already uses.
+
+The one **exact** bound the pair has is checked too: nobody-scores *is* 0-0,
+one way to draw, so it cannot exceed P(draw). Violated 0 times in 90 events.
+
+FTS needed its own `market_type`. Its middle leg is "nobody scores", not a
+draw, so filing it as a 3-way moneyline would feed a 0-0 price into every check
+that reads a 1X2.
 
 ### B2. `favourite_flip` — periods disagree on who's favoured
 - FT favours one side but a sub-period favours the other, **both decisively**
