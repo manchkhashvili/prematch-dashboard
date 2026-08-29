@@ -443,6 +443,14 @@ legs. Only fires inside the bettable range `1.15 ≤ odds ≤ 15.0`. Two bounds:
 > Filtering by PRICE now belongs to the per-table odds band on the tab and the
 > alert vetoes — visible and adjustable, where a constant makes a flag never
 > exist at all.
+>
+> **This applies to `htft_combo` ONLY.** `HTFT_ODDS_MAX` had two consumers and
+> the table above measures one of them. B7 `htft_fair` keeps its own
+> `HTFT_FAIR_ODDS_MAX = 4.5`: different sport (basketball), different model
+> (bivariate normal), all nine cells, and no calibration behind widening it.
+> Sharing the constant put 17 htft_fair flags on the live board at severities
+> to 123.3 — all "shape off vs model" on reversal cells, the corner where that
+> model is least trustworthy.
 - **Dominance:** `P(1/1) ≤ min(P(H1=1), P(FT=1))` ⟹ `odds(1/1) ≥` each leg.
   A combo **shorter than its own leg** is logically impossible → flag
   (`short_pct ≥ HTFT_GAP_PCT = 2%`).

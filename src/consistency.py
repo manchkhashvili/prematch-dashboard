@@ -144,6 +144,27 @@ HTFT_SHAPE_MIN_PROB = 0.05  # shape check only on outcomes the model gives >=5%
 # makes a flag never exist at all.
 HTFT_ODDS_MIN = 1.15
 HTFT_ODDS_MAX = 15.0
+# ...and htft_fair keeps the OLD 4.5, because the measurement above is not
+# about it. `HTFT_ODDS_MAX` had two consumers and only one was calibrated:
+#
+#   htft_combo  soccer, cells 1/1 and 2/2, a CORRELATION-fair approximation
+#               (h1 x (1 + (ft-1)/2)). That is what the residual table above
+#               measures, and it is what earned the 15.0.
+#   htft_fair   BASKETBALL, all NINE cells, a bivariate-normal model. A
+#               different check, a different sport, a different model, with no
+#               calibration behind widening it at all.
+#
+# Widening the shared constant put 17 htft_fair flags on the live board with
+# severities to 123.3 — every one of them a "market shape off vs model" on a
+# REVERSAL cell (1/2, 2/1), which is exactly where a bivariate normal is least
+# trustworthy: the lowest-probability corner of the grid, where a small
+# absolute error is a huge ratio. They swamped a tab whose next-largest check
+# tops out an order of magnitude below.
+#
+# So this one stays where it was measured to behave. Raising it is a separate
+# piece of work needing its own residual-by-price table for the basketball
+# model, not a side effect of a soccer measurement.
+HTFT_FAIR_ODDS_MAX = 4.5
 # Sports the consistency engine evaluates. Basketball (its original home),
 # soccer (1X2 + HT/FT), and tennis (set winners vs match winner — see
 # set_vs_match below; tennis detail pages carry 15 markets that are all
@@ -1254,7 +1275,7 @@ def _htft_fair_signals(
         cb = combo.get(label)
         if cb is None or p_fair <= 0:
             continue
-        if not HTFT_ODDS_MIN <= cb <= HTFT_ODDS_MAX:
+        if not HTFT_ODDS_MIN <= cb <= HTFT_FAIR_ODDS_MAX:
             continue  # outside the bettable range — not actionable
         fair_odds = 1.0 / p_fair
         if fair_odds > HTFT_FAIR_MAX_ODDS:

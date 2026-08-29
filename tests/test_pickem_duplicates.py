@@ -323,6 +323,29 @@ def test_a_long_htft_price_is_no_longer_gated_out():
     assert combo.odds == 5.9, "the flag must carry its price for the odds band"
 
 
+def test_the_two_htft_caps_are_independent():
+    """The regression guard for a mistake already made once.
+
+    `HTFT_ODDS_MAX` had TWO consumers and only one was calibrated. htft_combo
+    is soccer, two cells, a correlation-fair approximation — that is what the
+    residual measurement covers. htft_fair is BASKETBALL, nine cells, a
+    bivariate-normal model, with no calibration behind widening it.
+
+    Raising the shared constant put 17 htft_fair flags on the live board with
+    severities to 123.3, every one a "shape off vs model" on a reversal cell —
+    the lowest-probability corner of the grid, where the model is least
+    trustworthy and a small absolute error is a huge ratio.
+    """
+    assert C.HTFT_FAIR_ODDS_MAX == 4.5, (
+        "htft_fair must keep the cap it was measured under")
+    assert C.HTFT_ODDS_MAX > C.HTFT_FAIR_ODDS_MAX, (
+        "the two checks are calibrated separately and must not share a cap")
+    import inspect
+    src = inspect.getsource(C._htft_fair_signals)
+    assert "HTFT_FAIR_ODDS_MAX" in src and "HTFT_ODDS_MAX" not in src, (
+        "htft_fair is reading the combo check's cap again")
+
+
 def test_the_cap_still_stops_where_the_model_breaks_down():
     """Past 15 the residual spread nearly doubles (19.2 against ~10), so the
     fair value is no longer trustworthy enough to call anything an outlier."""
