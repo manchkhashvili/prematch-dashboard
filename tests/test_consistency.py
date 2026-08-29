@@ -157,18 +157,35 @@ def test_htft_combo_correlation_fair_flags_river_plate():
 
 
 def test_htft_odds_range_gate_suppresses_out_of_range_flags():
-    # 2/2 @ 8.00 violates the product bound (6.10) but sits above the 4.5
-    # bettable cap → suppressed. 1/1 @ 1.10 violates dominance (legs 1.60)
-    # but sits below the 1.15 floor → suppressed.
-    rows = _htft_fixture(combo_11=1.10, combo_22=8.00)
+    # Both ends of the bettable range. 1/1 @ 1.10 violates dominance (legs
+    # 1.60) but sits below the 1.15 floor; 2/2 @ 40.0 violates the product
+    # bound but sits above the cap.
+    #
+    # The cap was 4.5 and this used 8.00 until 2026-08-29. It is 15.0 now,
+    # because the correlation-fair model's p10-p90 dispersion is flat at
+    # ~10-11 % all the way to 15 and only widens past it (19.2) — 8.00 is
+    # inside the range where the model still holds, so suppressing it was
+    # hiding findings rather than filtering noise. What the check is protecting
+    # is unchanged: a price outside the range never fires.
+    rows = _htft_fixture(combo_11=1.10, combo_22=40.0)
     assert not any(f.kind == "htft_combo" for f in find_consistency_flags(rows))
 
 
+def test_htft_gate_admits_a_long_but_modellable_price():
+    # The other half of the same invariant, and the case that forced the cap
+    # up: Lech Poznan Uam II v Staszkowka posted 1/1 @5.90 against a
+    # correlation-fair 5.25 — 12.4 % too generous, and invisible at cap 4.5.
+    rows = _htft_fixture(combo_11=5.90, combo_22=2.80)
+    flags = [f for f in find_consistency_flags(rows) if f.kind == "htft_combo"]
+    assert flags, "a 5.90 combo is inside the model's reliable range"
+
+
 def test_htft_fair_odds_range_gate():
-    # An outcome priced above 4.5 never emits a fair-model flag, however
-    # large the model disagreement.
+    # An outcome priced outside the bettable range never emits a fair-model
+    # flag, however large the model disagreement. Was 5.2 against a 4.5 cap;
+    # 5.2 is inside the range now, so this uses a price outside the 15.0 one.
     prices = _fair_9(scale=0.85)
-    prices["1/1"] = 5.2   # way over model fair (~2.86) AND over the 4.5 cap
+    prices["1/1"] = 40.0   # way over model fair AND outside the range
     flags = [f for f in find_consistency_flags(_even_game_rows(prices))
              if f.kind == "htft_fair" and "1/1" in f.detail]
     assert flags == []

@@ -415,7 +415,34 @@ period, so only the permissive/anomaly path changes.
 
 ### B6. `htft_combo` — the HT/FT 1/1 (and 2/2) price vs its own legs · **BETTABLE direction exists**
 The Halftime/Fulltime combo checked against the H1 and FT **regulation** 1X2
-legs. Only fires inside the bettable range `1.15 ≤ odds ≤ 4.5`. Two bounds:
+legs. Only fires inside the bettable range `1.15 ≤ odds ≤ 15.0`. Two bounds:
+
+> **The cap was 4.5 until 2026-08-29**, and it was hiding well-founded flags
+> while filtering almost no noise. Residual of the correlation-fair model,
+> `(posted − fair)/fair`, over 2 936 (event, cell) pairs:
+>
+> | posted | n | median | p10 | p90 | **p10–p90 spread** |
+> |---|---|---|---|---|---|
+> | 1.15–2.5 | 441 | −12.0% | −15.1 | −3.9 | 11.2 |
+> | 2.5–4.5 | 1264 | −21.1% | −25.9 | −16.0 | 9.9 |
+> | 4.5–8 | 846 | −31.3% | −37.4 | −27.2 | 10.2 |
+> | 8–15 | 297 | −44.9% | −51.3 | −40.0 | 11.3 |
+> | >15 | 86 | −58.6% | −72.6 | −53.5 | **19.2** ← model degrades |
+>
+> The **dispersion is flat** to 15 and only widens past it — the model holds
+> fine at 5.90. What drifts is the **median**, and it drifts *down*, so the
+> +2 % bar gets **harder** to clear as the price lengthens. A long-price flag
+> is a *bigger* outlier than a short-price one, which is the opposite of what a
+> longshot gate assumes.
+>
+> Cells clearing +2 % across the whole collected board: cap 4.5 → **30**,
+> cap 8 → 30, cap 15 → **31**, no cap → 31. The old cap blocked one historical
+> flag, and on the live board a `1/1 @5.90` sitting **12.4 % above fair** while
+> its own bucket's p90 is −27.2 % (Lech Poznań Uam II v Staszkówka).
+>
+> Filtering by PRICE now belongs to the per-table odds band on the tab and the
+> alert vetoes — visible and adjustable, where a constant makes a flag never
+> exist at all.
 - **Dominance:** `P(1/1) ≤ min(P(H1=1), P(FT=1))` ⟹ `odds(1/1) ≥` each leg.
   A combo **shorter than its own leg** is logically impossible → flag
   (`short_pct ≥ HTFT_GAP_PCT = 2%`).

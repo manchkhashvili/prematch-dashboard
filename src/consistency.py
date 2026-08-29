@@ -114,9 +114,36 @@ HTFT_FAIR_MAX_ODDS = 20.0  # ignore outcomes the model prices longer than this
 HTFT_SHAPE_MIN_PROB = 0.05  # shape check only on outcomes the model gives >=5%
 # Bettable-range gate (owner 2026-06-12): HT/FT flags only fire when CB's
 # POSTED price sits inside this range — shorter than 1.15 isn't worth betting,
-# longer than 4.5 is longshot territory where flags were noise.
+# longer than the cap is longshot territory where flags were noise.
+#
+# The cap was 4.5 and is now 15.0 (2026-08-29). It was hiding well-founded
+# flags while filtering almost no noise, which the board says plainly. Residual
+# of the correlation-fair model, (posted - fair)/fair, bucketed by posted price
+# over 2 936 (event, cell) pairs:
+#
+#     posted      n     median     p10      p90    p10-p90 spread
+#     1.15-2.5   441    -12.0%   -15.1    -3.9         11.2
+#     2.5-4.5   1264    -21.1%   -25.9   -16.0          9.9
+#     4.5-8      846    -31.3%   -37.4   -27.2         10.2
+#     8-15       297    -44.9%   -51.3   -40.0         11.3
+#     >15         86    -58.6%   -72.6   -53.5         19.2   <- model degrades
+#
+# The DISPERSION is flat at ~10-11 % all the way to 15 and only widens past it,
+# so the model holds fine at 5.90; it is the MEDIAN that drifts with price. And
+# because the median drifts DOWN, the +2 % bar gets HARDER to clear as the price
+# lengthens, not easier — a long-price flag is a bigger outlier than a
+# short-price one, which is the opposite of what a longshot gate assumes.
+#
+# What the old cap actually cost, counting cells clearing the +2 % bar across
+# the whole collected board: cap 4.5 -> 30 flags, cap 8 -> 30, cap 15 -> 31,
+# no cap -> 31. It was blocking one historical flag and, on the live board, a
+# 1/1 @5.90 sitting 12.4 % above fair while its own bucket's p90 is -27.2 %.
+#
+# Noise filtering by PRICE now belongs to the odds band on the Anomalies tab and
+# the alert vetoes — visible, per-table and adjustable, where this constant
+# makes a flag never exist at all.
 HTFT_ODDS_MIN = 1.15
-HTFT_ODDS_MAX = 4.5
+HTFT_ODDS_MAX = 15.0
 # Sports the consistency engine evaluates. Basketball (its original home),
 # soccer (1X2 + HT/FT), and tennis (set winners vs match winner — see
 # set_vs_match below; tennis detail pages carry 15 markets that are all

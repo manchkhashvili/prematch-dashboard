@@ -291,3 +291,42 @@ def test_every_flag_that_names_a_bet_carries_its_price():
     assert flags["ml_vs_spread"].odds is None, (
         "ml_vs_spread describes a relationship between markets, not one leg — "
         "giving it a price would make the band hide it for the wrong reason")
+
+
+# ── the HT/FT bettable-range cap ─────────────────────────────────────────────
+
+HTFT_LEGS = [
+    _o("moneyline", "FT", {"home": 2.00, "draw": 3.95, "away": 2.70},
+       section="Main result"),
+    _o("moneyline", "H1", {"home": 3.50, "draw": 2.70, "away": 2.15},
+       section="1st Half Result"),
+]
+HTFT_GRID = {"1/1": 5.90, "1/X": 16.0, "1/2": 20.3, "X/1": 9.60, "X/X": 9.10,
+             "X/2": 5.90, "2/1": 27.8, "2/X": 16.0, "2/2": 2.80}
+
+
+def test_a_long_htft_price_is_no_longer_gated_out():
+    """Lech Poznan Uam II v Staszkowka: 1/1 @5.90 against a correlation-fair
+    5.25 is 12.4 % too generous, and the old 4.5 cap made the flag not exist.
+
+    The cap earned its 15.0 by measurement: the model's p10-p90 dispersion is
+    flat at ~10-11 % all the way to 15 and only widens past it (19.2). What
+    drifts with price is the MEDIAN, downwards — so the +2 % bar gets harder to
+    clear as the price lengthens, and a long-price flag is a bigger outlier
+    than a short one.
+    """
+    assert C.HTFT_ODDS_MAX >= 5.90, "the cap would gate this out again"
+    f = _kinds(HTFT_LEGS + [_o("htft", "FT", HTFT_GRID, section="HT/FT")])
+    combo = f.get("htft_combo")
+    assert combo is not None, "the 12.4% overprice was gated out"
+    assert combo.outcome == "1/1"
+    assert combo.odds == 5.9, "the flag must carry its price for the odds band"
+
+
+def test_the_cap_still_stops_where_the_model_breaks_down():
+    """Past 15 the residual spread nearly doubles (19.2 against ~10), so the
+    fair value is no longer trustworthy enough to call anything an outlier."""
+    assert C.HTFT_ODDS_MAX <= 15.0
+    grid = dict(HTFT_GRID, **{"1/1": 60.0})
+    assert "htft_combo" not in _kinds(
+        HTFT_LEGS + [_o("htft", "FT", grid, section="HT/FT")])
