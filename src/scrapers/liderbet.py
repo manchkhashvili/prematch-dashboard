@@ -186,6 +186,35 @@ _DECOR = re.compile(r"[①-⓿⁰-₟⅐-↏]")
 _SUBPERIOD = ("half", "quarter", " set", "{")  # → not a full-match market
 
 
+# ── corners: a second board, on the permissive/anomaly path ────────────────
+# Lider ships a fuller corner board than CrystalBet does — Corner Matchbet on
+# 319 events, Corners Handicap on 322, Total corners on 344, plus first-half
+# variants on 335-344. Same shape as the goals board: a 3-way result and a
+# handicap ladder.
+#
+# These MUST carry submarket="corners". The consistency engine groups on
+# (event, submarket), so an unlabelled corners row would land in the goals
+# bucket and every check would compare a goals price against a corner count.
+#
+# Kept out of _classify_market deliberately: that function feeds the Pinnacle
+# matching path too, and Pinnacle prices none of this.
+_CORNER_MARKETS: dict[str, tuple[str, str, int]] = {
+    "corner matchbet":            ("moneyline", "FT", 3),
+    "corners handicap":           ("spread",    "FT", 2),
+    "total corners":              ("total",     "FT", 2),
+    "1st half - corner matchbet": ("moneyline", "H1", 3),
+    "1st half - corner handicap": ("spread",    "H1", 2),
+    "1st half - total corners":   ("total",     "H1", 2),
+}
+
+
+def _classify_corner_market(raw_name: str) -> tuple[str, str, int] | None:
+    """Corner markets → (market_type, period, n_way). None if not one."""
+    name = _DECOR.sub("", raw_name or "").strip().lower()
+    name = re.sub(r"\s+", " ", name)
+    return _CORNER_MARKETS.get(name)
+
+
 def _classify_market(raw_name: str) -> tuple[str, int] | None:
     """Map a Lider marketType name → (market_type, n_way) for FT markets only.
 
@@ -313,6 +342,11 @@ def _parse_match(
     for mk in (m.get("markets") or {}).values():
         type_id = mk.get("typeId")
         tp = market_types.get(type_id, {})
+        # Reset per market. Only the corner branch sets it, and without this a
+        # corners row would leave "corners" behind for the next market in the
+        # loop — mislabelling a goals market as a corner one, which the
+        # consistency engine would then check against the real corner board.
+        submarket: str | None = None
         # Detail-tier markets are identified by their STABLE typeId; the FT
         # headline set still goes through the name classifier. typeId wins when
         # both would match, because two markets can share a name ("Handicap" is
@@ -323,6 +357,9 @@ def _parse_match(
             market_type, period, n_way, team_side = hit
         elif detail or not _names_classified(sport_name):
             continue            # allowlist-only (detail payload, and hockey)
+        elif _classify_corner_market(tp.get("name", "")) is not None:
+            market_type, period, n_way = _classify_corner_market(tp.get("name", ""))
+            team_side, submarket = None, "corners"
         else:
             cls = _classify_market(tp.get("name", ""))
             if cls is None:
@@ -343,7 +380,7 @@ def _parse_match(
             if n_way == 3:
                 sel["draw"] = _odds((priced.get("X") or {}).get("value"))
             row = _build(sport_name, home, away, "moneyline", period, sel,
-                         None, league, start_time, event_id, sr_match_id, fetched_at)
+                         None, league, start_time, event_id, sr_match_id, fetched_at, submarket=submarket)
             if row:
                 out.append(row)
 
@@ -353,7 +390,7 @@ def _parse_match(
                    "under": _odds((priced.get("Under") or {}).get("value"))}
             row = _build(sport_name, home, away, market_type, period, sel,
                          line, league, start_time, event_id, sr_match_id, fetched_at,
-                         team_side=team_side)
+                         team_side=team_side, submarket=submarket)
             if row:
                 out.append(row)
 
@@ -363,7 +400,7 @@ def _parse_match(
             sel = {"home": _odds(home_oc.get("value")),
                    "away": _odds((priced.get("2") or {}).get("value"))}
             row = _build(sport_name, home, away, "spread", period, sel,
-                         line, league, start_time, event_id, sr_match_id, fetched_at)
+                         line, league, start_time, event_id, sr_match_id, fetched_at, submarket=submarket)
             if row:
                 out.append(row)
 
@@ -375,7 +412,7 @@ def _parse_match(
             if any(v is None for v in sel.values()):
                 continue
             row = _build(sport_name, home, away, "htft", "FT", sel,
-                         None, league, start_time, event_id, sr_match_id, fetched_at)
+                         None, league, start_time, event_id, sr_match_id, fetched_at, submarket=submarket)
             if row:
                 out.append(row)
 
@@ -384,7 +421,7 @@ def _parse_match(
 
 def _build(sport_name, home, away, market_type, period, selections, line,
            league, start_time, event_id, sr_match_id, fetched_at,
-           team_side=None) -> Odds | None:
+           team_side=None, submarket=None) -> Odds | None:
     if any(v is None for v in selections.values()):
         return None
     if market_type in ("total", "spread", "team_total") and line is None:
@@ -396,6 +433,7 @@ def _build(sport_name, home, away, market_type, period, selections, line,
             fetched_at=fetched_at, line=line, start_time=start_time,
             league=league, raw_event_id=str(event_id) if event_id else None,
             sr_match_id=sr_match_id, team_side=team_side,
+            submarket=submarket,
         )
     except ValueError as exc:               # odds <= 1.0 slipped through
         log.debug("liderbet Odds rejected: %s", exc)

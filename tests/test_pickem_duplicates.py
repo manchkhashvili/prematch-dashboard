@@ -433,3 +433,35 @@ def test_the_corners_board_is_classified_at_all():
         assert (c.market_type, c.period, c.submarket) == (mt, per, "corners")
         assert SOC.classify_market_title(title) is None, (
             f"{title} must stay off the strict path — Pinnacle cannot pair it")
+
+
+# ── Lider-Bet corners ────────────────────────────────────────────────────────
+
+def test_liderbet_classifies_its_corner_board():
+    """Lider ships a fuller corner board than CB: Corner Matchbet on 319
+    events, Corners Handicap on 322, Total corners on 344, plus first-half
+    variants on 335-344."""
+    from src.scrapers import liderbet as LB
+    for name, want in (("Corner Matchbet", ("moneyline", "FT", 3)),
+                       ("Corners Handicap", ("spread", "FT", 2)),
+                       ("Total corners", ("total", "FT", 2)),
+                       ("1st Half - Corner Matchbet", ("moneyline", "H1", 3)),
+                       ("1st Half - Corner Handicap", ("spread", "H1", 2))):
+        assert LB._classify_corner_market(name) == want, name
+    assert LB._classify_corner_market("Total") is None
+    assert LB._classify_corner_market("Handicap") is None
+
+
+def test_liderbet_corner_rows_are_labelled_and_do_not_leak():
+    """`submarket` is set only on the corner branch, so it must be reset per
+    market or a corners row leaves "corners" behind for the NEXT market in the
+    loop — mislabelling a goals market, which the consistency engine would then
+    check against the real corner board."""
+    import inspect
+    from src.scrapers import liderbet as LB
+    src = inspect.getsource(LB._parse_match)
+    assert "submarket: str | None = None" in src, "submarket is not reset per market"
+    assert src.count("submarket=submarket") == src.count("_build(sport_name"), (
+        "a _build call is missing submarket, so those rows would land unlabelled")
+    # ...and the scraper can actually carry it
+    assert "submarket" in inspect.signature(LB._build).parameters
