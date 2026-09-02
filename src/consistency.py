@@ -332,6 +332,10 @@ class ConsistencyFlag:
     # with no price are never filtered out, because muting them would turn a
     # noise filter into a coverage hole.
     odds: Optional[float] = None
+    # Which board this finding is on: None for the main goals markets,
+    # "corners" for the corner markets, and so on. Every check runs
+    # INDEPENDENTLY per submarket — see the grouping in find_consistency_flags.
+    submarket: Optional[str] = None
 
     @property
     def match_label(self) -> str:
@@ -893,22 +897,36 @@ def find_consistency_flags(
     for o in odds:
         if o.sport not in CONSISTENCY_SPORTS:
             continue
-        ev = events.setdefault(o.raw_event_id, {})
+        # Keyed by (event, SUBMARKET). Corners are a separate board that
+        # happens to share an event id and a period vocabulary with goals: a
+        # corners 1X2 and a goals 1X2 are both "moneyline FT", and a corners
+        # 0.0 handicap and a goals one are both "spread FT line 0". Grouping on
+        # the event alone would put them in one bucket and every check would
+        # then compare a goals price against a corners price — ml_vs_spread
+        # would read the goals 1X2 against the corners pick'em, pickem_duplicate
+        # would "lock" a cover across two different things being counted.
+        #
+        # Everything that existed before this carries submarket=None, so the
+        # grouping is unchanged for it.
+        ev = events.setdefault((o.raw_event_id, o.submarket), {})
         ev.setdefault(o.period, {}).setdefault(o.market_type, []).append(o)
-        meta.setdefault(o.raw_event_id, o)
+        meta.setdefault((o.raw_event_id, o.submarket), o)
 
     flags: list[ConsistencyFlag] = []
-    for eid, periods in events.items():
-        m = meta[eid]
+    for (eid, submarket), periods in events.items():
+        m = meta[(eid, submarket)]
         views = {per: _build_period_view(mkts) for per, mkts in periods.items()}
 
-        def mk(kind, per_label, detail, severity, outcome=None, odds=None):
+        def mk(kind, per_label, detail, severity, outcome=None, odds=None,
+               _sub=submarket):
             flags.append(ConsistencyFlag(
                 sport=m.sport, league=m.league, home=m.home, away=m.away,
                 start_time=m.start_time, event_id=eid,
-                kind=kind, periods=per_label, detail=detail,
+                kind=kind, periods=per_label,
+                detail=(f"[{_sub}] {detail}" if _sub else detail),
                 severity=round(severity, 2), outcome=outcome,
                 odds=round(float(odds), 3) if odds is not None else None,
+                submarket=_sub,
             ))
 
         # 1. ML vs spread win-prob (per period)

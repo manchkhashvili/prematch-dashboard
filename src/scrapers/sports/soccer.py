@@ -522,6 +522,25 @@ _RE_DNB = re.compile(r"^(?:1st\s*half\s*-\s*)?draw no bet$")
 # CB ships it on ~105 of the collected soccer events.
 _RE_FTS = re.compile(r"^first team to score$")
 
+# ── corners, on the permissive path only ────────────────────────────────────
+# CB serves a whole second board per match — corners — with the same shape as
+# the goals board: a 3-way "who wins the corner count" and a 2-way handicap
+# ladder with a 0.0 rung. The strict path skips the 3-way as "different shape
+# from Pinnacle", which is right for MATCHING and wrong to inherit here, the
+# same mistake Draw No Bet was making: the consistency engine never touches
+# Pinnacle, so a market's matchability says nothing about whether the book can
+# be checked against itself on it.
+#
+# Whole-board census (CrystalBet soccer): "Corner Matchbet" 287 events,
+# "1st Half - CornerBet" 287, "Handicap of corner" 170 with a 0.0 rung on 141,
+# "Total Corners" 280. Together with the already-classified starred variants
+# that is the full pick'em structure — a 1X2 and a 0.0 rung — on a second board
+# the scan already has in hand, because it is on the same detail page.
+_RE_CORNER_ML   = re.compile(r"^corner\s*matchbet$")
+_RE_CORNER_ML_H1 = re.compile(r"^1st\s*half\s*-\s*(?:cornerbet|corner\s*matchbet)$")
+_RE_CORNER_HCP  = re.compile(r"^handicap of corner$")
+_RE_CORNER_TOT  = re.compile(r"^total corners$")
+
 
 def classify_market_title_permissive(title: str) -> Optional[MarketClassification]:
     """Strict soccer classification PLUS the markets that are unmatchable
@@ -559,6 +578,18 @@ def classify_market_title_permissive(title: str) -> Optional[MarketClassificatio
     norm = _normalize_title(title)
     if _RE_HTFT_TITLE.match(norm) and not _RE_HTFT_EXCLUDE.search(norm):
         return MarketClassification(market_type="htft", period="FT")
+    if _RE_CORNER_ML.match(norm):
+        return MarketClassification(market_type="moneyline", period="FT",
+                                    n_way=3, submarket="corners")
+    if _RE_CORNER_ML_H1.match(norm):
+        return MarketClassification(market_type="moneyline", period="H1",
+                                    n_way=3, submarket="corners")
+    if _RE_CORNER_HCP.match(norm):
+        return MarketClassification(market_type="spread", period="FT",
+                                    n_way=2, submarket="corners")
+    if _RE_CORNER_TOT.match(norm):
+        return MarketClassification(market_type="total", period="FT",
+                                    n_way=2, submarket="corners")
     if _RE_FTS.match(norm):
         return MarketClassification(market_type="fts", period="FT", n_way=3)
     if _RE_DNB.match(norm):

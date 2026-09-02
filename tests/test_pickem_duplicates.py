@@ -353,3 +353,83 @@ def test_the_cap_still_stops_where_the_model_breaks_down():
     grid = dict(HTFT_GRID, **{"1/1": 60.0})
     assert "htft_combo" not in _kinds(
         HTFT_LEGS + [_o("htft", "FT", grid, section="HT/FT")])
+
+
+# ── corners are a second board, and must never mix with goals ────────────────
+
+def _corner(mt, per, sels, line=None, section=None):
+    return Odds(source="crystalbet", sport="soccer", home="A", away="B",
+                market_type=mt, period=per, selections=dict(sels),
+                fetched_at=NOW, line=line, raw_event_id="e1",
+                submarket="corners", section=section)
+
+
+def test_a_corners_market_never_pairs_with_a_goals_market():
+    """The bug this partition exists to prevent, and it would have been silent.
+
+    A corners 1X2 and a goals 1X2 are both "moneyline FT"; a corners 0.0 rung
+    and a goals one are both "spread FT line 0". Grouped on the event alone
+    they land in one bucket, and every check then reads a goals price against a
+    corners price — pickem_duplicate would "lock" a cover across two different
+    things being counted.
+
+    The invariant, stated so it does not depend on the fixture happening to be
+    flag-free: scanning the two boards TOGETHER must produce exactly what
+    scanning each one ALONE produces. Any extra flag is a cross-board pairing.
+    """
+    goals = [
+        _o("moneyline", "FT", {"home": 2.50, "draw": 3.40, "away": 2.90},
+           section="Main result"),
+        _o("spread", "FT", {"home": 1.85, "away": 1.95}, line=0.0,
+           section="Asian Handicap"),
+    ]
+    # A corners board with a very different balance — the cross pairing would
+    # be wildly inconsistent, which is exactly what must not be looked at.
+    corners = [
+        _corner("moneyline", "FT", {"home": 1.40, "draw": 9.00, "away": 6.50},
+                section="Corner Matchbet"),
+        _corner("spread", "FT", {"home": 1.22, "away": 4.10}, line=0.0,
+                section="Handicap of corner"),
+    ]
+
+    def sig(fs):
+        return sorted((f.kind, f.submarket, f.severity) for f in fs)
+
+    together = sig(C.find_consistency_flags(goals + corners))
+    apart = sig(C.find_consistency_flags(goals) + C.find_consistency_flags(corners))
+    assert together == apart, (
+        "combining the boards produced a flag neither board produces alone — "
+        "a goals market was compared against a corners market")
+
+
+def test_a_corners_contradiction_is_still_found_and_labelled():
+    """Partitioning must not mean ignoring — the checks run on the corners
+    board on its own terms, and the flag says which board it is on."""
+    rows = [
+        _corner("moneyline", "FT", {"home": 2.90, "draw": 4.05, "away": 1.90},
+                section="Corner Matchbet"),
+        _corner("spread", "FT", {"home": 2.30, "away": 1.45}, line=0.0,
+                section="Handicap of corner"),
+        _corner("moneyline", "FT", {"home": 1.65, "away": 1.95},
+                section="Draw no bet of corner"),
+    ]
+    flags = C.find_consistency_flags(rows)
+    assert flags, "the corners board produced nothing"
+    assert all(f.submarket == "corners" for f in flags)
+    assert all(f.detail.startswith("[corners]") for f in flags), (
+        "a corners flag must say so — otherwise it reads as a goals finding")
+
+
+def test_the_corners_board_is_classified_at_all():
+    """CB serves a full second board per match. The 3-way was skipped as
+    "different shape from Pinnacle" — right for matching, wrong to inherit in a
+    check that never touches Pinnacle."""
+    for title, mt, per in (("Corner Matchbet", "moneyline", "FT"),
+                           ("1st Half - CornerBet", "moneyline", "H1"),
+                           ("Handicap of corner", "spread", "FT"),
+                           ("Total Corners", "total", "FT")):
+        c = SOC.classify_market_title_permissive(title)
+        assert c is not None, f"{title} is invisible"
+        assert (c.market_type, c.period, c.submarket) == (mt, per, "corners")
+        assert SOC.classify_market_title(title) is None, (
+            f"{title} must stay off the strict path — Pinnacle cannot pair it")
