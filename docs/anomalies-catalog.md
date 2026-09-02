@@ -960,3 +960,72 @@ model fair 3.45            ->  EV +99.8%
 ```
 
 with the two methods agreeing to within 0.35 on the fair price.
+
+
+## Measured and NOT built — the side-market sweep (2026-09-02)
+
+Owner asked to extend the checks to every statistic with handicaps and
+over/unders: corners, cards, shots, throw-ins, tackles, anything. Corners were
+built (both books). The rest was measured first and rejected, and the numbers
+are here so the call can be revisited on evidence rather than re-derived.
+
+### What the statistic boards hold, soccer
+
+| statistic | CrystalBet | Lider-Bet |
+|---|---|---|
+| cards | 1085 ev | 932 |
+| corners | 601 | 362 |
+| shots | 241 | 236 |
+| penalties | 34 | 106 |
+| offsides / fouls | 19 / 16 | 28 / 26 |
+| **throw-ins** | **15** | **21** |
+| tackles / saves | 9 / 6 | 7 / 6 |
+
+Past the top three it is a tail of under ~35 events. Throw-ins and tackles are
+single digits to low twenties on both books.
+
+### Three things measured, three zeros
+
+**`N+` threshold series (shots).** One-sided Yes prices, so `find_ladder_anomalies`
+cannot read them — but they carry their own exact bound, `P(≥4) ≥ P(≥5) ≥ …`.
+Built the check: **1090 series over 219 CB events, 594 over 198 Lider events,
+7444 adjacent comparisons, ZERO order violations.** A sample series reads
+`{8: 1.5, 9: 1.8, 10: 2.3, 11: 2.95, 12: 3.75}` — generated from one
+distribution, so it cannot disagree with itself.
+
+**`Exact bookings` vs the bookings total ladder.** Two *separately priced*
+markets, which is the shape that pays — and it showed a 4.45pp median
+disagreement, huge against everything else. It is an artifact: the exact
+market carries a **1.592 median overround** with **8.3 % of its devigged mass
+in buckets pinned at the 30.0 ceiling**. Proportional devigging spreads that
+evenly, deflating the short buckets, which is precisely the one-directional gap
+observed. Same trap as the old "grid opportunities" (100.0 on 88 552 positions).
+
+**The cards board.** It has exactly the right shape — CB posts TWO independent
+3-way results (`Booking 1X2` and `Which team will have the most cards`) plus a
+`Handicap cards**` ladder with a 0.00 rung. But they do not co-occur:
+
+```
+Booking 1X2                        40 events
+Which team will have the most cards 38 events
+Handicap cards** (0.00 rung)       39 events
+        BOTH 3-way results:         3 events
+        3-way + 0.00 rung:          1 event
+```
+
+On those 3 the two views disagree by up to **9.9pp** — real, but the
+best-of-each cover costs 1.0077 at its cheapest, so **0 locks**.
+
+### The pattern, and the actual constraint
+
+Contradictions live only where a book prices two things **independently**.
+Every zero above is a market generated from one number — a ladder, a threshold
+series, an incl-OT derivative. Every check that fires is a cross between
+separately priced markets: Draw No Bet vs the 0.0 rung, the 1X2 vs the 0.0
+rung, the HT/FT grid vs its own legs.
+
+But the binding constraint is not *which* markets get classified — it is how
+rarely a book posts two independent views of one quantity **on the same
+event**. Corners: 5 (event, period) pairs carry both a corners 1X2 and a
+corners 0.0 rung. Cards: 3. That is the ceiling on this whole direction, and
+no amount of extra classifiers raises it.
