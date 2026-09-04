@@ -28,7 +28,8 @@ https://guest.api.arcadia.pinnacle.com/0.1
 Headers (v1 sends all three; only some are enforced):
 
 ```
-x-api-key: CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R   # from pinnacle.com /config/app.json
+x-api-key: <guest key>   # resolved at runtime from pinnacle.com/config/app.json,
+                         # or pinned via PINNACLE_API_KEY — see src/scrapers/pinnacle.py
 Origin:    https://www.pinnacle.com
 Referer:   https://www.pinnacle.com/en/<sport>/
 ```

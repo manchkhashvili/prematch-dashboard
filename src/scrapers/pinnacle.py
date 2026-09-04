@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -91,19 +92,75 @@ SPORT_ID_AMERICANFOOTBALL = 15
 # opens in late September.
 SPORT_ID_ICEHOCKEY = 19
 
+# Pinnacle's guest API key. It is not a secret — the site publishes it in its
+# own front-end config so any browser can read it — but it is not ours to hold
+# either, and a literal credential in a public repo reads as one whatever it
+# actually protects. So: environment first, then the same public endpoint the
+# browser reads, which also makes the old "rotate if 403" note self-healing.
+PINNACLE_CONFIG_URL = "https://www.pinnacle.com/config/app.json"
+_API_KEY_CACHE: dict[str, str] = {}
+
+
+def _api_key() -> str:
+    """The guest API key, resolved lazily and cached for the process.
+
+    Lazy on purpose: resolving at import time would put a network call in every
+    `import pinnacle`, including under pytest and in `--help`.
+    """
+    env = os.environ.get("PINNACLE_API_KEY", "").strip()
+    if env:
+        return env
+    if "key" in _API_KEY_CACHE:
+        return _API_KEY_CACHE["key"]
+    try:
+        cfg = httpx.get(PINNACLE_CONFIG_URL, timeout=15,
+                        headers={"User-Agent": "Mozilla/5.0"}).json()
+        key = ((cfg.get("api") or {}).get("haywire") or {}).get("apiKey") \
+            or cfg.get("apiKey")
+        if not isinstance(key, str) or not key:
+            raise ValueError(f"no apiKey field in {PINNACLE_CONFIG_URL}")
+        _API_KEY_CACHE["key"] = key
+        log.info("pinnacle: guest api key fetched from %s", PINNACLE_CONFIG_URL)
+        return key
+    except Exception as exc:
+        raise RuntimeError(
+            "Pinnacle guest API key unavailable: set PINNACLE_API_KEY, or let "
+            f"the process reach {PINNACLE_CONFIG_URL}. Underlying error: {exc}"
+        ) from exc
+
+
 # Per-sport Referer mostly cosmetic — Pinnacle's WAF doesn't enforce it
 # strictly — but matches what a real user would send. Other headers shared.
 def _make_headers(sport_name: str) -> dict[str, str]:
     return {
-        "x-api-key": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R",  # from /config/app.json; rotate if 403
+        "x-api-key": _api_key(),
         "Origin": "https://www.pinnacle.com",
         "Referer": f"https://www.pinnacle.com/en/{sport_name}/",
     }
 
 
-# Back-compat constant: basketball headers. Tests don't import this, but the
-# original module exposed HEADERS at module level.
-HEADERS = _make_headers("basketball")
+# Back-compat shim: this module used to expose a plain HEADERS dict built at
+# import time. It is now filled on first ACCESS, so importing the module never
+# makes a network call.
+class _LazyHeaders(dict):
+    def _fill(self):
+        if not dict.__len__(self):
+            self.update(_make_headers("basketball"))
+
+    def __missing__(self, key):
+        self._fill()
+        return dict.__getitem__(self, key)
+
+    def __iter__(self):
+        self._fill()
+        return dict.__iter__(self)
+
+    def __len__(self):
+        self._fill()
+        return dict.__len__(self)
+
+
+HEADERS = _LazyHeaders()
 
 # Skip league names containing any of these (case-insensitive). Includes
 # soccer-specific "corners"/"bookings" — those leagues exist in the

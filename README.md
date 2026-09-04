@@ -1,50 +1,102 @@
-# Prematch Odds Dashboard
+# Prematch
 
-A local web dashboard that scrapes [CrystalBet](https://crystalbet.com) prematch
-odds and compares them against [Pinnacle](https://www.pinnacle.com) as a sharp
-reference, surfacing **+EV** and **arbitrage** opportunities across basketball,
-soccer, tennis, and American football.
+[![tests](https://github.com/manchkhashvili/prematch-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/manchkhashvili/prematch-dashboard/actions/workflows/tests.yml)
 
-Status: **research preview, single-user.** Tested daily against live books;
-not production-hardened.
+**An odds-aggregation and market-inconsistency platform.** It ingests prematch
+prices from **seven bookmakers** across **five sports**, normalises their
+mutually incompatible market vocabularies into one schema, and looks for two
+kinds of opportunity: prices that disagree *between* books, and prices that
+contradict *themselves* inside a single book.
+
+```
+23 488 lines of source   ·   18 369 lines of tests   ·   1 808 tests
+7 books   ·   5 sports   ·   4 transport protocols
+37.2 M price ticks over 80 days in a 4.5 GB time-series store
+```
+
+Status: **research project, single-user.** Runs daily against live books; not
+production-hardened, and not a recommendation to bet on anything.
+
+---
+
+## The interesting parts
+
+**Seven books, four protocols.** No two of these speak the same language, and
+the work is mostly in making them comparable:
+
+| book | transport |
+|---|---|
+| CrystalBet | ASP.NET WebForms — `__doPostBack` + viewstate, HTML repaired with html5lib |
+| Pinnacle | REST JSON (guest Arcadia API), used as the sharp reference |
+| Lider-Bet, Crocobet | JSON over TLS-impersonated HTTP (`curl_cffi`) |
+| Setanta | SignalR over WebSocket, MessagePack frames |
+| Betlive, 1xbet | REST JSON, 1xbet behind a pinned DNS resolver |
+
+**A schema that survives them.** Market vocabularies genuinely disagree, and
+folding that away loses money. Ice hockey is the sharpest case: `REG` (the 60
+minutes, where a tie is a real outcome) and `FT` (the game as it settles,
+overtime and shootout included) are *different markets*. Pinnacle keeps
+regulation on period 6 and incl-OT on period 0; CrystalBet ships two goal
+ladders per event. Merging them scores a 60-minute total against a full-game
+one on every event — so the model keeps them apart, and
+[`docs/icehockey.md`](docs/icehockey.md) records how that was verified rather
+than assumed.
+
+**Change-only storage.** A row lands only when a price *moves*, with a
+heartbeat recording "this whole board was read at T" — so a price that vanished
+is distinguishable from a board that was never read. Prices are stored as
+milli-odds integers in `WITHOUT ROWID` tables, and diffs run as set-based SQL
+against staged temp tables, keeping memory flat regardless of board size.
+
+**Anomaly detection from identities, not models.** The checks that hold up are
+arithmetic, not statistical. A Draw-No-Bet and a 0.0 Asian handicap are the
+*same bet* — both void on the draw — so a book quoting both at different prices
+can be covered for less than 1.0 with no losing branch. A 0.0 rung must be a
+*shorter* price than the 1X2 on the same side, exactly `1 − P(draw)`, because
+it voids the draw where the 1X2 loses to it. Live cases found at **+7.4 %**.
+
+**Measurement over intuition.** Every threshold in the codebase is a number
+someone measured, and the negative results are recorded next to the positive
+ones — see [`docs/anomalies-catalog.md`](docs/anomalies-catalog.md). Findings
+that did not survive contact with the data are documented as such, including a
+4.45pp "signal" that turned out to be a devigging artifact of the book's own
+price ceiling.
 
 ---
 
 ## What it does
 
-- Scrapes CrystalBet's `Sports.aspx` prematch pages via headless Playwright
-  (basketball / soccer / tennis / American football), parsing moneylines,
-  spreads, totals, team-totals, and corners markets.
-- Fetches Pinnacle's guest API for the same sports (sport ids 4 / 29 / 33 / 15
-  — Pinnacle calls American football "Football" and soccer "Soccer").
-- Matches CB events to Pin events by fuzzy team name similarity + start-time
-  proximity (Phase 3 fuzzy normalization handles tennis player-name format,
-  Georgian-to-Latin transliteration, GitHub Primer light/dark theming).
-- Devigs Pinnacle's posted prices using **Shin's method** (Phase 3.7 — replaced
-  the proportional default after we caught it overstating dog probabilities
-  on skewed lines).
-- Computes per-side edge%, quarter-Kelly stake suggestions, and ARB
-  opportunities (1/d1 + 1/d2 &lt; 1).
-- Serves a vanilla-HTML dashboard at `http://localhost:8000` with five pages:
-  Matches / Arbs / Bets / Calc / Unmatched.
-- Tracks placed bets in SQLite, snapshotting CB and Pinnacle fair odds every
-  poll so you can see CLV (Closing Line Value) per-bet via inline sparklines.
-- Cross-page sound alert when a new opportunity clears the gates you set —
-  edge, probability-point edge, odds range, Kelly range, Pinnacle limit,
-  kickoff window, plus sport/book/market/period/confidence filters — with the
-  seen-set persisted in `localStorage` so navigation never replays.
-
----
+- Scrapes CrystalBet's `Sports.aspx` prematch board browser-free by default
+  (`CB_TRANSPORT=http`), with Playwright kept as an optional fallback, across
+  basketball, soccer, tennis, American football and ice hockey.
+- Fetches Pinnacle's guest API for the same sports as the sharp reference, plus
+  five soft books for cross-book comparison.
+- Matches events across books by fuzzy team-name similarity and start-time
+  proximity — handling tennis player-name formats, Georgian-to-Latin
+  transliteration and per-book alias tables.
+- Devigs posted prices with **Shin's method** (replaced the proportional
+  default after it was caught overstating dog probabilities on skewed lines).
+- Computes per-side edge %, quarter-Kelly stakes, and arbitrage
+  (`1/d1 + 1/d2 < 1`), including push-aware covers that a naive sum misses.
+- Runs a CB-internal consistency engine over ladders, period structure, HT/FT
+  grids and the pick'em family, partitioned per submarket so a corners market
+  is never compared against a goals one.
+- Serves a dependency-free HTML dashboard at `http://localhost:8000`, tracks
+  placed bets in SQLite, and records every price it sees to a tick store.
 
 ## Stack
 
-- **Python 3.11+** (3.10 also works)
-- **httpx** for Pinnacle's guest API
-- **playwright** + Chromium for CrystalBet's ASP.NET WebForms pages
+- **Python 3.12+** (CI runs 3.12; developed on 3.14)
+- **httpx** for the JSON APIs · **curl_cffi** for the books that fingerprint TLS
+- **websockets** + MessagePack for Setanta's SignalR feed
+- **html5lib** to repair CrystalBet's unclosed ASP.NET markup — a browser-equivalent
+  parse, which is what makes the browser-free transport possible
+- **playwright** + Chromium as an *optional* fallback (`CB_TRANSPORT=playwright`);
+  not needed for the default path or for the tests
 - **FastAPI** + **uvicorn** for the local server
-- **sqlite3** (stdlib) for the bet tracker
-- **rapidfuzz** for team-name matching
-- **pyyaml** for the manual team alias overrides
+- **sqlite3** (stdlib) for the tick store and bet tracker
+- **numpy** for the goal model's Poisson score matrices and devigging
+- **rapidfuzz** for team-name matching · **pyyaml** for alias overrides
 - Vanilla HTML / CSS / JavaScript on the frontend — no React, no build step
 
 ---
@@ -58,14 +110,20 @@ cd prematch
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# 2. Install Python deps + the Chromium browser Playwright needs
+# 2. Install Python deps
 pip install -r requirements.txt
-playwright install chromium
 
 # 3. Run the dashboard
 python main.py
 # → http://localhost:8000
 ```
+
+No browser install is needed: CrystalBet is scraped over plain HTTP by default.
+Only `CB_TRANSPORT=playwright` needs `playwright install chromium`.
+
+Pinnacle's guest API key is resolved at runtime from the same public config the
+site's own front end reads, so there is nothing to configure. Set
+`PINNACLE_API_KEY` to pin it yourself.
 
 The first cycle is a cold-start (~30-60 s per sport). Subsequent cycles use
 the on-disk change cache and are typically &lt;30 s.
@@ -129,6 +187,7 @@ back to the env-seeded defaults.
 
 | Var                        | Default       | What it does |
 |----------------------------|---------------|--------------|
+| `PINNACLE_API_KEY`         | auto          | Pinnacle's guest API key. Left unset it is fetched once from `https://www.pinnacle.com/config/app.json` — the same public config the site's own front end reads — and cached for the process, so a key rotation heals itself. Set this to pin a value or to run fully offline. |
 | `SPORTS`                   | all-full      | Per-sport mode: `sport:mode` comma-separated. Modes: `full` (CB+Pin+detail), `list` (CB list-view only, no alt-lines), `off`. Example: `SPORTS=basketball:full,soccer:list`. |
 | `MAX_START_DAYS`           | 7             | **Global data horizon.** No book fetches, parses or emits an event starting more than this many days out — applied in all seven scrapers and bounding every per-book horizon (the tighter wins). `0` disables the cap. Live-adjustable on the Config tab as `limits.max_start_days`; see `src/horizon.py`. |
 | `OPP_REVERIFY_SEC`         | 120           | Re-pull CB detail for the games currently showing an opportunity, so an edge is confirmed on a fresh price. `0` disables. See "Stale prices" below. |
@@ -535,12 +594,21 @@ prematch/
 ## Testing
 
 ```bash
-python -m pytest                  # full suite
+python -m pytest                  # full suite — 1 808 tests, ~60 s
 python -m pytest tests/test_vig.py -v   # just the math
 ```
 
-The suite mocks Playwright + Pinnacle HTTP, so the tests don't hit any live
-service. Sample HTML for parser tests lives in `data/raw/`.
+**1 808 tests over 18 369 lines — a 0.78 : 1 test-to-code ratio.** The suite is
+offline by design: every scraper test runs against saved fixtures in
+`data/raw/`, and CI runs it with `PINNACLE_API_KEY=""` so a test that quietly
+reached a live service fails there rather than in production.
+
+Most tests pin a *measured decision* rather than an invented expectation — a
+threshold, a market mapping, a calibration — and carry the number that justifies
+it in the docstring. A recurring class guards silent failures specifically:
+controls that display one state while behaving as another (an alert panel
+saving a setting nothing reads, a filter shown as applying to rows it cannot
+reach, two odds bands rendered separately but applied from one value).
 
 ---
 
