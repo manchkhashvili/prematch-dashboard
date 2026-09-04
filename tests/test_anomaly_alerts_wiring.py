@@ -238,3 +238,68 @@ def test_an_existing_shared_setting_is_migrated_not_dropped():
     assert "anom_max_odds" in PAGE_T and "anom_min_odds" in PAGE_T, (
         "the legacy keys are gone, so an existing setting is lost on upgrade")
     assert "LEGACY_MAX" in PAGE_T and "LEGACY_MIN" in PAGE_T
+
+
+# ── a default the panel SHOWS must be a default the poller READS ─────────────
+
+def _shown_defaults(text: str) -> dict[str, str]:
+    """`consDef.value = lsGet(CONS_DEF, "12")` -> {"CONS_DEF": "12"}.
+
+    Only non-empty fallbacks matter: a blank box honestly reads as "off", while
+    a number rendered into the field reads as configured.
+    """
+    import re
+    return {k: v for k, v in
+            re.findall(r'lsGet\(\s*(\w+)\s*,\s*"([^"]*)"\s*\)', text)
+            if v not in ("", "0")}
+
+
+def test_every_displayed_threshold_is_persisted():
+    """The bug this pins, found 2026-09-05: consistency alerts had NEVER fired.
+
+    `ladPct` rendered "10" and `consDef` rendered "12", but `lsSet` only ran
+    from the change handler — so on a profile where nobody had edited those
+    boxes, localStorage held nothing for them. alerts.js then read the bar with
+    `cfgNum()`, got null, and `consPasses` rejected every row:
+
+        const bar = (k.sev ?? dflt);
+        if (bar === null) return false;      // every flag, every poll
+
+    The ladder side failed the same way, falling through pct/delta/step. Both
+    alert kinds were dead on arrival while the panel displayed a live-looking
+    threshold — the exact "shows one state, behaves as another" failure the
+    rest of this file guards, arriving through the one path it did not check.
+
+    Measured against the live feed: 0 of 157 consistency rows would have fired
+    before the fix, 19 after.
+    """
+    shown = _shown_defaults(PAGE_T)
+    assert shown, "no non-empty defaults parsed — the regex has drifted"
+    for const in shown:
+        assert f"seedIfAbsent({const}" in PAGE_T, (
+            f"{const} is rendered with a default the poller never sees; "
+            f"seed it on load or make the field blank")
+
+
+def test_seeding_never_overwrites_a_deliberate_choice():
+    """Including a deliberately blank box — absent is not the same as empty."""
+    import re
+    i = PAGE_T.index("function seedIfAbsent")
+    body = PAGE_T[i:i + 400]
+    assert "getItem(key) === null" in body, "seeding must only fill ABSENT keys"
+    assert 'value !== ""' in body, "an empty default must not be written"
+
+
+def test_every_persisted_input_is_bound_to_the_handler():
+    """syncAlertCfg() writes the four odds boxes, but nothing called it when
+    only an odds box changed — so typing a veto and clicking away saved
+    nothing until some other control happened to be touched."""
+    import re
+    # `.value` / `.checked` only — `lsSet(CONS_KINDS, JSON.stringify(...))`
+    # is not an input and has no change event of its own.
+    written = set(re.findall(r"lsSet\(\s*(\w+),\s*(\w+)\.(?:value|checked)",
+                             PAGE_T))
+    bound = re.search(r"for \(const el of \[(.*?)\]\)", PAGE_T, re.S).group(1)
+    bound = {x.strip() for x in bound.replace("\n", " ").split(",") if x.strip()}
+    for _key, el in written:
+        assert el in bound, f"{el} is saved by syncAlertCfg but never triggers it"

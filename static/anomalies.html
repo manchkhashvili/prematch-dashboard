@@ -525,6 +525,37 @@ consMaxOdds.value = lsGet(CONS_MAXODDS, "");
 ladMinOdds.value  = lsGet(LAD_MINODDS, "");
 consMinOdds.value = lsGet(CONS_MINODDS, "");
 
+/* PERSIST WHAT THE PANEL SHOWS (2026-09-05).
+ *
+ * The two lines above with a non-empty fallback — ladPct "10" and consDef "12"
+ * — were DISPLAYED but never written, because lsSet only runs from the change
+ * handler. So on a fresh profile the panel read "sev >= 12" while localStorage
+ * held nothing, alerts.js's cfgNum() returned null for the bar, and consPasses
+ * rejected every row:
+ *
+ *     const bar = (k.sev ?? dflt);
+ *     if (bar === null) return false;      // <- every consistency flag, always
+ *
+ * Same for the ladder side: with no pct, delta or step stored, ladderPasses
+ * fell through all three criteria and returned false. Both alert kinds were
+ * dead on arrival and the panel showed a configured threshold the whole time —
+ * which is the failure this file's tests exist to catch, arriving through the
+ * one path they were not checking: a default that is rendered but not saved.
+ *
+ * Seeding only the ABSENT keys, and only the scalar thresholds, so an explicit
+ * choice (including a deliberately blank box) is never overwritten, and the
+ * per-kind grid is left to ALERT_DEFAULT_OFF rather than frozen into storage.
+ */
+function seedIfAbsent(key, value) {
+  try {
+    if (localStorage.getItem(key) === null && value !== "") {
+      localStorage.setItem(key, value);
+    }
+  } catch (e) {}
+}
+seedIfAbsent(LAD_PCT, ladPct.value.trim());
+seedIfAbsent(CONS_DEF, consDef.value.trim());
+
 // Checks that are DIAGNOSTICS, not opportunities — listed and shown on the
 // tab, but not chiming unless you deliberately switch them on.
 //
@@ -622,7 +653,11 @@ function paintAlertCfg() {
 
 renderKindGrid();
 paintAlertCfg();
-for (const el of [ladOn, ladPct, ladDelta, ladStep, consOn, consDef]) {
+// The four odds boxes were missing here. syncAlertCfg() writes them, but
+// nothing invoked it when only an odds box changed — so typing a veto and
+// clicking away saved nothing until some OTHER control was touched.
+for (const el of [ladOn, ladPct, ladDelta, ladStep, consOn, consDef,
+                  ladMaxOdds, consMaxOdds, ladMinOdds, consMinOdds]) {
   el.addEventListener("change", syncAlertCfg);
 }
 document.getElementById("cons-kind-grid").addEventListener("change", syncAlertCfg);
