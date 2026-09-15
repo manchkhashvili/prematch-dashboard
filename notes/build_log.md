@@ -6130,3 +6130,58 @@ rather than shown directly. Writing ladder odds to the tick store would turn the
 next investigation of this kind into a SQL query. Offered, not done.
 
 Full write-up in `docs/anomalies-catalog.md`.
+
+## 2026-09-08 → 09-15 — the owner's doubts were right four times
+
+A week of work in which every substantive correction came from the owner
+pushing back, and every push-back survived measurement. Full write-up in
+`docs/anomalies-catalog.md` under the same date; the short version here.
+
+**Tennis correct score.** "Isn't it weird" → yes, and the market was never
+ingested because a docstring said it needed a schema change. It didn't. The
+fair price comes from the match price alone through a latent-strength Beta;
+the owner's "1.24 × 1.24" intuition was the right mechanism (variance lifts
+straight sets) with the wrong benchmark (squares the vig). The first version
+fitted the variance per match and was unidentified at even matches — the
+owner's "I don't think calculations are right" caught it. Pooled σ² = 0.0403.
+
+**Duplicate fixtures.** "Same time, same teams, that's it" — and the youth
+guard I added on four hand-picked examples was blocking three real
+mislabellings on the owner's books when measured on 238k events. Gone. 158
+historical hits on CB + Lider in three months. Then the live version, in the
+prematch app rather than the live dashboard, off the enumeration boards only.
+
+**Halves vs full time.** Belarus U19 at 25% away in H2 vs 6% for the match.
+Built, then the owner: "of course they differ — learn the correlation from
+top leagues". Tested honestly: the model had a real bias (half-draws −1.3 to
+−1.8pp on every book), but the naive empirical curve was worse than the biased
+model; model + learned bias won. Then "make it fire only on big gaps": 15pp,
+because normal pricing never exceeded 12.6 in three months and the two real
+cases are 18.8 and 22.4. The 6pp version I shipped first was correct as
+statistics and wrong as a product.
+
+**Five CB side-market candidates measured to zero** — HT/FT marginals, the
+combo family, correct score × totals, double chance, BTTS — on 851–1102
+events. The catalog's rule holds: CB prices side markets from one
+distribution. I nearly reported three phantom arbs at 0.7619 from grabbing a
+corners total; a 31% risk-free return is always the tell.
+
+**When to watch.** Soccer opportunities were never logged, so three weeks were
+replayed from ticks against Pinnacle. The owner's 15:00–03:00 window is the
+wrong half of the day: 09:00–21:00 yields ~60% more per poll, 00:00–04:00 is
+dead, Saturday is three times Monday, and the real pattern is "1–5 hours to
+kickoff". Asian leagues fill the morning; South America is late evening.
+
+**Also this week:** repo hygiene on live-sportsbook-arb (reduced to `live/`;
+BetsAPI token found public since June — rotate); Claude attribution stripped
+from 145 commits across five repos and disabled globally; Lider combos went
+dark for 18 minutes on a startup DNS wedge that xbet is already hardened
+against and Lider is not.
+
+**Things I stated and had to retract, in order:** the −1.5/0-2 duplicate as a
+finding; per-match ν; "flagged matches have more markets" (wrong proxy);
+"62% of the board invisible" (it's policy, and the detectors use a different
+horizon); the HT/FT marginal check as top candidate (sample of ten, all
+already-flagged); three phantom combo arbs; two severity schemes for
+duplicates; a 6pp half bar. Each is in the catalog with the number that
+overturned it.

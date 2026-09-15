@@ -1029,3 +1029,164 @@ rarely a book posts two independent views of one quantity **on the same
 event**. Corners: 5 (event, period) pairs carry both a corners 1X2 and a
 corners 0.0 rung. Cards: 3. That is the ceiling on this whole direction, and
 no amount of extra classifiers raises it.
+
+---
+
+## 2026-09-08 → 09-15 — four checks in, five candidates out, and when to watch
+
+### B13. `tennis_correct_score` — the exact set score vs the match price · BETTABLE
+
+CB's tennis correct score was skipped on the belief it "needs a schema change"
+(tennis.py docstring). It never did — `selections` is a free-form dict and
+`htft` has carried nine keys since soccer. Widening the `MarketType` Literal was
+the whole change.
+
+Fair price from the devigged **match price alone**, via a latent-strength
+model: sets are independent GIVEN a player's true per-set strength, which is
+unknown — `P ~ Beta(μν, (1−μ)ν)`, and every leg is a raw moment:
+`P(2-0) = E[P²] = μ² + σ²`. The set-to-set correlation IS the variance; ν→∞
+is the old IID `_match_prob_from_set`. Owner's phrasing of the mechanism:
+*"when someone wins first it most likely lower odds to win next one too."*
+
+**The first version was wrong** and the owner's doubt caught it. It solved ν
+per match from the (1st-set, match) pair — one free parameter per observation,
+and the gap's leverage is `3σ²(1−2μ)`, zero at an even match. Near μ = 0.5 the
+solver turned ordinary pricing noise into whatever variance closed the gap:
+the same −2pp gap implies σ² = 0.116 at μ = 0.55 and 0.012 at μ = 0.80. Filar
+v Spierle (μ = 0.573) solved to σ² = 0.121 — 49% of the maximum possible — and
+produced "+18.9%" on a leg the pooled model prices at −8.2%. Now **one σ² for
+the board**, least-squares on P(match) over 363 events: `CS_SIGMA2 = 0.04026`,
+residual RMS 1.60pp. It predicts the 1st-set market it never consumes to a
+median |err| of 0.94pp.
+
+Bars, all measured: edge ≥ 8% (p99 +7.49 over 1000 legs); leg odds ≤ 8.0 (the
+raw top finding was 0-2 @ 20.60 at "+18.6%"); moneyline legs ≥ 1.05 (Goncalo
+v Nunez at 1.01/9.00 is not a price, and vig.py's literal 1.20 floor would
+have dropped 30% of the board). **5 flags on 457 events**; the screenshot
+that started it (Balazs–Parizzia, 0-2 @ 1.70 vs fair 1.49) was the largest at
++14.1%. Capture: `data/raw/tennis_cs_calibration.json` (fit script lives in
+gitignored `scripts/`).
+
+### B14. `duplicate_fixture` — the same match listed twice by one book · BETTABLE · severity flat 100
+
+Rule, and it is the whole rule: **identical kickoff and the same two teams**
+(≥ 80 fuzzy, sides may be swapped). League plays no part — the same match under
+two league names is exactly the case worth catching. **No youth or women
+guard.** Measured on 238k tick-store events: a guard blocked 11 pairs
+board-wide, 3 on CB/Lider, and those three were the mislabellings the check
+exists for (`FCI Tallinn II` vs `Fci Levadia Tallinn U19`). Two different
+fixtures between the same teams do not share a kickoff minute.
+
+History says it is real: **CB 128, Lider 33 over ~3 months**, ≈ 1.8/day.
+Shapes: two league names (`Club Friendly Games` / `Clubs`), sides swapped
+(`Rostov v CSKA` / `CSKA v Rostov`), two spellings (`Dane Sweeny` / `Sweeny
+D.`). Swapped listings must be **realigned before covering** — the first
+version reported all of them "prices not comparable". Simulated/e-sports
+leagues must be excluded: 16,631 events, and they are why xbet shows 10k and
+betlive 3.4k against your books' 128 and 33.
+
+Severity is a **flat 100** by owner instruction. Scoring the locked edge put an
+identically-priced pair at −5.3 (the book's own overround); scoring the
+disagreement put it at 0. Neither clears a bar; both silenced exactly the
+duplicates worth hearing about.
+
+### B15. `half_result_vs_ft` — a half's 1X2 vs the full-time 1X2 · tripwire, 15pp
+
+Found by the owner: Belarus U19 v Gomel Region, full-time 1.10/6.90/14.6,
+first half 1.45/2.85/11.8, second half **1.90/3.20/3.50** — away 25% to win
+the half against 6% for the match. A goal model fitted only to the full-time
+market reproduced H1 to 0.0pp and missed H2 by 18pp. It could not fire: **CB's
+second half was never classified** ("Pinnacle ships no H2 soccer markets" —
+the +EV pipeline's concern, not this one's; third time that reasoning hid a
+CB-internal contradiction). Now on the PERMISSIVE path only; strict still
+skips it. Period totals write the number first (`0.5 Und`) and needed a label
+swap in `cb_detail`.
+
+**The model had a systematic bias**, the same on every book: closing-line
+posted − model, median pp — H1 Pinnacle (2763) draw **−1.32**, home +1.00; H2
+Lider (2827) draw **−1.79**; Crocobet agrees to a tenth. Fixed-split Poisson
+overstates half-draws. The owner proposed learning FT→half from well-priced
+data instead. Tested head-to-head on held-out Pinnacle: the pure empirical
+1-D curve removes the bias but has **wider tails than raw Poisson** (home p1
+−4.26 vs −1.60) — a map on FT-home alone cannot see totals. **Poisson + a
+learned bias curve** (`soccer_model.HALF_BIAS`: Pinnacle for H1, Lider+Croco
+for H2) wins on every outcome, both halves — H1 |mean| 1.21 → 0.72, H2 0.92 →
+0.36 — and transfers to CB unseen (p99 5.17; Setanta 4.81). "Top leagues only"
+changed nothing (5.10 vs 5.17). Cross-book H2 bar needs no CB history:
+Lider → Crocobet p99 2.22.
+
+The bar is **15pp**, deliberately high. Owner's example "ml 1.50 / ht ml 3.50"
+= 18.8pp; Belarus = 22.4pp; the largest gap in three months of normal pricing
+was **12.6pp** (CB H1) / **6.1pp** (Lider H2). A 6pp bar (just past p99) was
+correct as statistics and useless as a product: it fired the H1 draw of
+lopsided national-team matches. Both halves on, alerting.
+
+### B16. `duplicate_live` — the same LIVE match listed twice · severity flat 100
+
+`src/live_duplicates.py`, loop `_live_duplicate_loop`, `live_dup_sec` 300 s
+(floor 60 — a tripwire, not a feed). CB + Lider, every sport, **enumeration
+boards only**: Lider is one GET (~4 MB, 0.3 s); CB is GET → English flip →
+`ShowAllStarted` (~500 KB). No per-match calls. Anchor is the game state —
+same teams, same score, same period (swap-aware); books never cross.
+`live/docs/crystalbet-live.md` is **stale**: rows are `div.d_row` with
+`doGameOpenPost(id)` under a `sportTypeId` container, not `div.game_info`.
+Live: 94 CB + 108 Lider matches in 1.5 s, 0 duplicates on a normal board.
+
+### Measured and NOT built — CB side markets (2026-09-08)
+
+All on 851–1102 live CB soccer events, all zero:
+
+| candidate | result |
+|---|---|
+| HT/FT 9-cell marginals vs the 1X2 legs | 844 events, 5064 comparisons, **max 3.81pp**, 0 covers < 1.0 — consistent with the 2026-08-19 grid-identity control (median 0.80pp). The grid is derived with correct marginals and mis-specified dependence; `htft_combo`'s correlation bound is already aimed at the only part that carries signal |
+| 2-way combo family (`win or under 2.5` ×6) | 851 events, 0 arbs, best cover 1.0289 |
+| Correct score × totals ladder | 851 events, 0 arbs, best 1.0054 — structural, `Over 0.5` alone costs 0.9901 |
+| Double chance × 1X2 | 0 dominance violations, best cover 1.0289 |
+| BTTS × totals | 0 violations; `BTTS Yes ⊆ Over 1.5` never binds |
+
+The catalog's own rule, re-learned: CB prices its side markets from one
+distribution. The exception (B15, the second half) was never in this test set
+because it was never ingested. A first combo run reported three "locked arbs"
+at 0.7619 — the total-line finder had grabbed *Under/Over Corners 2nd Half*;
+a 31% risk-free return is the tell.
+
+Flagged CB matches carry a **median 34 raw markets vs 114 board-wide** and are
+reserves / U22 / cups / ITF. The 1,006 unexpanded soccer events are **policy**
+(`cb_expand_within_hours` = 24 for the poll; detectors run at
+`anomaly_extra_horizon_h` = 70), not a gap; far-out events are equally rich
+(median 114). `cb_expand_max_sec` = 300 is **not binding** — `past_budget` = 0
+on every sport, soccer uses 69 s. Tennis `list_fallback` = 38% (183/485) vs
+soccer 2.4% is the thing worth looking at.
+
+### When opportunities appear — CB soccer, 3 weeks, replayed from ticks
+
+Soccer opportunities were never logged (`output/history/*` is basketball-only).
+Replayed 11,639 CB events matched to Pinnacle, first crossing of ≥ 3% edge,
+**per 100 CB polls** because uptime ran 12–24 h/day. Local time (+04).
+
+- **09:00–21:00 = 142.6 per 100 polls; the owner's 15:00–03:00 = 88.5.**
+  15:00–20:00 is excellent (145–177), then decays; **00:00–04:00 is the dead
+  zone** (20–43). Hours 08–12 have < 40 polls each — direction solid, numbers soft.
+- Days: Sat **140** > Sun 106 > Fri 102 > Wed 86 > Tue 71 > Thu 57 > Mon 48.
+- **Median 4.3 h to kickoff** at first appearance, 40% inside 3 h, 7% beyond
+  a day. The clock pattern is really "when matches are 1–5 h out".
+- Morning leagues: Hong Kong (×3), New Zealand, Japan, Bulgaria, Norway U19,
+  Sweden Div 2, Denmark. South America (Honduras reserve, Argentina Primera C
+  reserves, Bolivia, Dominica) peaks late evening — already inside the window.
+  Top league overall: England FA National League – Women.
+- Markets: spread 704 > moneyline 554 > total 245.
+
+### Noted, not built
+
+- `htft_fair` emits EDGE and SHAPE under one `kind`. SHAPE severity is
+  `|ratio − 1| × 100`, so a 2/2 at 28% against a model 16% shows as **80** — a
+  diagnostic wearing a bet's number. The book had priced "away leads at half
+  and wins" at ≈ P(away wins). Split into `htft_fair` (EDGE) / `htft_shape`
+  (default-off), the way `ml_vs_spread` sits.
+- Lider-Bet has no DNS pin; `xbet.py::_resolve_ip` is the precedent. A startup
+  wedge on 2026-09-08 cost an 18-minute hole in the combo tab.
+- `half_result_vs_ft` H2 bar could tighten toward ~2.5pp once CB second-half
+  history accumulates (classified from 2026-09-14).
+- Alert sounds: both anomaly chimes were pure plucks (instant attack, decay
+  across the whole slot) and the consistency bend ended at 294 Hz. Now hold
+  then release; bend moved to 660→440 Hz with an octave partial.
