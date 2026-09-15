@@ -160,6 +160,7 @@ const SCAN_DESC = {
   betlive_anomaly: "Betlive favourite-flip watch (discover + refreshOdds).",
   soft_scan:       "Soft-book HT/FT + basketball-favourite sweep.",
   lider_combo:     "Lider-Bet combo markets vs the primitives they are built from — containment violations and locked covers. Fetches its own detail payloads, so it costs bandwidth nothing else pays for.",
+  live_dup:        "The same LIVE match listed twice by one book (CrystalBet + Lider-Bet, all sports). Reads the two enumeration boards only — no per-match calls — every few minutes. Severity 100.",
 };
 const CAD_DESC = {
   pinnacle_poll_sec: "Pinnacle reference poll",
@@ -173,6 +174,7 @@ const CAD_DESC = {
   betlive_watch_sec: "Betlive refreshOdds",
   soft_scan_sec: "Soft scan",
   lider_combo_sec: "Lider combo-bound scan",
+  live_dup_sec: "Live duplicate-listing scan",
 };
 const LIM_DESC = {
   max_start_days: "GLOBAL data horizon (days) — no book pulls, parses or emits an event starting later than this. 0 = no cap. Caps every per-book horizon below.",

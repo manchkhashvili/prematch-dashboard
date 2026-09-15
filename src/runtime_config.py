@@ -66,7 +66,7 @@ def _env_float(name: str, default: float) -> float:
 # `kind` drives the UI widget and the validator.
 BOOKS = ("crystalbet", "liderbet", "betlive", "crocobet", "setanta", "xbet")
 SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_scan",
-         "lider_combo")
+         "lider_combo", "live_dup")
 # Per-sport master switch (2026-08-14). Orthogonal to `books`: a book toggle is
 # "stop paying for this book, on every sport", a sport toggle is "stop paying
 # for this sport, at every book" — including the reference feeds and the scans,
@@ -102,6 +102,9 @@ CADENCES: dict[str, tuple] = {
     "betlive_watch_sec":   (lambda: _env_int("BETLIVE_WATCH_SEC", 8), 3, 3600),
     "soft_scan_sec":       (lambda: _env_int("SOFT_SCAN_SEC", 150), 30, 21600),
     "lider_combo_sec":     (lambda: _env_int("LIDER_COMBO_SEC", 900), 60, 21600),
+    # Live-board duplicate tripwire: slow on purpose, it reads two enumeration
+    # boards and nothing else. 60 s floor so it can never become a live feed.
+    "live_dup_sec":        (lambda: _env_int("LIVE_DUP_SEC", 300), 60, 3600),
 }
 
 # Cost/horizon knobs — the levers that cut per-cycle work without turning a
@@ -197,6 +200,9 @@ def _defaults() -> dict[str, Any]:
             # Opt-in: it fetches Lider's detail payloads itself, so it costs
             # bandwidth nothing else pays for. Off until asked for.
             "lider_combo":     _env_on("LIDER_COMBO"),
+            # On by default: two cheap board reads every 5 min, and a
+            # duplicated live fixture is exactly the thing worth an alert.
+            "live_dup":        _env_on("LIVE_DUP", True),
         },
         "cadence": {k: f() for k, (f, _lo, _hi) in CADENCES.items()},
         "limits": {k: f() for k, (f, _lo, _hi) in LIMITS.items()},

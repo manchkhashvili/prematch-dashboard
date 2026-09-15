@@ -836,6 +836,13 @@ _lider_combo_passes: int = 0
 _lider_combo_error: str | None = None
 _lider_combo_stats: dict = {}
 
+# Live-board duplicate listings (2026-09-15) — src/live_duplicates.py. Its own
+# list, merged into /api/anomalies `consistency` at request time like the rest.
+_live_dup_flags: list[dict] = []
+_live_dup_at: datetime | None = None
+_live_dup_error: str | None = None
+_live_dup_stats: dict = {}
+
 _soft_scan_flags: list[dict] = []             # consistency rows from soft_scan.scan_all
 _soft_scan_at: datetime | None = None
 _soft_scan_error: str | None = None
@@ -2147,6 +2154,49 @@ async def _soft_scan_loop():
                            "scans", "soft_scan")
 
 
+async def _live_duplicate_loop():
+    """The same LIVE match listed twice by one book → Anomalies tab, severity
+    100. CrystalBet and Lider-Bet, every sport; enumeration boards only, no
+    per-match calls. See src/live_duplicates.py. Slow by design
+    (`live_dup_sec`, default 300 s): a tripwire, not a feed."""
+    from src import live_duplicates as ld
+    global _live_dup_flags, _live_dup_at, _live_dup_error, _live_dup_stats
+    await asyncio.sleep(30)
+    while True:
+        if not await _gated("scans", "live_dup", "live duplicate scan"):
+            continue
+        ts = datetime.now(tz=timezone.utc)
+        matches, errs = [], {}
+        for book, fn in (("cb", ld.fetch_cb_live), ("liderbet", ld.fetch_liderbet_live)):
+            if not runtime_config.is_on("books", "crystalbet" if book == "cb" else book):
+                continue
+            try:
+                matches.extend(await asyncio.to_thread(fn))
+            except Exception as e:                 # one book down must not blind the other
+                errs[book] = str(e)[:160]
+                log.warning("live-dup %s board failed: %s", book, errs[book])
+        try:
+            fresh = ld.find_live_duplicates(matches, ts.isoformat())
+            async with _state_lock:
+                _live_dup_flags = _carry_first_seen(_live_dup_flags, fresh, ts.isoformat())
+                _live_dup_at = ts
+                _live_dup_error = "; ".join(f"{k}: {v}" for k, v in errs.items()) or None
+                _live_dup_stats = {
+                    "matches": len(matches),
+                    "by_book": {b: sum(1 for m in matches if m.book == b)
+                                for b in ("cb", "liderbet")},
+                    "flags": len(_live_dup_flags),
+                }
+            if _live_dup_flags:
+                log.info("live-dup: %d duplicated live listing(s) across %d matches",
+                         len(_live_dup_flags), len(matches))
+        except Exception as e:
+            log.exception("live duplicate scan failed")
+            async with _state_lock:
+                _live_dup_error = str(e)[:200]
+        await _sleep_gated(runtime_config.secs("live_dup_sec", 300), "scans", "live_dup")
+
+
 async def _lider_combo_loop():
     """Lider combo markets vs the primitives they are built from → Anomalies tab.
 
@@ -2400,6 +2450,7 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(_betlive_watch_loop(), name="betlive_watch_loop"))
     tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
     tasks.append(asyncio.create_task(_lider_combo_loop(), name="lider_combo_loop"))
+    tasks.append(asyncio.create_task(_live_duplicate_loop(), name="live_dup_loop"))
     _rc = runtime_config.get()
     log.info("runtime config — books ON: %s | scans ON: %s (change live at /config.html)",
              ", ".join(k for k, v in _rc["books"].items() if v) or "none",
@@ -2754,7 +2805,7 @@ async def api_anomalies(
     book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
     cons = [f for f in (_recent_consistency + _betlive_consistency + _soft_scan_flags
                         + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
-                        + _lider_combo_flags)
+                        + _lider_combo_flags + _live_dup_flags)
             if f["severity"] >= min_severity]
     cons.sort(key=lambda f: f["severity"], reverse=True)
     return {
@@ -2787,6 +2838,13 @@ async def api_anomalies(
             "watch_sec": runtime_config.secs("betlive_watch_sec", BETLIVE_WATCH_SEC),
             "discover_sec": runtime_config.secs("betlive_discover_sec", BETLIVE_DISCOVER_SEC),
             "error": _betlive_error,
+        },
+        "live_dup": {
+            "enabled": runtime_config.is_on("scans", "live_dup"),
+            "computed_at": _live_dup_at.isoformat() if _live_dup_at else None,
+            "scan_sec": runtime_config.secs("live_dup_sec", 300),
+            "error": _live_dup_error,
+            **_live_dup_stats,
         },
         "lider_combo": {
             "enabled": runtime_config.is_on("scans", "lider_combo"),
@@ -2894,7 +2952,7 @@ def _consistency_alert_rows() -> list[dict]:
     book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
     src = (_recent_consistency + _betlive_consistency + _soft_scan_flags
            + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
-           + _lider_combo_flags)
+           + _lider_combo_flags + _live_dup_flags)
     out = [{
         "book": f.get("book") or "cb",
         "sport": f.get("sport"),
