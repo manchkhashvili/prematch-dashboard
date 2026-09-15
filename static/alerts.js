@@ -275,15 +275,25 @@
   function playLadderAlert() {
     const ctx = ensureAudio();
     if (!ctx) return;
-    // DISTINCT from the other three: a fast DESCENDING 4-note sawtooth run
-    // (~0.4s) — reads as "warning", and nothing else here uses a sawtooth.
-    // A ladder violation is the most trustworthy thing we flag, so it gets a
-    // sound with some bite, but far shorter than the 2.5s +EV buzzer.
+    // DISTINCT from the other three: a fast DESCENDING sawtooth run — reads as
+    // "warning", and nothing else here uses a sawtooth. A ladder violation is
+    // the most trustworthy thing we flag, so it gets a sound with some bite,
+    // but far shorter than the 2.5s +EV buzzer.
+    //
+    // 2026-09-08: it was inaudible in practice, and raw gain was the least of
+    // the reasons. Every note was a pure pluck — instant attack, then an
+    // exponential decay across the whole 0.10s slot — so almost no energy
+    // survived the transient; the entire run was over in 0.4s; and 0.13 master
+    // put a sound that already had no sustain another ~8 dB down. Now each
+    // note HOLDS at full level for most of its slot before a short release,
+    // the slot is slightly longer, and the run repeats once: ~1.1s total.
+    // Still under half the +EV buzzer's length, still unmistakably not it.
     const now = ctx.currentTime;
-    const notes = [880, 740, 622, 523];
-    const noteDur = 0.10;
+    const notes = [880, 740, 622, 523, 880, 740, 622, 523];
+    const noteDur = 0.135;
+    const rel = 0.035;                  // release tail inside each slot
     const master = ctx.createGain();
-    master.gain.value = 0.13;
+    master.gain.value = 0.30;
     master.connect(ctx.destination);
     notes.forEach((freq, i) => {
       const t = now + i * noteDur;
@@ -293,7 +303,10 @@
       osc.frequency.value = freq;
       env.gain.setValueAtTime(0.0001, t);
       env.gain.exponentialRampToValueAtTime(1.0, t + 0.008);
-      env.gain.exponentialRampToValueAtTime(0.0001, t + noteDur - 0.008);
+      // Anchor the held level: without this the release below would ramp from
+      // the attack's end and decay across the entire slot, i.e. a pluck again.
+      env.gain.setValueAtTime(1.0, t + noteDur - rel);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + noteDur);
       osc.connect(env).connect(master);
       osc.start(t);
       osc.stop(t + noteDur);
@@ -303,26 +316,44 @@
   function playConsistencyAlert() {
     const ctx = ensureAudio();
     if (!ctx) return;
-    // Deliberately the QUIETEST and softest of the four: one low sine note with
-    // a downward pitch bend (~0.35s). A consistency flag is diagnostic — "go
-    // look" — so it should register without demanding attention the way the
-    // ladder run or the +EV buzzer do.
+    // Deliberately the SOFTEST of the four: a sine with a downward pitch bend.
+    // A consistency flag is diagnostic — "go look" — so it should register
+    // without demanding attention the way the ladder run or the +EV buzzer do.
+    //
+    // 2026-09-08: soft had become inaudible. The bend ENDED at 294 Hz, which
+    // laptop speakers barely reproduce, on a pure sine with no harmonics to
+    // carry it, at 0.11 master, decaying from the moment it started. Four
+    // changes, none of which touch its character: the bend moved up a fifth to
+    // 660→440 Hz where small speakers actually work; a quiet octave partial
+    // gives the sine some body; the note holds before releasing instead of
+    // decaying throughout; and the master came up. Same soft two-tone fall,
+    // now audible from across a room — and still the gentlest thing here.
     const now = ctx.currentTime;
-    const dur = 0.35;
+    const dur = 0.45;
+    const rel = 0.12;
     const master = ctx.createGain();
-    master.gain.value = 0.11;
+    master.gain.value = 0.26;
     master.connect(ctx.destination);
-    const osc = ctx.createOscillator();
     const env = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(440, now);
-    osc.frequency.exponentialRampToValueAtTime(294, now + dur);
     env.gain.setValueAtTime(0.0001, now);
     env.gain.exponentialRampToValueAtTime(1.0, now + 0.02);
+    env.gain.setValueAtTime(1.0, now + dur - rel);   // hold, then release
     env.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    osc.connect(env).connect(master);
-    osc.start(now);
-    osc.stop(now + dur);
+    env.connect(master);
+    // Fundamental plus a quiet octave. The partial is what makes a sine
+    // carry on a small speaker; at 0.28 it adds presence, not harshness.
+    [[1, 1.0], [2, 0.28]].forEach(function (pair) {
+      const mult = pair[0], level = pair[1];
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      g.gain.value = level;
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(660 * mult, now);
+      osc.frequency.exponentialRampToValueAtTime(440 * mult, now + dur);
+      osc.connect(g).connect(env);
+      osc.start(now);
+      osc.stop(now + dur);
+    });
   }
 
   function loadMoveSeen() {
