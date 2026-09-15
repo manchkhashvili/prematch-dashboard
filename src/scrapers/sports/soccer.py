@@ -518,6 +518,9 @@ _RE_HTFT_EXCLUDE = re.compile(r"\band\b|&|correct|exact|\btotal\b|score|goals")
 # `2nd Half - Draw No Bet***` — a 3-way scoreline derivative, and a different
 # bet — cannot slip in on the trailing asterisks.
 _RE_DNB = re.compile(r"^(?:1st\s*half\s*-\s*)?draw no bet$")
+_RE_H2_RESULT   = re.compile(r"^2nd half result$")
+_RE_H2_HANDICAP = re.compile(r"^handicap 2nd period$")
+_RE_PERIOD_TOTAL = re.compile(r"^under\s*/\s*over (1st|2nd) period$")
 # "First Team To Score" — 3-way over {1, 0, 2} where 0 is "nobody scores".
 # CB ships it on ~105 of the collected soccer events.
 _RE_FTS = re.compile(r"^first team to score$")
@@ -578,6 +581,25 @@ def classify_market_title_permissive(title: str) -> Optional[MarketClassificatio
     norm = _normalize_title(title)
     if _RE_HTFT_TITLE.match(norm) and not _RE_HTFT_EXCLUDE.search(norm):
         return MarketClassification(market_type="htft", period="FT")
+    # ── the 2nd half (2026-09-14) ─────────────────────────────────────────
+    # The strict path skips H2 wholesale because Pinnacle prices no soccer
+    # second half, so there is nothing to pair it with. Correct for +EV, and
+    # the third time that reasoning has hidden a CB-internal contradiction.
+    # Found by the owner on the live board (Belarus U19 v Gomel Region,
+    # 2026-09-11): full-time 1.10/6.90/14.6, first half 1.45/2.85/11.8, and
+    # then a SECOND half of 1.90/3.20/3.50 — the away side 25% to win the half
+    # against 6% to win the match. A goal model fitted only to the full-time
+    # market reproduced the first half to 0.0pp and missed the second by
+    # 18.2pp. See `half_result_vs_ft` in consistency.py. Also the 1st-period
+    # total, which the strict path skips for the same reason.
+    if _RE_H2_RESULT.match(norm):
+        return MarketClassification(market_type="moneyline", period="H2", n_way=3)
+    if _RE_H2_HANDICAP.match(norm):
+        return MarketClassification(market_type="spread", period="H2", n_way=2)
+    m_pt = _RE_PERIOD_TOTAL.match(norm)
+    if m_pt:
+        return MarketClassification(market_type="total", n_way=2,
+                                    period="H1" if m_pt.group(1) == "1st" else "H2")
     if _RE_CORNER_ML.match(norm):
         return MarketClassification(market_type="moneyline", period="FT",
                                     n_way=3, submarket="corners")

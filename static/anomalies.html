@@ -410,6 +410,10 @@ const KIND_LABEL = {
   htft_combo: "HT/FT combo",
   htft_fair: "HT/FT fair (model)",
   tennis_set_match: "tennis: set vs match",
+  tennis_correct_score: "tennis: correct score",
+  duplicate_fixture: "same match listed twice",
+  duplicate_live: "same LIVE match listed twice",
+  half_result_vs_ft: "half result vs full-time",
   // Both sports post a regulation market and an incl-OT one and tie them by
   // arithmetic; hockey does it across REG and FT, AF within one period.
   ot_vs_regulation: "OT vs regulation",
@@ -473,6 +477,21 @@ const KIND_UNIT = {
   // either P(set1) − P(match) on the hard order violation, or the per-set
   // disagreement on the soft one. Both are pp.
   tennis_set_match: "pp",
+  // tennis_correct_score severity is the BETTING EDGE, not the pp gap. The two
+  // come apart badly on this check: a 10pp move on a 1.18 leg is worth +5%
+  // while 7.7pp on a 4.45 leg is worth +18%, so sorting the tab by pp would
+  // bury the bets under the arithmetic. The pp gap is in the detail text.
+  tennis_correct_score: "%",
+  // duplicate_fixture carries a FLAT severity of 100 — a book listing one
+  // match twice always alerts rather than competing on size. The real numbers
+  // (how far the two listings disagree, and the best-of-both cover) are in the
+  // row's detail text, not the severity.
+  duplicate_fixture: "%",
+  // duplicate_live: flat 100, same convention as duplicate_fixture.
+  duplicate_live: "%",
+  // half_result_vs_ft severity is the probability gap on the most generous
+  // outcome of the half, in pp against what the full-time 1X2 implies.
+  half_result_vs_ft: "pp",
   // ot_vs_regulation severity is how far P(win incl OT) sits outside the
   // [P(win reg), P(win reg)+P(tie)] box, or the coin-flip gap inside it — pp.
   ot_vs_regulation: "pp",

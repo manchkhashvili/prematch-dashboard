@@ -69,7 +69,7 @@ from typing import Any, Iterable, Optional
 
 from src import htft_model
 from src.models import Odds
-from src.vig import devig_2way, devig_3way  # FAIR PROBABILITIES (devigged)
+from src.vig import devig_2way, devig_3way, devig_nway_shin  # FAIR PROBABILITIES (devigged)
 
 
 # ── Thresholds (tunable; defaults sit well above measured normal variation) ────
@@ -277,6 +277,208 @@ SET_MATCH_PP = 10.0
 SET_MATCH_HARD_MIN_FAV = 0.60
 SET_MATCH_HARD_MIN_PP = 3.0
 
+# tennis_correct_score: the minimum EDGE, posted odds against the model's fair
+# price, before a leg is worth naming. This is the whole test now — the earlier
+# version also gated on a percentage-point gap against the devigged
+# correct-score market, which measured shape rather than money and came apart
+# from it badly (a 10pp move on a 1.18 leg is +5%, 7.7pp on a 4.45 leg is +18%).
+#
+# Calibrated on the live board 2026-09-08, 1000 legs over 250 events. The edge
+# distribution is p50 -13.95%, p90 -0.89%, p99 +7.49%:
+#      6% -> 18 legs (1.8%)     10% ->  1 leg
+#      8% ->  5 legs (0.5%)     15% ->  0
+# 8% sits just above p99, which is where this repo puts a bar it wants the tail
+# of rather than the body. 10% was the first choice and left a single event on
+# a 250-event board — too tight to learn anything from.
+CS_MIN_EDGE = 0.08
+
+# Longshot guard. A small absolute probability error becomes a huge RELATIVE
+# edge on a long price, so without this the list is led by legs nobody would
+# bet: the calibration board's top finding was 0-2 @ 20.60 at "+18.6%", where
+# the model and the book differ by well under a point of probability. 8.0 sits
+# above every realistic bo3 correct-score leg while removing that class.
+CS_MAX_LEG_ODDS = 8.0
+
+# Both moneyline legs must be real prices before anything is derived from them.
+# src/vig.py's own policy is "stay in 1.2-5.0 odds range where Shin's
+# assumptions are well-validated". The calibration board had Goncalo M. vs
+# Nunez L. priced 1.01/9.00 — 1.01 is the ">0.99 implied" solver edge case and
+# is not really a price; it produced a spurious +5.1%.
+#
+# The bar is on IMPLIED PROBABILITY (1.05 ~ 95%), not on favouritism: vig.py's
+# literal 1.20 floor drops 30% of the board and takes ordinary prices with it
+# (Figl M. vs Nagel A is 3.85/1.15, a normal 87% favourite).
+CS_MIN_ML_ODDS = 1.05
+
+# duplicate_fixture: the same match listed TWICE by one book, as two separate
+# events. Every other check here compares two markets inside one event; this one
+# compares two events, so it is the only cross-event rule in the module.
+#
+# The rule is deliberately the strict one the owner asked for: identical kickoff
+# AND the same two teams. Nothing fuzzier — a wider time window immediately
+# starts reporting real fixtures as duplicates.
+#
+# LEAGUE PLAYS NO PART, by owner instruction: the same match is routinely
+# listed under two different league names, which is precisely the case worth
+# catching. League appears only in the flag's detail text, never in the test.
+#
+# Measured 2026-09-09 on the live boards, CrystalBet 1677 events and Lider-Bet
+# 1506: ZERO duplicate pairs. The check is expected to sit silent, which is the
+# point — when it does fire, the same outcome is being quoted at two prices by
+# one book and that is bettable with no model.
+#
+# Measured against 3 months of the tick store rather than argued: 158 real
+# duplicates on the two books that matter (CrystalBet 126, Lider-Bet 32), about
+# 1.8 a day. They come in three shapes, all of which this catches — the same
+# match under two league names ("Club Friendly Games" vs "Clubs"), the same
+# match with the sides swapped ("Rostov v CSKA" vs "CSKA v Rostov"), and the
+# same match spelled two ways ("Dane Sweeny" vs "Sweeny D.").
+#
+# Simulated and e-sports leagues must be excluded by the caller or they drown
+# it: those fixtures legitimately repeat every few minutes, and they accounted
+# for more than 16k events in the same scan.
+DUP_NAME_SCORE = 80.0
+
+# half_result_vs_ft: how far a HALF's 1X2 may sit below what the full-time 1X2
+# implies for it, in percentage points on the most generous outcome.
+#
+# The halves are BIAS-CORRECTED Poisson (soccer_model.HALF_BIAS): raw Poisson
+# overstates half-draws by 1-2pp on every book measured.
+#
+# The bar is deliberately HIGH, by owner instruction 2026-09-14: this is not a
+# precision instrument, it is a tripwire for a half priced absurdly against
+# its own full-time market — "ml has 1.50 on one and ht ml has 3.50 on one".
+# That example measures 18.8pp. The screenshot that prompted the check
+# (Belarus U19 v Gomel Region, a second half at 25% away against 6% for the
+# match) measured 22.4pp. And in three months of closing history the LARGEST
+# gap ordinary pricing ever produced was 12.6pp on CrystalBet H1 (3667
+# events) and 6.1pp on Lider-Bet H2 (2827):
+#     bar   CB-H1 fires   Lider-H2 fires
+#      8        13             0
+#     10         5             0
+#     12         2             0
+#     15         0             0
+# 15.0 sits in the gap between everything normal and the cases worth an
+# alert. An earlier bar of 6.0 (just past p99) was correct as statistics and
+# wrong as a product: it fired the H1 draw of lopsided national-team matches,
+# which nobody wants to be woken up for.
+HALF_RESULT_PP = 15.0
+
+# Both halves, on, alerting. A brief spell OFF (same day) while the bar was
+# being re-thought — the calibration and correction underneath did not change.
+HALF_RESULT_ENABLED = True
+
+
+def _duplicate_fixture_flags(events, meta) -> list["ConsistencyFlag"]:
+    """The same match, listed twice by one book, as two separate events.
+
+    Returns one flag per duplicated PAIR, attached to the event whose id sorts
+    first and naming its twin in `detail` — ConsistencyFlag is keyed to a single
+    event, so the pair is reported from one side rather than twice.
+
+    Severity is a FLAT 100 for every duplicate, by owner instruction: a book
+    listing one match twice is always worth being told about, so the flag must
+    clear whatever threshold the panel is set to instead of competing on size.
+    Nothing is lost by it — the price disagreement and the best-of-both cover,
+    including whether that cover is actually locked, are both in `detail`.
+
+    Two earlier versions were wrong about this. Scoring the locked edge put an
+    identically-priced pair at -5.3 (the book's own overround), which could
+    never clear a threshold; scoring the disagreement put it at 0, which still
+    could not clear a positive one. Both silenced exactly the duplicates worth
+    hearing about.
+    """
+    from rapidfuzz import fuzz
+    from src.normalize import normalize_team, normalize_tennis_name
+
+    def _norm(name: str, sport: str) -> str:
+        name = str(name or "").strip()
+        if not name:
+            return ""
+        try:
+            return (normalize_tennis_name(name) if sport == "tennis"
+                    else normalize_team(name))
+        except Exception:
+            return name.lower()
+
+    def _ml(key) -> dict[str, float]:
+        """The full-time moneyline of one listing, as {outcome: odds}."""
+        for o in events.get(key, {}).get("FT", {}).get("moneyline", []):
+            s = o.selections
+            if "home" in s and "away" in s:
+                return {k: v for k, v in s.items() if v and v > 1.0}
+        return {}
+
+    # Only the main board — a corners submarket is not a separate fixture.
+    rows = [(k, o) for k, o in meta.items()
+            if k[1] is None and o.start_time and o.sport in CONSISTENCY_SPORTS]
+    buckets: dict[tuple, list] = {}
+    for k, o in rows:
+        buckets.setdefault((o.sport, o.start_time), []).append((k, o))
+
+    out: list[ConsistencyFlag] = []
+    for (sport, _start), group in buckets.items():
+        if len(group) < 2:
+            continue
+        for i, (ka, a) in enumerate(sorted(group, key=lambda x: str(x[0][0]))):
+            for kb, b in sorted(group, key=lambda x: str(x[0][0]))[i + 1:]:
+                if ka[0] == kb[0]:
+                    continue
+                # NO GUARDS, and no league test. The rule is the whole rule:
+                # same kickoff, same two teams. Measured over 3 months of the
+                # tick store (238k events, simulated/e-sports leagues excluded)
+                # a youth/senior guard blocked 11 pairs board-wide, 3 of them on
+                # CrystalBet and Lider-Bet — and those three are the mislabelling
+                # this check exists to catch, not false alarms:
+                #     FCI Tallinn II       v Tabasalu Ulasabat
+                #     Fci Levadia Tallinn U19 v Tabasalu
+                # one side tagged "II", the other "U19", same club. A women's
+                # guard blocked 2 more. Two genuinely different fixtures between
+                # the same two teams do not kick off in the same minute, so the
+                # tags carry no information the kickoff has not already given.
+                ah, aa = _norm(a.home, sport), _norm(a.away, sport)
+                bh, ba = _norm(b.home, sport), _norm(b.away, sport)
+                if not (ah and aa and bh and ba):
+                    continue
+                direct = min(fuzz.token_set_ratio(ah, bh), fuzz.token_set_ratio(aa, ba))
+                swap = min(fuzz.token_set_ratio(ah, ba), fuzz.token_set_ratio(aa, bh))
+                if max(direct, swap) < DUP_NAME_SCORE:
+                    continue
+                flipped = swap > direct
+                ml_a, ml_b = _ml(ka), _ml(kb)
+                # Align the twin onto this listing's orientation before
+                # comparing. A swapped duplicate ("Rostov v CSKA" against
+                # "CSKA v Rostov") is not a lesser case — measured on the tick
+                # store it is a large share of the real ones, and it is the most
+                # bettable, since backing the same team on both listings is one
+                # bet at two prices. An earlier version gated the cover behind
+                # `not flipped` and reported every one of them as "prices not
+                # comparable" with no edge at all.
+                if flipped:
+                    ml_b = {"home": ml_b.get("away"), "away": ml_b.get("home"),
+                            **({"draw": ml_b["draw"]} if "draw" in ml_b else {})}
+                    ml_b = {k: v for k, v in ml_b.items() if v}
+                note = "prices not comparable"
+                if ml_a and ml_b and set(ml_a) == set(ml_b):
+                    best = {k: max(ml_a[k], ml_b[k]) for k in ml_a}
+                    cover = sum(1.0 / v for v in best.values())
+                    gap = max(abs(ml_a[k] / ml_b[k] - 1.0) * 100.0 for k in ml_a)
+                    note = (f"they disagree by up to {gap:.1f}%, best-of-both "
+                            f"cover {cover:.4f}"
+                            + (f" — LOCKED {(1.0 - cover) * 100:.2f}%"
+                               if cover < 1.0 else ""))
+                out.append(ConsistencyFlag(
+                    sport=a.sport, league=a.league, home=a.home, away=a.away,
+                    start_time=a.start_time, event_id=ka[0],
+                    kind="duplicate_fixture", periods="FT",
+                    detail=(f"same match listed twice at the same kickoff — "
+                            f"event {ka[0]} ({a.league}) and event {kb[0]} "
+                            f"({b.league}){' with sides flipped' if flipped else ''}; "
+                            f"{note}"),
+                    severity=100.0, outcome=None, odds=None,
+                    submarket=None))
+    return out
+
 
 def _match_prob_from_set(p: float) -> float:
     """P(win a best-of-3) given a constant per-set win probability p.
@@ -303,6 +505,166 @@ def _set_prob_from_match(p_match: float) -> Optional[float]:
         else:
             hi = mid
     return (lo + hi) / 2.0
+
+
+# ── Tennis correct score: the latent-strength (Beta) model ───────────────────
+#
+# _match_prob_from_set above assumes a CONSTANT per-set probability, i.e. that
+# set outcomes are independent. They are not, and the owner put the mechanism
+# better than the textbook does: "when someone wins first it most likely lower
+# odds to win next one too". Winning set 1 is evidence you are the better
+# player, so it shortens set 2.
+#
+# The honest way to say that is NOT a correlation fudge factor bolted onto the
+# product. Sets ARE independent — given the player's true per-set strength.
+# What we lack is that strength. So make it a random variable:
+#
+#     P ~ Beta(mu*nu, (1-mu)*nu)
+#
+# and every correct-score leg is a raw moment of P:
+#
+#     P(fav 2-0) = E[P^2]                       = mu^2 + sigma^2
+#     P(fav 2-1) = 2(E[P^2] - E[P^3])
+#     P(dog 2-1) = 2(mu - 2E[P^2] + E[P^3])
+#     P(dog 2-0) = 1 - 2mu + E[P^2]
+#     P(match)   = 3E[P^2] - 2E[P^3]
+#
+# The correlation IS the variance: straight sets get lifted by exactly sigma^2
+# over the independent p^2, and nu -> infinity recovers _match_prob_from_set
+# exactly. Nothing is fitted by eye.
+#
+# The reason this is worth having at all is that CB OVER-DETERMINES it. The
+# 1st-set price gives mu; the match price then pins nu; and the four
+# correct-score legs follow with NO free parameter left. A board that posts all
+# three is making a checkable arithmetic claim, not three opinions.
+#
+# CAVEAT, stated because it bounds what the check can ever say: solving nu from
+# the match price forces the model to reproduce that price. So this tests the
+# SHAPE across the four legs, never the level. If CB's match price is wrong,
+# the model inherits the error and reports nothing.
+
+def _cs_moments(mu: float, nu: float) -> tuple[float, float]:
+    """E[P^2], E[P^3] for P ~ Beta(mu*nu, (1-mu)*nu)."""
+    a, b = mu * nu, (1.0 - mu) * nu
+    n = a + b
+    return (a * (a + 1) / (n * (n + 1)),
+            a * (a + 1) * (a + 2) / (n * (n + 1) * (n + 2)))
+
+
+def _cs_match_prob(mu: float, nu: float) -> float:
+    """P(win a best-of-3) under the latent-strength model."""
+    m2, m3 = _cs_moments(mu, nu)
+    return 3.0 * m2 - 2.0 * m3
+
+
+def _cs_solve_nu(mu: float, p_match: float) -> Optional[float]:
+    """Concentration implied by a (1st-set, match) price pair.
+
+    Variance costs a favourite match equity, so P(match) is increasing in nu —
+    bisect geometrically, since nu spans orders of magnitude. Returns None when
+    NO nu reproduces the observed match price: that pair is already
+    contradictory before correct score is consulted, and tennis_set_match
+    above owns that case.
+    """
+    if not 0.0 < mu < 1.0 or not 0.0 < p_match < 1.0:
+        return None
+    # Solve on the FAVOURITE. P(match) is monotone in nu but the DIRECTION
+    # flips at mu = 0.5: variance costs a favourite match equity and gives it
+    # to a dog. Bisecting without this reversed the comparison on every event
+    # where the away player was the underdog, and the range check then rejected
+    # it — measured 2026-09-08 on the live board as a 55% "unfittable" rate that
+    # was entirely this bug. Orienting fixes it because nu = a + b is symmetric
+    # under P <-> 1-P: Beta(a,b) and Beta(b,a) have the same concentration, so
+    # the nu solved for the favourite is the one the dog has too.
+    if mu < 0.5:
+        mu, p_match = 1.0 - mu, 1.0 - p_match
+    lo, hi = 1e-6, 1e9
+    if not (_cs_match_prob(mu, lo) <= p_match <= _cs_match_prob(mu, hi)):
+        return None
+    for _ in range(200):
+        mid = (lo * hi) ** 0.5
+        if _cs_match_prob(mu, mid) < p_match:
+            lo = mid
+        else:
+            hi = mid
+    return (lo * hi) ** 0.5
+
+
+def _cs_partition(mu: float, nu: float) -> dict[str, float]:
+    """The four best-of-3 correct-score probabilities, keyed HOME-AWAY.
+
+    `mu` is the AWAY player's per-set strength, matching the "0-2" label
+    convention (away wins 2-0). Sums to exactly 1 by construction.
+    """
+    m2, m3 = _cs_moments(mu, nu)
+    return {
+        "0-2": m2,
+        "1-2": 2.0 * (m2 - m3),
+        "2-1": 2.0 * (mu - 2.0 * m2 + m3),
+        "2-0": 1.0 - 2.0 * mu + m2,
+    }
+
+
+# The set-to-set variance, as ONE constant for the whole board rather than a
+# parameter fitted per match.
+#
+# Fitting nu per match was the first version and it was wrong. There is exactly
+# one observation (the gap between the 1st-set price and the match price) per
+# free parameter, and the gap's leverage on nu is 3*sigma^2*(1-2mu) — which goes
+# to ZERO at an even match. So near mu = 0.5 the parameter is unidentified and
+# the solver converts CB's ordinary pricing noise into whatever variance closes
+# the gap. Measured on the live board 2026-09-08: an identical -2pp gap implies
+# sigma^2 = 0.116 at mu = 0.55 but 0.012 at mu = 0.80, and one real match
+# (Filar K. vs Spierle J., a -2.94pp gap at mu = 0.573) solved to sigma^2 =
+# 0.121 — 49% of the maximum variance mathematically possible, i.e. a
+# near-uniform Beta asserting we know nothing about the player. That single
+# artefact was the largest "finding" the first version produced: +18.9% on a
+# leg this model prices at -8.2%.
+#
+# Pooled by least squares on P(match) instead — one parameter for the whole
+# board, fitted over all 363 events carrying both moneylines, residual RMS
+# 1.60pp. Deliberately NOT conditioned on having a correct-score market: this
+# constant describes how CB's set and match prices relate, which is a property
+# of the board, not of the subset we happen to be checking. Fitting it on the
+# 250 correct-score events gave 0.0335 and the wider sample gives 0.0403.
+#
+# HONEST LIMIT: this is fitted to make CB's own two markets agree, so it
+# absorbs whatever systematic gap sits between them — and CB alone cannot
+# distinguish "sets are correlated" from "these two markets are priced
+# inconsistently". Settling that needs a sharp reference (Pinnacle prices
+# tennis; src/scrapers/pinnacle.py already reaches it). Until then, treat
+# 0.0335 as a description of CB, not of tennis.
+CS_SIGMA2 = 0.04026
+
+
+def _cs_fair_from_match(p_match: float, sigma2: float = CS_SIGMA2) -> dict[str, float]:
+    """Fair correct-score partition from the devigged MATCH price alone.
+
+    This is the whole model in one call: devig the match, invert it to a per-set
+    strength at the board's fixed variance, and read off the four legs. The
+    1st-set price is deliberately NOT an input — it was what the discredited
+    per-match fit consumed, and holding it out leaves it free to be used as a
+    check on the model instead of a feedstock for it.
+
+    Stated on the AWAY player ("0-2" = away wins 2-0). Below 0.5 it recurses on
+    the favourite and mirrors, because the inversion is only monotone above it.
+    """
+    if p_match < 0.5:
+        f = _cs_fair_from_match(1.0 - p_match, sigma2)
+        return {"2-0": f["0-2"], "2-1": f["1-2"], "1-2": f["2-1"], "0-2": f["2-0"]}
+    lo, hi = 0.5, 0.999
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        nu = mid * (1.0 - mid) / sigma2 - 1.0
+        if nu <= 0.0:
+            lo = mid
+            continue
+        if _cs_match_prob(mid, nu) < p_match:
+            lo = mid
+        else:
+            hi = mid
+    mu = (lo + hi) / 2.0
+    return _cs_partition(mu, mu * (1.0 - mu) / sigma2 - 1.0)
 
 
 @dataclass(frozen=True)
@@ -1080,6 +1442,132 @@ def find_consistency_flags(
                                    f"{ps*100:.0f}% — {gap:.0f}pp apart on the same "
                                    f"quantity", gap)
 
+        # 4c-ter. TENNIS: the correct-score market against the match price.
+        #
+        # Devig the match, turn it into a fair price for each exact set score,
+        # and compare the board's correct-score legs to it. That is the whole
+        # check, and it is deliberately the simple thing: the only market it
+        # reads besides correct score is the match winner.
+        #
+        # The set score is a function of per-set strength, and the match price
+        # pins that down — but NOT under independent sets, which is the owner's
+        # point and it is right: "when someone wins first it most likely lower
+        # odds to win next one too." That is carried by CS_SIGMA2, one constant
+        # measured across the board, in _cs_fair_from_match.
+        #
+        # An earlier version fitted that variance PER MATCH from the 1st-set
+        # price. It looked more principled and was much worse — see CS_SIGMA2
+        # for why the fit is unidentified near an even match, and for the
+        # +18.9% phantom it produced on a leg this model prices at -8.2%.
+        # Holding the 1st-set price out also leaves it available as an
+        # independent check on the model rather than an input to it, and lifts
+        # coverage to every match with a correct-score board.
+        #
+        # Only the GENEROUS direction fires. The other sign is the book
+        # charging too much, which is most of the board and is just the vig.
+        if m.sport == "tennis":
+            cs_rows = periods.get("FT", {}).get("correct_score") or []
+            ftv = views.get("FT")
+            if cs_rows and ftv is not None and ftv.ml_phome is not None:
+                # Refuse to derive anything from a price the book isn't making.
+                real_prices = all(
+                    o2.selections.get(k, 0.0) >= CS_MIN_ML_ODDS
+                    for o2 in periods.get("FT", {}).get("moneyline", [])
+                    for k in ("home", "away"))
+                # Model is stated on the AWAY player, matching "0-2".
+                fair = _cs_fair_from_match(1.0 - ftv.ml_phome)
+                for o in cs_rows:
+                    if not real_prices:
+                        break
+                    sels = o.selections
+                    # Best-of-5 boards parse, but the closed form is bo3.
+                    if set(sels) != set(fair):
+                        continue
+                    for leg, price in sels.items():
+                        edge = price * fair[leg] - 1.0
+                        if edge < CS_MIN_EDGE or price > CS_MAX_LEG_ODDS:
+                            continue
+                        mk("tennis_correct_score", "FT",
+                           f"correct score {leg} @ {price:.2f} against a fair "
+                           f"{1.0 / fair[leg]:.2f} — the match price "
+                           f"({(1.0 - ftv.ml_phome) * 100:.0f}% away, devigged) "
+                           f"makes {leg} a {fair[leg] * 100:.1f}% shot, so the "
+                           f"board is {edge * 100:+.1f}% generous on it",
+                           edge * 100.0, outcome=leg, odds=price)
+
+        # 4c-quater. SOCCER: each HALF's result against the full-time result.
+        #
+        # The full-time 1X2 fixes the goal rates; the halves are a fixed share
+        # of those rates. So the first- and second-half 1X2 are not free
+        # opinions — they are determined by the full-time market up to the
+        # league's half split. A half priced far from that is the book
+        # contradicting its own headline market.
+        #
+        # Found by the owner on the live board (Belarus U19 v Gomel Region,
+        # 2026-09-11). Full-time 1.10/6.90/14.6, first half 1.45/2.85/11.8,
+        # second half 1.90/3.20/3.50: the away side 25.4% to win the second
+        # half against 6.1% to win the match. A goal model fitted ONLY to the
+        # full-time 1X2 and total reproduced the first half to 0.0pp — never
+        # having seen it — and put the second-half away at 7.2%: an 18.2pp
+        # miss. When the same fit nails one half and misses the other by 3.5x,
+        # the market is the outlier. The value sat on the other side: home in
+        # the second half at 1.90 against a model 66.5% is +26% EV.
+        #
+        # The second half could not fire before this because CB's H2 was never
+        # classified — skipped as unmatchable against Pinnacle, which is the
+        # +EV pipeline's concern and not this one's. Third time that reasoning
+        # has hidden a CB-internal contradiction; see the permissive
+        # classifier's docstring for the other two.
+        #
+        # Fires on the GENEROUS direction: the outcome whose posted probability
+        # sits furthest BELOW the model, i.e. the leg priced too long. The
+        # opposite sign is the book charging too much, which is not a bet.
+        if HALF_RESULT_ENABLED and m.sport == "soccer" and submarket is None:
+            ftv = views.get("FT")
+            if (ftv is not None and ftv.ml_phome3 is not None
+                    and ftv.ml_pdraw3 is not None):
+                ph, pd = ftv.ml_phome3, ftv.ml_pdraw3
+                pa = 1.0 - ph - pd
+                if 0.0 < ph < 1.0 and 0.0 < pd < 1.0 and 0.0 < pa < 1.0:
+                    from src.soccer_model import (fit_lambdas, half_result_probs,
+                                                  split_for_league)
+                    try:
+                        lh, la, info = fit_lambdas(ph, pd, pa)
+                        ok = bool(info.get("converged", True))
+                    except Exception:
+                        ok = False
+                    if ok:
+                        # Bias-corrected halves — see HALF_BIAS in soccer_model
+                        # for why raw Poisson halves are not used here.
+                        h1p, h2p = half_result_probs(lh, la, (ph, pd, pa),
+                                                     split=split_for_league(m.league))
+                        for per, (mh, md, ma) in (("H1", h1p), ("H2", h2p)):
+                            v = views.get(per)
+                            if v is None or v.ml_phome3 is None or v.ml_pdraw3 is None:
+                                continue
+                            posted = {"1": v.ml_phome3, "X": v.ml_pdraw3,
+                                      "2": 1.0 - v.ml_phome3 - v.ml_pdraw3}
+                            model = {"1": mh, "X": md, "2": ma}
+                            gen = max(posted, key=lambda k: model[k] - posted[k])
+                            gap = (model[gen] - posted[gen]) * 100.0
+                            if gap < HALF_RESULT_PP:
+                                continue
+                            # the posted price of that leg, for the odds band
+                            price = None
+                            for o3 in periods.get(per, {}).get("moneyline", []):
+                                s3 = o3.selections
+                                if {"home", "draw", "away"} <= set(s3):
+                                    price = s3[{"1": "home", "X": "draw", "2": "away"}[gen]]
+                                    break
+                            ev = (price * model[gen] - 1.0) * 100.0 if price else None
+                            mk("half_result_vs_ft", f"{per} vs FT",
+                               f"{per} result prices {gen} at {posted[gen]*100:.1f}% but the "
+                               f"full-time 1X2 ({ph*100:.0f}/{pd*100:.0f}/{pa*100:.0f}) "
+                               f"implies {model[gen]*100:.1f}% for that half — {gap:.1f}pp "
+                               f"generous"
+                               + (f", {gen} @ {price:.2f} is {ev:+.0f}% EV" if price else ""),
+                               gap, outcome=gen, odds=price)
+
         # 4c-bis. ICE HOCKEY: the same overtime identity, one period apart.
         #
         # Hockey posts its two full-game moneylines under DIFFERENT periods,
@@ -1248,6 +1736,10 @@ def find_consistency_flags(
                 mk(kind, periods_label, detail, severity, outcome=outcome)
 
     flags.sort(key=lambda f: f.severity, reverse=True)
+    # 7. DUPLICATE FIXTURE — the only CROSS-event rule here. Runs after the
+    #    per-event loop because it needs every event at once.
+    flags.extend(_duplicate_fixture_flags(events, meta))
+
     return flags
 
 

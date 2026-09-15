@@ -53,8 +53,20 @@ Source     = Literal["crystalbet", "pinnacle", "xbet", "liderbet", "betlive", "c
 # "fts" = First Team To Score, a 3-way over {home, none, away}. It is NOT a
 # moneyline: its middle leg is "nobody scores" (P(0-0)), not a draw, so filing
 # it as one would feed a 0-0 price into every check that reads a 1X2.
-MarketType = Literal["moneyline", "spread", "total", "team_total", "htft", "fts"]
-Period     = Literal["FT", "H1", "Q1", "Q2", "Q3", "Q4", "REG", "P1", "P2", "P3"]
+# "correct_score" = the exact set score, selections keyed "2-0"/"2-1"/"1-2"/"0-2"
+# on a best-of-3 (and "3-0".."0-3" on a best-of-5), always HOME-AWAY order.
+# Tennis only for now. Like "htft" it is captured by the permissive
+# (anomaly-scan) classifier for CB-internal checks and never matched against
+# Pinnacle. The legs form an exhaustive partition of the match, which is what
+# makes them checkable: they must sum to 1 after devig, and their SHAPE is
+# fixed by the per-set win probability the moneyline already implies.
+#
+# 2026-09-08: src/scrapers/sports/tennis.py used to say wiring this "needs a
+# schema change". It did not — `selections` is a free-form dict and htft has
+# carried 9 keys through it since soccer. Only the Literal needed widening.
+MarketType = Literal["moneyline", "spread", "total", "team_total", "htft", "fts",
+                     "correct_score"]
+Period     = Literal["FT", "H1", "H2", "Q1", "Q2", "Q3", "Q4", "REG", "P1", "P2", "P3"]
 Submarket  = Literal["corners", "bookings"]
 TeamSide   = Literal["home", "away"]
 

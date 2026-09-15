@@ -82,7 +82,7 @@ def classify_market_title(title):
         2nd Period Winner Home/Away     1/2      -> moneyline H2
         Under/Over Sets                 Und/Over -> total FT
         Number Of Sets                  2/3 sets -> same market, different words
-        Correct Score                   2-0 ...  -> skipped (4-way)
+        Correct Score                   2-0 ...  -> correct_score FT
         To win 1st set & win the match  1/2      -> skipped; this is P(1/1), the
                                                     combo leg, worth wiring next
         Asian Handicap Sets/Games/1st Period, Under/Over Games, Odd/Even, ...
@@ -100,7 +100,7 @@ def classify_market_title(title):
         Set Handicap                    1(-1.5)  -> skipped (see note below)
         Home/Away Team To Win a Set     Yes/No   -> skipped
         Home/Away to win exactly 1 set  Yes/No   -> skipped
-        Correct score                   2:0 ...  -> skipped (4-way)
+        Correct score                   2:0 ...  -> correct_score FT
         Match to end 2:0 / 0:2          Yes/No   -> skipped
         Odd/even games                  odd/even -> skipped
 
@@ -108,9 +108,18 @@ def classify_market_title(title):
     "Winner & total", "1 set - winner & total" and the per-set winners.
 
     The skipped ones are real and useful — every one is a linear function of the
-    four correct-score probabilities — but Odds has no representation for a
-    yes/no or 4-way correct-score market, so wiring them needs a schema change.
-    They are catalogued here so the next pass knows exactly what is on the table.
+    four correct-score probabilities. They are catalogued here so the next pass
+    knows exactly what is on the table.
+
+    CORRECTION (2026-09-08): this paragraph used to claim wiring them "needs a
+    schema change", because Odds had no representation for a 4-way market. That
+    was wrong and it cost the correct-score market a month on the bench —
+    `selections` is a free-form dict and htft has carried NINE keys through it
+    since soccer. Widening the MarketType Literal was the whole change. The
+    remaining skips (the Yes/No shapes, "To win 1st set & win the match") are
+    still genuinely unrepresented, but for a different reason: they are
+    2-way projections OF the correct-score partition, so they want the same
+    market row, not a new market type.
 
     NOTE the spread here is a SET handicap (±1.5 sets), while the list-view
     spread for tennis is a GAMES handicap. Both land on market_type "spread",
@@ -148,4 +157,18 @@ def classify_market_title(title):
     # which is itself a consistency opportunity once Odds can hold both.
     if t.startswith("total sets") or t.startswith("under/over sets"):
         return MarketClassification(market_type="total", period="FT", n_way=2)
+
+    # ── correct score (the exact set score) ─────────────────────────────────
+    # Wired 2026-09-08. EXACT titles only, deliberately: this market is an
+    # exhaustive partition of the match, and the checks built on it devig
+    # across the whole set of legs. A substring test would also match a
+    # per-set correct score ("Correct score 1st set" — games within one set),
+    # whose legs are a partition of something else entirely; folding those in
+    # would devig two different markets together and invent edge out of it.
+    # Both CB naming schemes reduce to the same lowercase string; the list is
+    # here so an unrecognised third wording stays unclassified rather than
+    # being guessed at.
+    if t in ("correct score", "correct score sets"):
+        return MarketClassification(market_type="correct_score",
+                                    period="FT", n_way=4)
     return None

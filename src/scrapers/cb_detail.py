@@ -90,6 +90,10 @@ _RE_TOTAL_LABEL = re.compile(
     r"^(und(?:er)?|over|ov)\s+(\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
+_RE_TOTAL_REVERSED = re.compile(
+    r"^(\d+(?:\.\d+)?)\s*(und(?:er)?|over|ov)$",
+    re.IGNORECASE,
+)
 
 
 def _bt_pair(snatch) -> Optional[tuple[str, str]]:
@@ -160,6 +164,15 @@ def _parse_ml_3way(snatches) -> Optional[dict[str, float]]:
 
 _RE_HTFT_LABEL = re.compile(r"^([12Xx])\s*/\s*([12Xx])$")
 
+# Correct-score labels. CB serves tennis under two naming schemes (see
+# src/scrapers/sports/tennis.py) and they punctuate the score differently:
+# scheme A ships "2-0", scheme B "2:0". Both are HOME-AWAY. Kept deliberately
+# generic over single digits rather than pinned to the four best-of-3 scores,
+# so a best-of-5 board ("3-2") parses with no code change — deciding WHICH
+# scores form a valid partition is the consistency check's job, not the
+# parser's.
+_RE_CS_LABEL = re.compile(r"^(\d)\s*[-:–]\s*(\d)$")
+
 
 def _parse_fts(snatches) -> Optional[dict[str, float]]:
     """Parse First Team To Score: labels "1" / "0" / "2".
@@ -206,6 +219,46 @@ def _parse_htft(snatches) -> Optional[dict[str, float]]:
             continue
         sels[f"{m.group(1).upper()}/{m.group(2).upper()}"] = odds
     return sels if ("1/1" in sels or "2/2" in sels) else None
+
+
+def _parse_correct_score(snatches) -> Optional[dict[str, float]]:
+    """
+    Parse the exact set score: labels "2-0" / "2:1" / ... Returns {label: odds}
+    normalized to hyphen form ("2-0"), HOME-AWAY.
+
+    Unlike _parse_htft we require the WHOLE partition to survive, not a corner
+    outcome. Every use of this market — devig, the fair-value comparison
+    against the moneyline, the P(2-1)/P(2-0) ratio identity — assumes the legs
+    are exhaustive and mutually exclusive. With one leg suspended (_safe_float
+    drops it) the remainder still sums to something plausible-looking, so the
+    devig silently inflates every surviving leg and the check reports edge that
+    is really just a missing outcome. Better to emit nothing.
+
+    "Whole" is defined by the scores present, since we do not know here whether
+    the board is best-of-3 or best-of-5: take the highest set count seen (2 or
+    3), and demand all four (resp. six) scores that reach it.
+    """
+    sels: dict[str, float] = {}
+    for snatch in snatches:
+        pair = _bt_pair(snatch)
+        if pair is None:
+            continue
+        label, odds_text = pair
+        m = _RE_CS_LABEL.match(label.strip())
+        if not m:
+            continue
+        odds = _safe_float(odds_text)
+        if odds is None:
+            continue
+        sels[f"{m.group(1)}-{m.group(2)}"] = odds
+    if not sels:
+        return None
+    # Best-of-N: the winner takes N sets, the loser 0..N-1.
+    n = max(max(int(a), int(b)) for a, b in (k.split("-") for k in sels))
+    if n not in (2, 3):
+        return None
+    want = {f"{n}-{i}" for i in range(n)} | {f"{i}-{n}" for i in range(n)}
+    return sels if want <= set(sels) else None
 
 
 def _parse_spread(snatches) -> list[tuple[float, dict[str, float]]]:
@@ -256,6 +309,11 @@ def _parse_total(snatches) -> list[tuple[float, dict[str, float]]]:
         if pair is None:
             continue
         label, odds_text = pair
+        # CB's PERIOD totals put the number first — "0.5 Und", "2.5 Und",
+        # "0.5Under" — where the full-time ladder writes "Under 3.5". Same
+        # market, reversed label. Swap it into the canonical order so one regex
+        # serves both; nothing that already matched is touched.
+        label = _RE_TOTAL_REVERSED.sub(r"\2 \1", label)
         m = _RE_TOTAL_LABEL.match(label)
         if not m:
             continue
@@ -402,6 +460,26 @@ def parse_detail_page(
                 home=home, away=away,
                 sport_name=sport_name,
                 market_type="htft", period="FT",
+                selections=sels, line=None,
+                fetched_at=fetched_at, event_id=event_id,
+                league=league, start_time=start_time,
+                submarket=cls.submarket, team_side=None,
+                section=title,
+            )
+            if odds is not None:
+                ranked.append((cls.variant_rank, odds))
+
+        elif cls.market_type == "correct_score":
+            # Exact set score — one row, selections keyed "2-0".."0-2". Like
+            # htft the market spans the whole match, so period is FT and there
+            # is no line.
+            sels = _parse_correct_score(snatches)
+            if sels is None:
+                continue
+            odds = _build_odds(
+                home=home, away=away,
+                sport_name=sport_name,
+                market_type="correct_score", period="FT",
                 selections=sels, line=None,
                 fetched_at=fetched_at, event_id=event_id,
                 league=league, start_time=start_time,

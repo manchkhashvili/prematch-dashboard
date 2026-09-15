@@ -218,6 +218,36 @@ def devig_3way_shin(d1: float, d2: float, d3: float) -> tuple[float, float, floa
         return devig_3way_proportional(d1, d2, d3)
 
 
+def devig_nway_shin(odds: Sequence[float]) -> list[float]:
+    """Shin devig for an arbitrary exhaustive partition (4+ outcomes).
+
+    Added 2026-09-08 for tennis correct score, which is a 4-way (best-of-3) or
+    6-way (best-of-5) partition of the match. _solve_shin_z was already generic
+    over the number of outcomes — devig_2way_shin and devig_3way_shin are only
+    argument-shape wrappers around it — so this adds no new mathematics.
+
+    It matters here more than on a moneyline, not less: a correct-score board
+    spans 1.70 to 7.30 on the same event, and that is exactly the skew where
+    proportional overstates the longshot legs. Devigging this market
+    proportionally while the moneylines it is compared against use Shin would
+    put the two sides of the comparison on different scales and book the
+    difference as edge.
+    """
+    if any(d <= 1.0 for d in odds):
+        raise ValueError(f"decimal odds must be > 1.0; got {list(odds)}")
+    imps = [1.0 / d for d in odds]
+    try:
+        _, probs = _solve_shin_z(imps)
+        if not all(0 < p < 1 for p in probs):
+            raise ValueError(f"Shin produced invalid probs {probs}")
+        return probs
+    except (ValueError, ZeroDivisionError) as e:
+        log.warning("Shin n-way devig failed for %s: %s — falling back to proportional",
+                    list(odds), e)
+        total = sum(imps)
+        return [p / total for p in imps]
+
+
 # ── Default-method aliases (the rest of the codebase uses these) ─────────────
 # Switched 2026-05-27 (Phase 3.7) from proportional → Shin. Callers don't need
 # to change anything; they get more accurate fair prices automatically.

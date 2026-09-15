@@ -147,7 +147,10 @@ def test_tennis_titles_classify(title, mt, per):
 
 
 @pytest.mark.parametrize("title", [
-    "Correct score",            # 4-way; Odds has no representation yet
+    # "Correct score" used to live here, on the belief that a 4-way market had
+    # no representation in Odds. It did — `selections` is a free-form dict and
+    # htft has carried nine keys through it since soccer. Wired 2026-09-08;
+    # see tests/test_tennis_correct_score.py.
     "Home Team To Win a Set",   # yes/no
     "Odd/even games",
     "Set Handicap",             # would collide with the list-view GAMES spread

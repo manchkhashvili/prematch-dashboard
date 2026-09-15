@@ -42,6 +42,86 @@ def split_for_league(league: Optional[str]) -> float:
     return LEAGUE_SPLIT.get(league.strip().lower(), DEFAULT_SPLIT)
 
 
+# ── Half-result bias correction (2026-09-14) ─────────────────────────────────
+#
+# The fixed-split Poisson halves carry a SYSTEMATIC bias against how books
+# actually price halves, and it is the same bias on every book measured: the
+# model overstates the half DRAW and understates the favourite. Closing-line
+# residuals, posted minus model, median in pp:
+#
+#                       home    draw    away
+#   H1  Pinnacle (2763) +1.00   -1.32   +0.41
+#   H1  Lider-Bet(2827) +0.93   -1.22   +0.19
+#   H2  Lider-Bet(2827) +0.73   -1.79   +1.09
+#   H2  Crocobet (1540) +0.76   -1.77   +1.07
+#
+# The owner's proposal was to drop the model and learn the FT->half map from
+# well-priced data directly. Tested head-to-head on held-out Pinnacle H1 (829
+# events): the pure 1-D empirical curve removes the bias but has WIDER tails
+# than raw Poisson (home p1 -4.26 vs -1.60), because a map on FT-home alone
+# cannot see that a 60% favourite in a low-total game and one in a high-total
+# game have different halves. The Poisson structure captures that; it just
+# needs its bias taken out. Poisson + a learned bias curve won on every
+# outcome, both halves — H1 |mean| 1.21 -> 0.72 (home), 1.77 -> 1.18 (draw);
+# H2 0.92 -> 0.36 (home), 1.74 -> 0.65 (draw).
+#
+# Each curve is a binned median of (posted - model), keyed by the FT
+# probability of the SAME outcome, 20 bins, linear between bin centres.
+# H1 is learned from Pinnacle (sharp). H2 from Lider-Bet + Crocobet, because
+# no sharp book prices a soccer second half; the two soft books agree with each
+# other to a fraction of a point, which is the best evidence available. Applied
+# to CrystalBet H1 (3667 events the curves never saw): most-generous-leg gap
+# median +0.74, p99 +5.17. Setanta, also unseen: p99 +4.81.
+#
+# Re-fit: scripts/... does not exist yet; the fit is in the session notes for
+# 2026-09-14 and takes ~10 s off data/ticks.db `latest`.
+HALF_BIAS: dict[str, tuple[list[float], list[float]]] = {
+    "H1:home": ([0.1348, 0.2038, 0.2470, 0.2825, 0.3118, 0.3389, 0.3634, 0.3861, 0.4071, 0.4299, 0.4475, 0.4687, 0.4898, 0.5126, 0.5385, 0.5666, 0.5960, 0.6305, 0.6814, 0.7600],
+             [-0.00650, +0.00060, +0.00350, +0.00580, +0.00810, +0.00850, +0.00970, +0.01000, +0.01170, +0.01170, +0.01470, +0.01350, +0.01310, +0.01340, +0.01160, +0.01170, +0.01210, +0.01280, +0.01430, +0.01050]),
+    "H1:draw": ([0.1375, 0.1761, 0.1958, 0.2105, 0.2206, 0.2297, 0.2365, 0.2433, 0.2481, 0.2530, 0.2578, 0.2625, 0.2672, 0.2720, 0.2785, 0.2847, 0.2931, 0.3004, 0.3155, 0.3393],
+             [+0.00240, -0.00410, -0.00590, -0.00850, -0.00980, -0.01100, -0.01020, -0.01290, -0.01240, -0.01300, -0.01450, -0.01560, -0.01740, -0.01620, -0.01940, -0.01940, -0.01950, -0.02380, -0.01880, -0.01700]),
+    "H1:away": ([0.0846, 0.1252, 0.1531, 0.1716, 0.1895, 0.2071, 0.2221, 0.2409, 0.2572, 0.2741, 0.2928, 0.3114, 0.3283, 0.3523, 0.3767, 0.4061, 0.4458, 0.4910, 0.5569, 0.6668],
+             [-0.00860, -0.00800, -0.00390, -0.00480, -0.00180, -0.00040, +0.00150, +0.00250, +0.00420, +0.00400, +0.00560, +0.00540, +0.00800, +0.00760, +0.00850, +0.01020, +0.01120, +0.01180, +0.00910, +0.01030]),
+    "H2:home": ([0.1005, 0.1923, 0.2454, 0.2818, 0.3141, 0.3358, 0.3617, 0.3806, 0.4002, 0.4194, 0.4378, 0.4533, 0.4771, 0.5020, 0.5304, 0.5569, 0.5912, 0.6246, 0.6885, 0.7783],
+             [+0.00650, +0.01260, +0.01430, +0.01440, +0.01340, +0.01240, +0.01090, +0.01070, +0.01080, +0.00890, +0.00830, +0.00700, +0.00630, +0.00490, +0.00280, +0.00050, -0.00230, -0.00560, -0.00800, -0.00820]),
+    "H2:draw": ([0.1210, 0.1661, 0.1915, 0.2046, 0.2161, 0.2244, 0.2311, 0.2381, 0.2446, 0.2491, 0.2542, 0.2590, 0.2639, 0.2699, 0.2749, 0.2807, 0.2866, 0.2923, 0.3027, 0.3220],
+             [+0.00280, +0.00220, -0.00260, -0.00630, -0.00870, -0.01170, -0.01520, -0.01770, -0.01810, -0.02080, -0.02030, -0.02160, -0.02180, -0.02250, -0.02210, -0.02110, -0.02230, -0.02270, -0.02230, -0.02310]),
+    "H2:away": ([0.0751, 0.1249, 0.1557, 0.1782, 0.1964, 0.2184, 0.2386, 0.2564, 0.2750, 0.2923, 0.3083, 0.3254, 0.3464, 0.3642, 0.3887, 0.4190, 0.4523, 0.4985, 0.5776, 0.7344],
+             [+0.00410, +0.00750, +0.01020, +0.01210, +0.01350, +0.01370, +0.01460, +0.01390, +0.01510, +0.01460, +0.01320, +0.01320, +0.01190, +0.01170, +0.01030, +0.00940, +0.00770, +0.00440, -0.00100, -0.00690]),
+}
+
+
+def half_bias(half: str, outcome: str, p_ft: float) -> float:
+    """Learned correction (probability units) to add to the Poisson half
+    result for `outcome` in `half`, given the full-time probability of that
+    same outcome. Clamped at the outer bin centres."""
+    import bisect
+    cx, cy = HALF_BIAS[f"{half}:{outcome}"]
+    i = bisect.bisect_left(cx, p_ft)
+    if i <= 0:
+        return cy[0]
+    if i >= len(cx):
+        return cy[-1]
+    x0, x1, y0, y1 = cx[i - 1], cx[i], cy[i - 1], cy[i]
+    return y0 + (p_ft - x0) * (y1 - y0) / (x1 - x0) if x1 > x0 else y0
+
+
+def half_result_probs(lh: float, la: float, ft: tuple[float, float, float],
+                      *, split: float = DEFAULT_SPLIT) -> tuple[tuple, tuple]:
+    """(H1, H2) result probabilities as (home, draw, away), bias-corrected and
+    renormalised. `ft` is the devigged full-time triple the lambdas were fitted
+    to — it indexes the correction."""
+    m1, m2 = half_matrices(lh, la, split=split)
+    out = []
+    for half, M in (("H1", m1), ("H2", m2)):
+        raw = result_probs(M)
+        adj = [max(1e-6, raw[i] + half_bias(half, k, ft[i]))
+               for i, k in enumerate(("home", "draw", "away"))]
+        s = sum(adj)
+        out.append(tuple(a / s for a in adj))
+    return out[0], out[1]
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Devig
 # ══════════════════════════════════════════════════════════════════════════════

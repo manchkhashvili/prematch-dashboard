@@ -1,0 +1,8409 @@
+[
+ {
+  "event_id": "3209665237",
+  "home": "Richards L.",
+  "away": "Sornlaksup P.",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   11.8,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209659119",
+  "home": "Pastoric D.I.",
+  "away": "Goina P.G.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   9.0,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209659104",
+  "home": "Cucu S.",
+  "away": "Alesia Breaz",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   7.3,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209180753",
+  "home": "Ronde S.",
+  "away": "Desai Z.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   9.8,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209659089",
+  "home": "Jaeger E.",
+  "away": "Prisacariu A.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   9.2,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209660137",
+  "home": "Martinez Cirez C.",
+  "away": "Min Liu",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   9.0
+  ]
+ },
+ {
+  "event_id": "3210660735",
+  "home": "Laia Gavalda Cruz",
+  "away": "primorac Pavicic I.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   15.0,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3211181339",
+  "home": "Chetouane M.",
+  "away": "Liu L.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   9.5,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3211133204",
+  "home": "Petretic L",
+  "away": "Roots A.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   9.7
+  ]
+ },
+ {
+  "event_id": "3209661729",
+  "home": "Coelho D.",
+  "away": "Tanner G.L.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   7.7,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3210393993",
+  "home": "Galea E",
+  "away": "Andaloro F.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   15.0,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3210410216",
+  "home": "Mateus De Carvalho Cardoso Alves",
+  "away": "Victor B.",
+  "league": "ITF Leme, Men",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   15.0
+  ]
+ },
+ {
+  "event_id": "3210868161",
+  "home": "Sanchez A.S.",
+  "away": "Lopez P.",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   11.4
+  ]
+ },
+ {
+  "event_id": "3210870024",
+  "home": "Cinalli L.M.",
+  "away": "Ambar C.M.",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   11.4
+  ]
+ },
+ {
+  "event_id": "3210874147",
+  "home": "Sousa Salazar N.",
+  "away": "Urrutia M.F.",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   15.0,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3210779205",
+  "home": "Gerald Gonzalez J.J./Urrutia F.M.",
+  "away": "Barreto Scholz S.M./Lopez Ocampos A.J.",
+  "league": "ITF. Pilar, Women. Doubles",
+  "start_time": "2026-09-08T17:30:00+00:00",
+  "ml_H1": [
+   1.01,
+   7.1
+  ]
+ },
+ {
+  "event_id": "3211148448",
+  "home": "Tosetto R./Zanellato N.",
+  "away": "Eugenio Almeida Junior / Andre Souza",
+  "league": "ITF Leme, Men Doubles",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   1.25,
+   3.0
+  ],
+  "ml_H1": [
+   1.34,
+   2.6
+  ]
+ },
+ {
+  "event_id": "3210685114",
+  "home": "Ana Victoria Gobbi Monllau / Emily Zornada",
+  "away": "E'Halli Obeid M./Soto Neira A.",
+  "league": "ITF. Pilar, Women. Doubles",
+  "start_time": "2026-09-08T19:23:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.5
+  ],
+  "ml_H1": [
+   1.4,
+   2.35
+  ]
+ },
+ {
+  "event_id": "3210844589",
+  "home": "Enzo Lima / Gabriel Schenekenberg",
+  "away": "Gava P./Garcia Finetto R.A.",
+  "league": "ITF Leme, Men Doubles",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   1.05,
+   5.6
+  ],
+  "ml_H1": [
+   1.09,
+   4.75
+  ]
+ },
+ {
+  "event_id": "3207744220",
+  "home": "Arango E.",
+  "away": "Perez Garcia M.P.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T23:30:00+00:00",
+  "ml_FT": [
+   1.01,
+   8.25
+  ],
+  "ml_H1": [
+   1.01,
+   7.65
+  ]
+ },
+ {
+  "event_id": "3209657594",
+  "home": "Kuan Yi Lee",
+  "away": "Oki Y.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.55
+  ],
+  "ml_H1": [
+   1.4,
+   2.35
+  ]
+ },
+ {
+  "event_id": "3209665253",
+  "home": "Suksumrarn T.",
+  "away": "Congcar C.",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   1.02,
+   6.8
+  ],
+  "ml_H1": [
+   1.05,
+   5.65
+  ]
+ },
+ {
+  "event_id": "3210566829",
+  "home": "Wang J.",
+  "away": "Astakhova D.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   4.0,
+   1.14
+  ],
+  "ml_H1": [
+   3.45,
+   1.19
+  ]
+ },
+ {
+  "event_id": "3209034292",
+  "home": "Storch S./Visaya A.",
+  "away": "Chang A./Perez Ramos P.",
+  "league": "ITF Bali, Men Doubles",
+  "start_time": "2026-09-09T03:30:00+00:00",
+  "ml_FT": [
+   3.25,
+   1.21
+  ],
+  "ml_H1": [
+   3.05,
+   1.25
+  ]
+ },
+ {
+  "event_id": "3209717236",
+  "home": "Stefan Menichella / Wilhelm Saiga",
+  "away": "Shanker Heisnam / Hitesh Chauhan",
+  "league": "ITF Bali, Men Doubles",
+  "start_time": "2026-09-09T03:30:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.4
+  ],
+  "ml_H1": [
+   2.35,
+   1.4
+  ]
+ },
+ {
+  "event_id": "3208815197",
+  "home": "Matsuda K./Shiraishi H.",
+  "away": "Tanaka Y./Tange S.",
+  "league": "ITF Sapporo, Men. Doubles",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.5
+  ],
+  "ml_H1": [
+   1.4,
+   2.35
+  ]
+ },
+ {
+  "event_id": "3209838480",
+  "home": "Leal R./Liborio P.",
+  "away": "Goncalo Marques / Francisco Rocha",
+  "league": "ITF. Sintra, Men. Doubles",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   5.2,
+   1.07
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ]
+ },
+ {
+  "event_id": "3210425671",
+  "home": "Tabacco F./Tabacco G.",
+  "away": "Alen Mujakic / Julien Penzlin",
+  "league": "ITF. Sintra, Men. Doubles",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.25
+  ],
+  "ml_H1": [
+   1.5,
+   2.15
+  ]
+ },
+ {
+  "event_id": "3210719740",
+  "home": "Abasolo T.C./Silva J.D.",
+  "away": "Cacao T. /Marques D.",
+  "league": "ITF. Sintra, Men. Doubles",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.34
+  ],
+  "ml_H1": [
+   2.5,
+   1.35
+  ]
+ },
+ {
+  "event_id": "3208850898",
+  "home": "Yuichiro Inui / Yuta Kikuchi",
+  "away": "Woo Chu s./Chung Y.",
+  "league": "ITF Sapporo, Men. Doubles",
+  "start_time": "2026-09-09T04:30:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.45
+  ],
+  "ml_H1": [
+   2.15,
+   1.5
+  ]
+ },
+ {
+  "event_id": "3210554012",
+  "home": "Yang Y./Choi J.",
+  "away": "Sawashiro K./Zhu C.",
+  "league": "ITF Yeongwol, Women. Doubles",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   6.6,
+   1.02
+  ],
+  "ml_H1": [
+   5.2,
+   1.07
+  ]
+ },
+ {
+  "event_id": "3210664861",
+  "home": "Morisaki Kanako / Ozeki Michika",
+  "away": "Lee H.E./Choi S.Y.",
+  "league": "ITF Yeongwol, Women. Doubles",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ]
+ },
+ {
+  "event_id": "3210680457",
+  "home": "Desvignes E.M. / Kim Y.",
+  "away": "Kosaka R./Leykina P.",
+  "league": "ITF Yeongwol, Women. Doubles",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.75
+  ],
+  "ml_H1": [
+   1.75,
+   1.75
+  ]
+ },
+ {
+  "event_id": "3209179929",
+  "home": "Kokoro Isomura / Ryota Tanuma",
+  "away": "Fukuda S./Takahata R.",
+  "league": "ITF Sapporo, Men. Doubles",
+  "start_time": "2026-09-09T05:15:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ]
+ },
+ {
+  "event_id": "3210697930",
+  "home": "Ferguson C./Shin S.",
+  "away": "Idogaki K./Otsuka K.",
+  "league": "ITF Sapporo, Men. Doubles",
+  "start_time": "2026-09-09T05:15:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.5
+  ],
+  "ml_H1": [
+   1.4,
+   2.35
+  ]
+ },
+ {
+  "event_id": "3210585998",
+  "home": "Kulikova A./Shubladze A.",
+  "away": "Lee E./Sato H.",
+  "league": "ITF Guiyang, Women. Doubles",
+  "start_time": "2026-09-09T06:15:00+00:00",
+  "ml_FT": [
+   1.33,
+   2.65
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ]
+ },
+ {
+  "event_id": "3209369099",
+  "home": "Kamput/Surarityotin",
+  "away": "Adrian Arcon / Peter Bertran",
+  "league": "ITF. Nonthaburi, Men. Doubles",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_H1": [
+   6.6,
+   1.02
+  ]
+ },
+ {
+  "event_id": "3208797380",
+  "home": "Koaykul/Srisen",
+  "away": "Penn Charusorn / Kamonpanyakorn Thadpong",
+  "league": "ITF. Nonthaburi, Men. Doubles",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3211148942",
+  "home": "Tahiri M.",
+  "away": "Pahwa S.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   5.5,
+   1.05
+  ],
+  "ml_H1": [
+   4.75,
+   1.09
+  ]
+ },
+ {
+  "event_id": "3211130315",
+  "home": "Marmousez L",
+  "away": "Ben Weintraub",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   8.2
+  ],
+  "ml_H1": [
+   1.05,
+   5.65
+  ]
+ },
+ {
+  "event_id": "3210868000",
+  "home": "Dvorackova A.",
+  "away": "Sramkova T.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.14,
+   4.0
+  ],
+  "ml_H1": [
+   1.18,
+   3.5
+  ]
+ },
+ {
+  "event_id": "3211036914",
+  "home": "Alex Kobelt",
+  "away": "Garcian A.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   3.5,
+   1.18
+  ],
+  "ml_H1": [
+   3.05,
+   1.25
+  ]
+ },
+ {
+  "event_id": "3211037700",
+  "home": "Antchandie H.",
+  "away": "Vasilev A.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   8.5,
+   1.01
+  ],
+  "ml_H1": [
+   6.6,
+   1.02
+  ]
+ },
+ {
+  "event_id": "3209053728",
+  "home": "Djere L.",
+  "away": "Piraino G.",
+  "league": "Challenger. Genoa, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.09,
+   4.95
+  ],
+  "ml_H1": [
+   1.15,
+   4.0
+  ]
+ },
+ {
+  "event_id": "3207010550",
+  "home": "Drzewiecki K / Matuszewski P",
+  "away": "Passaro F / Travaglia S",
+  "league": "Challenger. Genoa, Italy Men Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.16,
+   3.95
+  ],
+  "ml_H1": [
+   1.21,
+   3.4
+  ]
+ },
+ {
+  "event_id": "3209708129",
+  "home": "Makhlouf M.N.",
+  "away": "Yazdani A.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   3.05,
+   1.25
+  ],
+  "ml_H1": [
+   2.8,
+   1.29
+  ]
+ },
+ {
+  "event_id": "3209692282",
+  "home": "Cossu M.G./Ouakaa A.",
+  "away": "Rahul Dhokia / Roan Jones",
+  "league": "ITF. Monastir, Men. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3209694001",
+  "home": "Amadike C./Shah K.S.",
+  "away": "Qureshi A.N./Shoaib M.",
+  "league": "ITF. Monastir, Men. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ]
+ },
+ {
+  "event_id": "3209765071",
+  "home": "Haddad I./Tahiri M.",
+  "away": "Sanchez M.O./Urso A.",
+  "league": "ITF. Monastir, Women. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ]
+ },
+ {
+  "event_id": "3210354049",
+  "home": "Dada-Mascoll S./Dmitrichenko Y.",
+  "away": "Andre Lukosiute / Astrid Cirotte",
+  "league": "ITF. Monastir, Women. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.7
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3208923088",
+  "home": "Salbiev M.",
+  "away": "Van Der Meerschen M.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   8.7,
+   1.01
+  ],
+  "ml_H1": [
+   6.1,
+   1.03
+  ]
+ },
+ {
+  "event_id": "3211189488",
+  "home": "Svatikova L.",
+  "away": "Chytilova A.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   8.0
+  ],
+  "ml_H1": [
+   1.02,
+   6.6
+  ]
+ },
+ {
+  "event_id": "3209664105",
+  "home": "Jacopo Bilardo / Vladyslav Orlov",
+  "away": "Davide Ciaschetti / Antonio Marigliano",
+  "league": "ITF Pozzuoli, Men. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.12,
+   4.3
+  ],
+  "ml_H1": [
+   1.16,
+   3.75
+  ]
+ },
+ {
+  "event_id": "3209664120",
+  "home": "Galea/Santonocito",
+  "away": "Bove F./Pizzigoni M.",
+  "league": "ITF Pozzuoli, Men. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   6.9,
+   1.01
+  ],
+  "ml_H1": [
+   5.65,
+   1.05
+  ]
+ },
+ {
+  "event_id": "3210709074",
+  "home": "Sakellaridis D./Tsitsipas P.",
+  "away": "Prinoth P./Troebinger E.",
+  "league": "ITF Pozzuoli, Men. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.06,
+   5.4
+  ],
+  "ml_H1": [
+   1.1,
+   4.45
+  ]
+ },
+ {
+  "event_id": "3210425351",
+  "home": "Fornasieri Ch./Vallega Montebruno G.P.",
+  "away": "Casari A./Giambelli C.",
+  "league": "ITF Viserba, Women. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.29,
+   2.8
+  ],
+  "ml_H1": [
+   1.34,
+   2.6
+  ]
+ },
+ {
+  "event_id": "3209666612",
+  "home": "Gomez Pezuela Cano M./Reasco Gonzalez M.E.",
+  "away": "Jessica Hinojosa Gomez / Ekaterina Yashina",
+  "league": "ITF Evora, Women. Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.65
+  ]
+ },
+ {
+  "event_id": "3209278864",
+  "home": "Toffanin N",
+  "away": "Loge J.",
+  "league": "ITF. Rabat, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   8.9,
+   1.01
+  ],
+  "ml_H1": [
+   6.1,
+   1.03
+  ]
+ },
+ {
+  "event_id": "3209704357",
+  "home": "Lahjomri Y./",
+  "away": "Demanet E./Rivet M.",
+  "league": "ITF. Rabat, Men | Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   3.5,
+   1.19
+  ],
+  "ml_H1": [
+   3.2,
+   1.23
+  ]
+ },
+ {
+  "event_id": "3209704342",
+  "home": "Blancaneaux G./Nagel A.",
+  "away": "Joshua Schaefer / Frazier Rengifo",
+  "league": "ITF. Rabat, Men | Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.02,
+   6.8
+  ],
+  "ml_H1": [
+   1.11,
+   4.4
+  ]
+ },
+ {
+  "event_id": "3210400808",
+  "home": "Adrian Andreev / Yassine Smiej",
+  "away": "Iannis Miletich / Niklas Schell",
+  "league": "ITF. Rabat, Men | Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.8,
+   1.29
+  ],
+  "ml_H1": [
+   2.6,
+   1.34
+  ]
+ },
+ {
+  "event_id": "3211174218",
+  "home": "Carroll M.",
+  "away": "Sahtali T.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   8.4,
+   1.01
+  ],
+  "ml_H1": [
+   6.6,
+   1.02
+  ]
+ },
+ {
+  "event_id": "3210548427",
+  "home": "Chmielewska W. / Sikora M.",
+  "away": "Golda K. / Straszewska B.",
+  "league": "ITF. Radom, Women. Doubles",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   4.3,
+   1.12
+  ],
+  "ml_H1": [
+   3.75,
+   1.16
+  ]
+ },
+ {
+  "event_id": "3209521483",
+  "home": "Colombo A.",
+  "away": "Pecorini F.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   1.01,
+   9.0
+  ],
+  "ml_H1": [
+   1.03,
+   6.1
+  ]
+ },
+ {
+  "event_id": "3209661719",
+  "home": "Weightman O.",
+  "away": "Wright M.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   1.04,
+   5.8
+  ],
+  "ml_H1": [
+   1.02,
+   6.6
+  ]
+ },
+ {
+  "event_id": "3209668192",
+  "home": "Ferraris S.",
+  "away": "Raggi A.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T12:45:00+00:00",
+  "ml_FT": [
+   8.7,
+   1.01
+  ],
+  "ml_H1": [
+   7.1,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209666592",
+  "home": "Vickery/Medvedeva",
+  "away": "Arsenault A./Lacasse R.",
+  "league": "ITF Evora, Women. Doubles",
+  "start_time": "2026-09-09T15:15:00+00:00",
+  "ml_FT": [
+   4.0,
+   1.13
+  ],
+  "ml_H1": [
+   3.5,
+   1.18
+  ]
+ },
+ {
+  "event_id": "3208922320",
+  "home": "Mikayel Avanesyan",
+  "away": "Guttau N.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   11.0,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209586557",
+  "home": "Aubriot A.",
+  "away": "Szoke A.G.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.01,
+   8.9
+  ]
+ },
+ {
+  "event_id": "3210456141",
+  "home": "Bulbarella M.",
+  "away": "Barrera Aguirre I.",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-08T18:23:00+00:00",
+  "ml_FT": [
+   9.0,
+   1.01
+  ],
+  "ml_H1": [
+   7.25,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3210684546",
+  "home": "Li W.",
+  "away": "Vujic S.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T02:30:00+00:00",
+  "ml_FT": [
+   5.9,
+   1.04
+  ],
+  "ml_H1": [
+   4.75,
+   1.09
+  ]
+ },
+ {
+  "event_id": "3210683631",
+  "home": "Koyama H.",
+  "away": "Xia Y.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   1.04,
+   5.8
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3208871453",
+  "home": "Matsumoto Y.",
+  "away": "Mushika M.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   6.3,
+   1.03
+  ],
+  "ml_H1": [
+   5.2,
+   1.07
+  ]
+ },
+ {
+  "event_id": "3209046763",
+  "home": "Bartone K.",
+  "away": "Atay S.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T06:00:00+00:00",
+  "ml_FT": [
+   1.03,
+   6.4
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3209118690",
+  "home": "Denolly C.",
+  "away": "Khodorchenko M",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   1.01,
+   9.5
+  ],
+  "ml_H1": [
+   1.02,
+   6.85
+  ]
+ },
+ {
+  "event_id": "3209041791",
+  "home": "Bataljin L.",
+  "away": "Pleshivtsev E.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   6.3,
+   1.03
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ]
+ },
+ {
+  "event_id": "3209659094",
+  "home": "Biro M.",
+  "away": "Capeti A.M.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   1.02,
+   6.5
+  ],
+  "ml_H1": [
+   1.09,
+   4.75
+  ]
+ },
+ {
+  "event_id": "3210683887",
+  "home": "Guo C.",
+  "away": "Shao Z.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T07:45:00+00:00",
+  "ml_FT": [
+   6.5,
+   1.02
+  ],
+  "ml_H1": [
+   5.2,
+   1.07
+  ]
+ },
+ {
+  "event_id": "3209078512",
+  "home": "Ansari C.",
+  "away": "Dmitrichenko Y.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.04,
+   5.8
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3209660157",
+  "home": "Hui K.",
+  "away": "Peet F.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   7.3
+  ],
+  "ml_H1": [
+   1.07,
+   5.2
+  ]
+ },
+ {
+  "event_id": "3211110265",
+  "home": "Bhatia D.",
+  "away": "Vlajic T.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   5.9,
+   1.04
+  ],
+  "ml_H1": [
+   5.2,
+   1.07
+  ]
+ },
+ {
+  "event_id": "3211131676",
+  "home": "Hansen S.O.",
+  "away": "Sacco F.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   5.5,
+   1.05
+  ],
+  "ml_H1": [
+   4.3,
+   1.11
+  ]
+ },
+ {
+  "event_id": "3211171944",
+  "home": "Bouchelaghem C.",
+  "away": "Elamin A.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   7.6
+  ],
+  "ml_H1": [
+   1.05,
+   5.65
+  ]
+ },
+ {
+  "event_id": "3209205366",
+  "home": "Davit Poghosyan",
+  "away": "Ferri L.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   10.3,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3210394350",
+  "home": "Tabacco G.",
+  "away": "Salvador Monteiro",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.05,
+   5.6
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3209278844",
+  "home": "Smiej Y.",
+  "away": "Demanet E.",
+  "league": "ITF. Rabat, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   8.6,
+   1.01
+  ],
+  "ml_H1": [
+   6.6,
+   1.02
+  ]
+ },
+ {
+  "event_id": "3209668207",
+  "home": "Dessolis B",
+  "away": "Voracek E.M.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T12:45:00+00:00",
+  "ml_FT": [
+   8.2,
+   1.01
+  ],
+  "ml_H1": [
+   5.65,
+   1.05
+  ]
+ },
+ {
+  "event_id": "3209665258",
+  "home": "Hillel O.",
+  "away": "Chanta T",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   15.0,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3210637459",
+  "home": "Nagarajan A./Ortega Redondo M.",
+  "away": "Alejandro Garcia Carbajal / Oscar Jose Gutierrez",
+  "league": "ITF Gijon, Men. Doubles",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "cs": {
+   "2-0": 20.9,
+   "2-1": 20.9,
+   "0-2": 1.09,
+   "1-2": 8.4
+  }
+ },
+ {
+  "event_id": "3209677910",
+  "home": "Goncalo M.",
+  "away": "Nunez L.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   9.0
+  ],
+  "ml_H1": [
+   1.01,
+   7.4
+  ],
+  "cs": {
+   "2-0": 1.18,
+   "2-1": 5.75,
+   "0-2": 18.5,
+   "1-2": 17.0
+  }
+ },
+ {
+  "event_id": "3209661734",
+  "home": "Mendes J.",
+  "away": "Colby R.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   7.1,
+   1.01
+  ],
+  "ml_H1": [
+   7.15,
+   1.01
+  ],
+  "cs": {
+   "2-0": 17.6,
+   "2-1": 16.0,
+   "0-2": 1.22,
+   "1-2": 5.25
+  }
+ },
+ {
+  "event_id": "3210686365",
+  "home": "Alcaraz Galbis V./Djukic Valera N.",
+  "away": "Martinez Sanz A./Rojas C.",
+  "league": "ITF Gijon, Men. Doubles",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.3,
+   "2-1": 5.45,
+   "0-2": 2.1,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3210382323",
+  "home": "Teixido Garcia A./Teixido Garcia M.",
+  "away": "Yesypchuk D./Serban I.M.",
+  "league": "ITF. Reus, Women. Doubles",
+  "start_time": "2026-09-09T11:30:00+00:00",
+  "ml_FT": [
+   2.8,
+   1.29
+  ],
+  "ml_H1": [
+   2.6,
+   1.34
+  ],
+  "cs": {
+   "2-0": 5.0,
+   "2-1": 6.0,
+   "0-2": 1.85,
+   "1-2": 4.5
+  }
+ },
+ {
+  "event_id": "3210637464",
+  "home": "Palomar X./Serrano A.P.",
+  "away": "Asier Meneses Perny / Roberto Perez socas",
+  "league": "ITF Gijon, Men. Doubles",
+  "start_time": "2026-09-09T15:30:00+00:00",
+  "ml_FT": [
+   1.6,
+   1.95
+  ],
+  "ml_H1": [
+   1.65,
+   1.9
+  ],
+  "cs": {
+   "2-0": 2.45,
+   "2-1": 4.45,
+   "0-2": 3.45,
+   "1-2": 4.7
+  }
+ },
+ {
+  "event_id": "3211109481",
+  "home": "Yang Y.C. / Zhou X.",
+  "away": "Jin Yu./Sun Q.",
+  "league": "ITF. Wuning, Men. Doubles",
+  "start_time": "2026-09-10T02:00:00+00:00",
+  "ml_FT": [
+   6.6,
+   1.02
+  ],
+  "ml_H1": [
+   5.2,
+   1.07
+  ],
+  "cs": {
+   "2-0": 10.9,
+   "2-1": 11.4,
+   "0-2": 1.29,
+   "1-2": 5.7
+  }
+ },
+ {
+  "event_id": "3211032077",
+  "home": "Zaharije-Zak Talic / Lachlan Vickery",
+  "away": "Choe J./Kim G.J.",
+  "league": "ITF. Wuning, Men. Doubles",
+  "start_time": "2026-09-10T05:00:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.3,
+   "2-1": 5.45,
+   "0-2": 2.1,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3211109928",
+  "home": "Koyama H. / Tomida Y.",
+  "away": "Liu Sh./Yang X.",
+  "league": "ITF. Wuning, Men. Doubles",
+  "start_time": "2026-09-10T05:00:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.2,
+   "2-1": 5.35,
+   "0-2": 2.15,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3210879207",
+  "home": "Dabin Kim / Ri Kim Na",
+  "away": "Anri Nagata / Kisa Yoshioka",
+  "league": "ITF Yeongwol, Women. Doubles",
+  "start_time": "2026-09-10T05:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.75,
+   "2-1": 5.0,
+   "0-2": 2.25,
+   "1-2": 4.5
+  }
+ },
+ {
+  "event_id": "3211111410",
+  "home": "Pawit Sornlaksup / Tanakorn Srirat",
+  "away": "Nisisananonti N./Chaiyarin K.",
+  "league": "ITF. Nonthaburi, Men. Doubles",
+  "start_time": "2026-09-10T06:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "2-1": 4.4,
+   "0-2": 3.8,
+   "1-2": 5.05
+  }
+ },
+ {
+  "event_id": "3211193577",
+  "home": "Molgin I./Zogranian D.",
+  "away": "Seleznev B./Wygona J.",
+  "league": "ITF Tsaghkadzor, Men. Doubles",
+  "start_time": "2026-09-10T06:30:00+00:00",
+  "ml_FT": [
+   6.6,
+   1.02
+  ],
+  "ml_H1": [
+   5.2,
+   1.07
+  ],
+  "cs": {
+   "2-0": 10.9,
+   "2-1": 11.4,
+   "0-2": 1.29,
+   "1-2": 5.7
+  }
+ },
+ {
+  "event_id": "3211181230",
+  "home": "Carpentier N.",
+  "away": "Soriano Santiago M.",
+  "league": "ITF Dijon, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   5.7,
+   1.05
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ],
+  "cs": {
+   "2-0": 9.2,
+   "2-1": 10.2,
+   "0-2": 1.4,
+   "1-2": 4.85
+  }
+ },
+ {
+  "event_id": "3211196054",
+  "home": "Lian Tran",
+  "away": "Bougouffa H.",
+  "league": "ITF Dijon, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.03,
+   6.4
+  ],
+  "ml_H1": [
+   1.07,
+   5.25
+  ],
+  "cs": {
+   "2-0": 1.31,
+   "2-1": 5.15,
+   "0-2": 10.8,
+   "1-2": 12.3
+  }
+ },
+ {
+  "event_id": "3209307951",
+  "home": "Dapkute I.",
+  "away": "Collins K.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   8.8,
+   1.01
+  ],
+  "ml_H1": [
+   6.2,
+   1.03
+  ]
+ },
+ {
+  "event_id": "3210880000",
+  "home": "Shepp A.",
+  "away": "Barki N.A.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-10T01:00:00+00:00",
+  "ml_FT": [
+   1.03,
+   6.1
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ],
+  "cs": {
+   "2-0": 1.35,
+   "2-1": 4.85,
+   "0-2": 10.2,
+   "1-2": 11.2
+  }
+ },
+ {
+  "event_id": "3211189339",
+  "home": "Alessia Popescu",
+  "away": "Bojica S",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-10T06:30:00+00:00",
+  "ml_FT": [
+   5.7,
+   1.05
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ],
+  "cs": {
+   "2-0": 9.2,
+   "2-1": 11.2,
+   "0-2": 1.35,
+   "1-2": 5.1
+  }
+ },
+ {
+  "event_id": "3211096788",
+  "home": "Mesaglio M.",
+  "away": "Mchugh A.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-10T08:00:00+00:00",
+  "ml_FT": [
+   5.6,
+   1.05
+  ],
+  "ml_H1": [
+   4.3,
+   1.11
+  ],
+  "cs": {
+   "2-0": 9.3,
+   "2-1": 10.3,
+   "0-2": 1.4,
+   "1-2": 4.65
+  }
+ },
+ {
+  "event_id": "3209544982",
+  "home": "Sakellaridis D.",
+  "away": "Gandolfi G.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   1.05,
+   5.7
+  ],
+  "ml_H1": [
+   1.09,
+   4.7
+  ],
+  "cs": {
+   "2-0": 1.25,
+   "2-1": 5.0,
+   "0-2": 15.9,
+   "1-2": 14.8
+  }
+ },
+ {
+  "event_id": "3209661724",
+  "home": "Schoen P.",
+  "away": "St-Hilaire M.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T12:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   7.0
+  ],
+  "ml_H1": [
+   1.11,
+   4.35
+  ],
+  "cs": {
+   "2-0": 1.26,
+   "2-1": 4.95,
+   "0-2": 16.0,
+   "1-2": 14.4
+  }
+ },
+ {
+  "event_id": "3210410176",
+  "home": "Braga B.",
+  "away": "Sakamoto P.",
+  "league": "ITF Leme, Men",
+  "start_time": "2026-09-08T21:00:00+00:00",
+  "ml_FT": [
+   10.9,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209593279",
+  "home": "De Jonge D.",
+  "away": "Freire Da Silva A.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.27,
+   2.95
+  ],
+  "ml_H1": [
+   1.34,
+   2.6
+  ]
+ },
+ {
+  "event_id": "3211125376",
+  "home": "Boussaffir S.",
+  "away": "Singh Rao S.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   4.65,
+   1.09
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ]
+ },
+ {
+  "event_id": "3211232321",
+  "home": "Katsumi N.",
+  "away": "Rathi A.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.14,
+   3.95
+  ],
+  "ml_H1": [
+   1.15,
+   3.8
+  ]
+ },
+ {
+  "event_id": "3209247545",
+  "home": "Reco A.",
+  "away": "Banerjee S.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   2.05,
+   1.55
+  ]
+ },
+ {
+  "event_id": "3211095853",
+  "home": "Gubi T.",
+  "away": "Yunis F.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   3.75,
+   1.16
+  ],
+  "ml_H1": [
+   3.15,
+   1.23
+  ]
+ },
+ {
+  "event_id": "3209307976",
+  "home": "Vaquero M.M.",
+  "away": "Gasanova A.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   6.8,
+   1.02
+  ],
+  "ml_H1": [
+   5.1,
+   1.07
+  ],
+  "cs": {
+   "2-0": 13.2,
+   "2-1": 14.5,
+   "0-2": 1.26,
+   "1-2": 5.15
+  }
+ },
+ {
+  "event_id": "3209668197",
+  "home": "Meliss V.",
+  "away": "Gasparini C.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T10:45:00+00:00",
+  "ml_FT": [
+   1.07,
+   5.1
+  ],
+  "ml_H1": [
+   1.11,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3210681233",
+  "home": "Jones A.",
+  "away": "Tseng T-Y",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.06,
+   5.4
+  ],
+  "ml_H1": [
+   1.09,
+   4.75
+  ]
+ },
+ {
+  "event_id": "3210683626",
+  "home": "Minakata R.",
+  "away": "Tomida Y.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   5.0,
+   1.08
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ]
+ },
+ {
+  "event_id": "3209311889",
+  "home": "Rafael Kis Balazs",
+  "away": "Parizzia N.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   4.45,
+   1.11
+  ],
+  "ml_H1": [
+   3.05,
+   1.24
+  ],
+  "cs": {
+   "2-0": 7.3,
+   "2-1": 7.2,
+   "0-2": 1.7,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3211143577",
+  "home": "Maja Wrobel",
+  "away": "Sucha A.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   4.2,
+   1.12
+  ],
+  "ml_H1": [
+   4.05,
+   1.13
+  ]
+ },
+ {
+  "event_id": "3209241924",
+  "home": "Popovic K.",
+  "away": "Dell Edera F.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.08,
+   4.9
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3211117236",
+  "home": "Stabauer T.",
+  "away": "Belkova K.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.8,
+   1.29
+  ],
+  "ml_H1": [
+   2.6,
+   1.34
+  ]
+ },
+ {
+  "event_id": "3211190751",
+  "home": "Zhenikhova S.",
+  "away": "Cinkanicova S.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.6
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ]
+ },
+ {
+  "event_id": "3209278849",
+  "home": "Caniato C.A.",
+  "away": "Jamji A.",
+  "league": "ITF. Rabat, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.12,
+   4.25
+  ],
+  "ml_H1": [
+   1.15,
+   3.9
+  ],
+  "cs": {
+   "2-0": 1.45,
+   "2-1": 4.1,
+   "0-2": 10.8,
+   "1-2": 9.8
+  }
+ },
+ {
+  "event_id": "3211095858",
+  "home": "Fajta P.",
+  "away": "Dimic M.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.07,
+   5.2
+  ],
+  "ml_H1": [
+   1.13,
+   4.05
+  ]
+ },
+ {
+  "event_id": "3211169761",
+  "home": "Heinzova I.",
+  "away": "Gorska D.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   3.0,
+   1.25
+  ],
+  "ml_H1": [
+   2.85,
+   1.29
+  ]
+ },
+ {
+  "event_id": "3210871811",
+  "home": "Ayala L.",
+  "away": "Labrana F.",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   5.2,
+   1.07
+  ],
+  "ml_H1": [
+   4.3,
+   1.12
+  ]
+ },
+ {
+  "event_id": "3209665263",
+  "home": "Gohil V.",
+  "away": "Sumizawa D.",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   3.1,
+   1.24
+  ],
+  "ml_H1": [
+   2.8,
+   1.29
+  ]
+ },
+ {
+  "event_id": "3210683915",
+  "home": "Kim G.J.",
+  "away": "Vickery L.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T05:45:00+00:00",
+  "ml_FT": [
+   1.12,
+   4.3
+  ],
+  "ml_H1": [
+   1.15,
+   3.8
+  ]
+ },
+ {
+  "event_id": "3211188911",
+  "home": "Kartseva A.",
+  "away": "Efremova A.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T06:00:00+00:00",
+  "ml_FT": [
+   2.55,
+   1.35
+  ],
+  "ml_H1": [
+   2.15,
+   1.5
+  ]
+ },
+ {
+  "event_id": "3209659124",
+  "home": "Safta A.",
+  "away": "Wildgruber. A",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   1.14,
+   4.0
+  ],
+  "ml_H1": [
+   1.21,
+   3.3
+  ]
+ },
+ {
+  "event_id": "3209659099",
+  "home": "Sanduleasa I.I.",
+  "away": "Todoni C.N.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   4.3,
+   1.12
+  ],
+  "ml_H1": [
+   3.8,
+   1.15
+  ]
+ },
+ {
+  "event_id": "3211171952",
+  "home": "Shah K.S.",
+  "away": "Deflandre L.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.7,
+   1.85
+  ]
+ },
+ {
+  "event_id": "3209311894",
+  "home": "Matei Todoran",
+  "away": "Kimhi O.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.75,
+   1.31
+  ],
+  "ml_H1": [
+   2.6,
+   1.34
+  ]
+ },
+ {
+  "event_id": "3211095873",
+  "home": "Dullinger V.",
+  "away": "Baragiola Mordini T.C.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.5
+  ],
+  "ml_H1": [
+   1.4,
+   2.35
+  ]
+ },
+ {
+  "event_id": "3209241667",
+  "home": "Masiianskaia M.",
+  "away": "Mansouri Y.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   3.7,
+   1.16
+  ],
+  "ml_H1": [
+   3.3,
+   1.21
+  ]
+ },
+ {
+  "event_id": "3210393998",
+  "home": "Marigliano A",
+  "away": "Di Rubba A.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.12,
+   4.25
+  ],
+  "ml_H1": [
+   1.15,
+   3.8
+  ]
+ },
+ {
+  "event_id": "3209409551",
+  "home": "Naw H.",
+  "away": "Longwe Smit T.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   1.18,
+   3.55
+  ],
+  "ml_H1": [
+   1.18,
+   3.5
+  ]
+ },
+ {
+  "event_id": "3211110079",
+  "home": "Oscar Brown",
+  "away": "Ambarzumjan E.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   1.14,
+   3.9
+  ],
+  "ml_H1": [
+   1.18,
+   3.55
+  ]
+ },
+ {
+  "event_id": "3209307971",
+  "home": "Brantmeier R.",
+  "away": "Mortensen M.R.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   7.1
+  ],
+  "ml_H1": [
+   1.06,
+   5.35
+  ],
+  "cs": {
+   "2-0": 1.3,
+   "2-1": 5.25,
+   "0-2": 10.9,
+   "1-2": 12.6
+  }
+ },
+ {
+  "event_id": "3209659114",
+  "home": "Sandru I.M.",
+  "away": "Miron T.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   4.35,
+   1.11
+  ],
+  "ml_H1": [
+   3.8,
+   1.15
+  ]
+ },
+ {
+  "event_id": "3211037344",
+  "home": "Pagotto V.H.R.",
+  "away": "Schiessl J. E.",
+  "league": "ITF Leme, Men",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   4.75,
+   1.09
+  ],
+  "ml_H1": [
+   3.75,
+   1.16
+  ]
+ },
+ {
+  "event_id": "3209657569",
+  "home": "Seong-Chan Hong",
+  "away": "Fukuda S.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   1.27,
+   2.95
+  ],
+  "ml_H1": [
+   1.34,
+   2.6
+  ]
+ },
+ {
+  "event_id": "3209657589",
+  "home": "Tanuma R.",
+  "away": "Honda.N",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ]
+ },
+ {
+  "event_id": "3209657564",
+  "home": "Matsuda R.",
+  "away": "Yu Tanaka",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   1.19,
+   3.5
+  ],
+  "ml_H1": [
+   1.23,
+   3.2
+  ]
+ },
+ {
+  "event_id": "3209355755",
+  "home": "Susanto A.",
+  "away": "Becroft I.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   8.5,
+   1.01
+  ],
+  "ml_H1": [
+   4.9,
+   1.08
+  ],
+  "cs": {
+   "2-0": 12.8,
+   "2-1": 17.5,
+   "0-2": 1.24,
+   "1-2": 5.25
+  }
+ },
+ {
+  "event_id": "3210681903",
+  "home": "Dorokhov I.",
+  "away": "Talic Z",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T01:45:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.8
+  ],
+  "ml_H1": [
+   1.75,
+   1.75
+  ]
+ },
+ {
+  "event_id": "3209657579",
+  "home": "Oh Chan-Yeong",
+  "away": "Toshihide Matsui",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.07,
+   5.0
+  ],
+  "ml_H1": [
+   1.12,
+   4.3
+  ]
+ },
+ {
+  "event_id": "3210652981",
+  "home": "Taka Y.",
+  "away": "Roddick J.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   3.75,
+   1.16
+  ],
+  "ml_H1": [
+   3.5,
+   1.18
+  ]
+ },
+ {
+  "event_id": "3208871537",
+  "home": "kim Y.",
+  "away": "Park E.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   2.95,
+   1.26
+  ],
+  "ml_H1": [
+   2.6,
+   1.34
+  ]
+ },
+ {
+  "event_id": "3210682806",
+  "home": "Choe\tJ.",
+  "away": "Southcombe M.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   1.14,
+   4.0
+  ],
+  "ml_H1": [
+   1.18,
+   3.5
+  ]
+ },
+ {
+  "event_id": "3209368693",
+  "home": "Kuharenko\tP.",
+  "away": "Perapekhina Y.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T06:00:00+00:00",
+  "ml_FT": [
+   3.2,
+   1.22
+  ],
+  "ml_H1": [
+   3.05,
+   1.25
+  ]
+ },
+ {
+  "event_id": "3208996172",
+  "home": "Sarksian D.",
+  "away": "Malirz K.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   1.29,
+   2.85
+  ],
+  "ml_H1": [
+   1.34,
+   2.6
+  ]
+ },
+ {
+  "event_id": "3211172864",
+  "home": "Rahul D.",
+  "away": "Van Wyk K.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.75
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3209161670",
+  "home": "Urso A.",
+  "away": "Kashyap T.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.34
+  ],
+  "ml_H1": [
+   2.5,
+   1.35
+  ]
+ },
+ {
+  "event_id": "3209660127",
+  "home": "Alcaraz E.L.",
+  "away": "Argyrokastriti M.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   3.7,
+   1.16
+  ],
+  "ml_H1": [
+   3.2,
+   1.23
+  ],
+  "cs": {
+   "2-0": 6.95,
+   "2-1": 6.8,
+   "0-2": 1.75,
+   "1-2": 3.75
+  }
+ },
+ {
+  "event_id": "3209311884",
+  "home": "Thomas F.",
+  "away": "Fernandez B.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.55,
+   1.35
+  ],
+  "ml_H1": [
+   2.35,
+   1.4
+  ]
+ },
+ {
+  "event_id": "3209179950",
+  "home": "Weckerle M.",
+  "away": "Reguer A",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.3,
+   2.75
+  ],
+  "ml_H1": [
+   1.34,
+   2.6
+  ]
+ },
+ {
+  "event_id": "3209157724",
+  "home": "Ifi N.",
+  "away": "Gobat A.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.35
+  ],
+  "ml_H1": [
+   2.5,
+   1.35
+  ]
+ },
+ {
+  "event_id": "3211037530",
+  "home": "Chidekh L.",
+  "away": "Slavic N.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   4.75,
+   1.09
+  ],
+  "ml_H1": [
+   4.05,
+   1.13
+  ]
+ },
+ {
+  "event_id": "3211110046",
+  "home": "Ganesan A.",
+  "away": "Martin T.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ]
+ },
+ {
+  "event_id": "3211110302",
+  "home": "Seifert S.",
+  "away": "Walch A.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.6
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ]
+ },
+ {
+  "event_id": "3209545455",
+  "home": "Bilardo J.",
+  "away": "Rossi L.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   3.1,
+   1.24
+  ],
+  "ml_H1": [
+   2.65,
+   1.33
+  ]
+ },
+ {
+  "event_id": "3211234299",
+  "home": "Haddad I.",
+  "away": "Farzami M.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.65
+  ]
+ },
+ {
+  "event_id": "3211148644",
+  "home": "Bednarz Z.",
+  "away": "Narti C.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.6
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ]
+ },
+ {
+  "event_id": "3209278859",
+  "home": "Von Der Schulenburg J.",
+  "away": "Dlimi Y.",
+  "league": "ITF. Rabat, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.45,
+   1.4
+  ],
+  "ml_H1": [
+   2.35,
+   1.4
+  ]
+ },
+ {
+  "event_id": "3211173293",
+  "home": "Vojcinakova I.",
+  "away": "Hertel A.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ]
+ },
+ {
+  "event_id": "3211098682",
+  "home": "Shylov H.",
+  "away": "Shimanov O.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T12:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ]
+ },
+ {
+  "event_id": "3209657559",
+  "home": "Catry R.",
+  "away": "Ogura K",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ]
+ },
+ {
+  "event_id": "3208711061",
+  "home": "Ishikawa H.",
+  "away": "Chen Y.C.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   6.3,
+   1.03
+  ],
+  "ml_H1": [
+   4.15,
+   1.12
+  ],
+  "cs": {
+   "2-0": 9.1,
+   "2-1": 14.6,
+   "0-2": 1.35,
+   "1-2": 4.8
+  }
+ },
+ {
+  "event_id": "3208711075",
+  "home": "Ahren Moonga E.",
+  "away": "M Rifqi F.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   8.2,
+   1.01
+  ],
+  "ml_H1": [
+   4.8,
+   1.08
+  ],
+  "cs": {
+   "2-0": 11.6,
+   "2-1": 16.1,
+   "0-2": 1.28,
+   "1-2": 5.0
+  }
+ },
+ {
+  "event_id": "3208724765",
+  "home": "Yang Y.C.",
+  "away": "Trongcharoenchaikul W.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T02:30:00+00:00",
+  "ml_FT": [
+   7.5,
+   1.01
+  ],
+  "ml_H1": [
+   4.75,
+   1.09
+  ],
+  "cs": {
+   "2-0": 11.8,
+   "2-1": 15.4,
+   "0-2": 1.3,
+   "1-2": 4.8
+  }
+ },
+ {
+  "event_id": "3209038852",
+  "home": "Khazime D.",
+  "away": "Khotchenkov E.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   1.23,
+   3.2
+  ],
+  "ml_H1": [
+   1.29,
+   2.8
+  ]
+ },
+ {
+  "event_id": "3210394003",
+  "home": "Pizzigoni M.",
+  "away": "Donato Logrippo R.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.6
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ]
+ },
+ {
+  "event_id": "3211195255",
+  "home": "Taym Al Azmeh",
+  "away": "Connel J.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ]
+ },
+ {
+  "event_id": "3209545000",
+  "home": "Bacaloni A.",
+  "away": "Hudd E.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   3.75,
+   1.16
+  ],
+  "ml_H1": [
+   3.3,
+   1.21
+  ]
+ },
+ {
+  "event_id": "3211101563",
+  "home": "Renard L.",
+  "away": "Kupcic J.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   3.0,
+   1.26
+  ],
+  "ml_H1": [
+   2.5,
+   1.35
+  ]
+ },
+ {
+  "event_id": "3209657574",
+  "home": "Keisuke Saitoh",
+  "away": "Isomura K.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.75
+  ],
+  "ml_H1": [
+   1.75,
+   1.75
+  ]
+ },
+ {
+  "event_id": "3210839828",
+  "home": "Lu Ch-Y.",
+  "away": "Yamamoto N.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   1.65,
+   1.9
+  ],
+  "ml_H1": [
+   1.65,
+   1.9
+  ]
+ },
+ {
+  "event_id": "3208922301",
+  "home": "Kharlamov R.",
+  "away": "Scherbakov E.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T06:30:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.8
+  ],
+  "ml_H1": [
+   1.7,
+   1.8
+  ]
+ },
+ {
+  "event_id": "3209179924",
+  "home": "Marinkovic I.",
+  "away": "Hrabavets\tU.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   1.85,
+   1.7
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3211189198",
+  "home": "Dugardin R",
+  "away": "Van Herck L.",
+  "league": "ITF. Plaisir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.6,
+   2.0
+  ],
+  "ml_H1": [
+   1.65,
+   1.9
+  ]
+ },
+ {
+  "event_id": "3211116778",
+  "home": "Chen Y.",
+  "away": "Turkmen D.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ]
+ },
+ {
+  "event_id": "3210947513",
+  "home": "Neporent S.",
+  "away": "Wagner L.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3211036895",
+  "home": "Kochta T.",
+  "away": "Martianova S.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.75
+  ],
+  "ml_H1": [
+   1.75,
+   1.75
+  ]
+ },
+ {
+  "event_id": "3209668202",
+  "home": "Shapatava S.",
+  "away": "Senica A",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3211116600",
+  "home": "Ben Ezzedine Meriem M.",
+  "away": "Safi M.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ]
+ },
+ {
+  "event_id": "3209364891",
+  "home": "Clarissa Blomqvist",
+  "away": "Cirotte A.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.45
+  ]
+ },
+ {
+  "event_id": "3211214448",
+  "home": "Haruka K.",
+  "away": "Shubladze A.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-10T02:00:00+00:00",
+  "ml_FT": [
+   3.5,
+   1.18
+  ],
+  "ml_H1": [
+   3.2,
+   1.23
+  ],
+  "cs": {
+   "2-0": 6.55,
+   "2-1": 7.05,
+   "0-2": 1.65,
+   "1-2": 4.55
+  }
+ },
+ {
+  "event_id": "3209118758",
+  "home": "Tenti F.",
+  "away": "Tiukaev R.",
+  "league": "ITF Tsaghkadzor, Men",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   1.7,
+   1.85
+  ],
+  "ml_H1": [
+   1.7,
+   1.85
+  ]
+ },
+ {
+  "event_id": "3211182704",
+  "home": "Warda Ait El Bachir",
+  "away": "Marcinkevica D.",
+  "league": "ITF Dijon, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.4,
+   2.45
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "2-1": 4.55,
+   "0-2": 4.4,
+   "1-2": 6.1
+  }
+ },
+ {
+  "event_id": "3209661714",
+  "home": "Murgett F.",
+  "away": "Marques D.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.25,
+   3.05
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "2-1": 3.7,
+   "0-2": 7.45,
+   "1-2": 7.55
+  }
+ },
+ {
+  "event_id": "3211083121",
+  "home": "Matilde P.",
+  "away": "Cherubini D.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-10T08:00:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.25
+  ],
+  "ml_H1": [
+   1.29,
+   2.85
+  ],
+  "cs": {
+   "2-0": 1.8,
+   "2-1": 4.0,
+   "0-2": 6.0,
+   "1-2": 6.5
+  }
+ },
+ {
+  "event_id": "3209661704",
+  "home": "Da Rosa Castro G.",
+  "away": "George B.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   2.65,
+   1.33
+  ],
+  "ml_H1": [
+   2.5,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.4,
+   "2-1": 6.0,
+   "0-2": 1.95,
+   "1-2": 3.7
+  }
+ },
+ {
+  "event_id": "3211033212",
+  "home": "Cross K.",
+  "away": "Stojsavljevic M.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.0,
+   "2-1": 5.5,
+   "0-2": 2.1,
+   "1-2": 4.5
+  }
+ },
+ {
+  "event_id": "3211033207",
+  "home": "Minnen G.",
+  "away": "Jorge M.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-10T08:00:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.6
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ],
+  "cs": {
+   "2-0": 2.0,
+   "2-1": 4.35,
+   "0-2": 4.5,
+   "1-2": 5.5
+  }
+ },
+ {
+  "event_id": "3209661709",
+  "home": "Alekseychuk A",
+  "away": "Semedo M.",
+  "league": "ITF. Sintra, Men",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.75
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ],
+  "cs": {
+   "2-0": 3.2,
+   "2-1": 4.25,
+   "0-2": 3.0,
+   "1-2": 4.05
+  }
+ },
+ {
+  "event_id": "3210592414",
+  "home": "Inoue H.",
+  "away": "Adkar V.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-10T02:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.75
+  ],
+  "ml_H1": [
+   1.65,
+   1.9
+  ],
+  "cs": {
+   "2-0": 2.85,
+   "2-1": 4.75,
+   "0-2": 2.8,
+   "1-2": 4.75
+  }
+ },
+ {
+  "event_id": "3210898842",
+  "home": "Kokkinis T.",
+  "away": "Ma Y.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-10T02:00:00+00:00",
+  "ml_FT": [
+   2.1,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.45,
+   "2-1": 4.95,
+   "0-2": 2.35,
+   "1-2": 4.7
+  }
+ },
+ {
+  "event_id": "3211182692",
+  "home": "Luescher S.",
+  "away": "Lataste M.",
+  "league": "ITF Dijon, Women",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.25
+  ],
+  "ml_H1": [
+   1.5,
+   2.15
+  ],
+  "cs": {
+   "2-0": 2.15,
+   "2-1": 4.7,
+   "0-2": 3.7,
+   "1-2": 5.4
+  }
+ },
+ {
+  "event_id": "3210879202",
+  "home": "Uemura M.",
+  "away": "Lee H.E.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-10T01:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.7,
+   "2-1": 5.4,
+   "0-2": 2.15,
+   "1-2": 4.7
+  }
+ },
+ {
+  "event_id": "3210946129",
+  "home": "Tsao C.Y.",
+  "away": "Zhu C.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-10T01:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.65,
+   "2-1": 5.35,
+   "0-2": 2.2,
+   "1-2": 4.65
+  }
+ },
+ {
+  "event_id": "3211033217",
+  "home": "Rapolu M.",
+  "away": "Swan K.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-10T08:00:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.45
+  ],
+  "ml_H1": [
+   2.15,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.7,
+   "2-1": 5.4,
+   "0-2": 2.15,
+   "1-2": 4.7
+  }
+ },
+ {
+  "event_id": "3209047208",
+  "home": "Breen S.",
+  "away": "Nepliy E.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   4.35,
+   1.11
+  ],
+  "ml_H1": [
+   3.6,
+   1.18
+  ],
+  "cs": {
+   "2-0": 11.3,
+   "2-1": 10.3,
+   "0-2": 1.45,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3207809650",
+  "home": "Carle M L / Herrero Linana A",
+  "away": "Lansere S / Pridankina E",
+  "league": "WTA. Antalya 4, Turkiye Women Doubles",
+  "start_time": "2026-09-09T09:40:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.5
+  ],
+  "ml_H1": [
+   2.2,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.7,
+   "0-2": 2.01,
+   "2-1": 5.5,
+   "1-2": 4.73
+  }
+ },
+ {
+  "event_id": "3207810608",
+  "home": "Feistel G / Serban R G",
+  "away": "Bhosale R / Kulambayeva Z",
+  "league": "WTA. Antalya 4, Turkiye Women Doubles",
+  "start_time": "2026-09-09T11:20:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.45
+  ],
+  "ml_H1": [
+   2.25,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.87,
+   "0-2": 1.96,
+   "2-1": 5.6,
+   "1-2": 4.73
+  }
+ },
+ {
+  "event_id": "3207811476",
+  "home": "Urgesi F./Zantedeschi A.",
+  "away": "Dencheva R / Drazic M",
+  "league": "WTA. Antalya 4, Turkiye Women Doubles",
+  "start_time": "2026-09-09T12:00:00+00:00",
+  "ml_FT": [
+   1.6,
+   2.0
+  ],
+  "ml_H1": [
+   1.65,
+   1.95
+  ],
+  "cs": {
+   "2-0": 2.29,
+   "0-2": 3.11,
+   "2-1": 4.8,
+   "1-2": 5.18
+  }
+ },
+ {
+  "event_id": "3209745983",
+  "home": "Fossa Huergo N / Havlickova L",
+  "away": "Christie F / Silva E",
+  "league": "WTA. Montreux, Women Doubles",
+  "start_time": "2026-09-09T13:10:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.19,
+   "0-2": 3.3,
+   "2-1": 4.77,
+   "1-2": 5.28
+  }
+ },
+ {
+  "event_id": "3207810347",
+  "home": "Ayukawa M./Webley-Smith E.",
+  "away": "Ibragimova A / Zaytseva K",
+  "league": "WTA. Antalya 4, Turkiye Women Doubles",
+  "start_time": "2026-09-09T14:00:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.5
+  ],
+  "ml_H1": [
+   2.2,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.69,
+   "0-2": 2.02,
+   "2-1": 5.49,
+   "1-2": 4.73
+  }
+ },
+ {
+  "event_id": "3208759858",
+  "home": "Ciric Bagaric L / Moratelli A",
+  "away": "Cascino E / Feng S",
+  "league": "WTA. Montreux, Women Doubles",
+  "start_time": "2026-09-09T14:20:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.5
+  ],
+  "ml_H1": [
+   2.2,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.71,
+   "0-2": 2.01,
+   "2-1": 5.5,
+   "1-2": 4.73
+  }
+ },
+ {
+  "event_id": "3207811514",
+  "home": "Gavrila O / Nagy A",
+  "away": "Cengiz B./Oz I.",
+  "league": "WTA. Antalya 4, Turkiye Women Doubles",
+  "start_time": "2026-09-09T16:30:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.17,
+   "0-2": 3.33,
+   "2-1": 4.76,
+   "1-2": 5.3
+  }
+ },
+ {
+  "event_id": "3209557324",
+  "home": "Manuel J.",
+  "away": "Ouakaa A.",
+  "league": "ITF. Monastir, Men",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   4.55,
+   1.1
+  ],
+  "ml_H1": [
+   3.85,
+   1.15
+  ],
+  "cs": {
+   "2-0": 10.3,
+   "2-1": 9.9,
+   "0-2": 1.45,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3209278854",
+  "home": "Figl M.",
+  "away": "Nagel A",
+  "league": "ITF. Rabat, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   3.85,
+   1.15
+  ],
+  "ml_H1": [
+   3.45,
+   1.19
+  ],
+  "cs": {
+   "2-0": 7.35,
+   "2-1": 7.25,
+   "0-2": 1.7,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3209604897",
+  "home": "Lesauvage A.",
+  "away": "Perry, Luciana",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   6.35,
+   1.04
+  ],
+  "ml_H1": [
+   4.9,
+   1.09
+  ],
+  "cs": {
+   "2-0": 16.8,
+   "0-2": 1.18,
+   "2-1": 17.2,
+   "1-2": 5.1
+  }
+ },
+ {
+  "event_id": "3209558038",
+  "home": "Rihane Y.",
+  "away": "Messis A.",
+  "league": "UTR, PTT Tallahassee Men 03",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   1.03,
+   6.8
+  ],
+  "ml_H1": [
+   1.06,
+   5.65
+  ],
+  "cs": {
+   "2-0": 1.13,
+   "0-2": 21.5,
+   "2-1": 5.7,
+   "1-2": 17.9
+  }
+ },
+ {
+  "event_id": "3210419719",
+  "home": "Miroshnichenko V.",
+  "away": "Allegre O.",
+  "league": "UTR, PTT Newport Beach Women 21",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   7.8
+  ],
+  "ml_H1": [
+   1.04,
+   6.5
+  ],
+  "cs": {
+   "2-0": 1.08,
+   "0-2": 34.3,
+   "2-1": 5.95,
+   "1-2": 30.2
+  }
+ },
+ {
+  "event_id": "3210352174",
+  "home": "Oliver, Liam",
+  "away": "Avendano Cadena M.",
+  "league": "UTR, PTT Newport Beach Men 21",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   7.35,
+   1.02
+  ],
+  "ml_H1": [
+   6.2,
+   1.04
+  ],
+  "cs": {
+   "2-0": 27.3,
+   "0-2": 1.1,
+   "2-1": 21.0,
+   "1-2": 6.1
+  }
+ },
+ {
+  "event_id": "3210794030",
+  "home": "Olsen A.",
+  "away": "Shaw E",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   7.45,
+   1.01
+  ],
+  "ml_H1": [
+   5.95,
+   1.05
+  ],
+  "cs": {
+   "2-0": 26.9,
+   "0-2": 1.1,
+   "2-1": 24.9,
+   "1-2": 5.65
+  }
+ },
+ {
+  "event_id": "3209590937",
+  "home": "Deatherage, M B",
+  "away": "Dia Evtimova",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   1.03,
+   6.8
+  ],
+  "ml_H1": [
+   1.07,
+   5.3
+  ],
+  "cs": {
+   "2-0": 1.15,
+   "0-2": 20.0,
+   "2-1": 5.3,
+   "1-2": 19.6
+  }
+ },
+ {
+  "event_id": "3210268115",
+  "home": "Jones S.",
+  "away": "Braund, A",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-08T23:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   7.7
+  ],
+  "ml_H1": [
+   1.03,
+   6.7
+  ],
+  "cs": {
+   "2-0": 1.07,
+   "0-2": 33.9,
+   "2-1": 6.45,
+   "1-2": 24.2
+  }
+ },
+ {
+  "event_id": "3210828834",
+  "home": "Alame, R",
+  "away": "Chanya K.N.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-08T23:00:00+00:00",
+  "ml_FT": [
+   1.02,
+   7.05
+  ],
+  "ml_H1": [
+   1.06,
+   5.55
+  ],
+  "cs": {
+   "2-0": 1.13,
+   "0-2": 22.0,
+   "2-1": 5.4,
+   "1-2": 21.2
+  }
+ },
+ {
+  "event_id": "3209338432",
+  "home": "Shah. Maahi",
+  "away": "Khan L.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T00:10:00+00:00",
+  "ml_FT": [
+   6.6,
+   1.03
+  ],
+  "ml_H1": [
+   5.1,
+   1.08
+  ],
+  "cs": {
+   "2-0": 18.3,
+   "0-2": 1.16,
+   "2-1": 18.4,
+   "1-2": 5.2
+  }
+ },
+ {
+  "event_id": "3209338462",
+  "home": "Schwarz M.",
+  "away": "Thompson B.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T00:10:00+00:00",
+  "ml_FT": [
+   7.8,
+   1.01
+  ],
+  "ml_H1": [
+   6.5,
+   1.03
+  ],
+  "cs": {
+   "2-0": 34.3,
+   "0-2": 1.08,
+   "2-1": 30.2,
+   "1-2": 5.95
+  }
+ },
+ {
+  "event_id": "3210268004",
+  "home": "Casey H.",
+  "away": "Girdler J.",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.01,
+   8.05
+  ],
+  "ml_H1": [
+   1.02,
+   7.3
+  ],
+  "cs": {
+   "2-0": 1.04,
+   "0-2": 45.6,
+   "2-1": 6.9,
+   "1-2": 28.9
+  }
+ },
+ {
+  "event_id": "3208808231",
+  "home": "Lorusso L.",
+  "away": "Bakshi A.",
+  "league": "ITF Hurghada, Men",
+  "start_time": "2026-09-09T06:00:00+00:00",
+  "ml_FT": [
+   2.8,
+   1.29
+  ],
+  "ml_H1": [
+   2.55,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.8,
+   "2-1": 6.3,
+   "0-2": 1.9,
+   "1-2": 3.6
+  }
+ },
+ {
+  "event_id": "3209262911",
+  "home": "Allen V.",
+  "away": "Diatlova K.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T06:00:00+00:00",
+  "ml_FT": [
+   1.2,
+   3.35
+  ],
+  "ml_H1": [
+   1.27,
+   2.95
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "2-1": 3.7,
+   "0-2": 7.3,
+   "1-2": 7.4
+  }
+ },
+ {
+  "event_id": "3209660132",
+  "home": "Hennemann C.W.",
+  "away": "Serban I.M.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.23,
+   3.15
+  ],
+  "ml_H1": [
+   1.3,
+   2.8
+  ],
+  "cs": {
+   "2-0": 1.8,
+   "2-1": 3.7,
+   "0-2": 6.6,
+   "1-2": 6.6
+  }
+ },
+ {
+  "event_id": "3209311904",
+  "home": "Melnic V.",
+  "away": "Kivattsev K",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   3.65,
+   1.17
+  ],
+  "ml_H1": [
+   3.1,
+   1.24
+  ],
+  "cs": {
+   "2-0": 7.6,
+   "2-1": 7.7,
+   "0-2": 1.65,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3209659129",
+  "home": "Simona Ogescu",
+  "away": "Paul K.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.3,
+   2.8
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "2-1": 3.65,
+   "0-2": 5.8,
+   "1-2": 6.05
+  }
+ },
+ {
+  "event_id": "3209668187",
+  "home": "Maines N.",
+  "away": "Petkovic A.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T17:15:00+00:00",
+  "ml_FT": [
+   2.8,
+   1.3
+  ],
+  "ml_H1": [
+   2.55,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.65,
+   "2-1": 6.2,
+   "0-2": 1.9,
+   "1-2": 3.7
+  }
+ },
+ {
+  "event_id": "3208723948",
+  "home": "Zhu S.",
+  "away": "Zhao Z.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   4.8,
+   1.09
+  ],
+  "ml_H1": [
+   3.55,
+   1.18
+  ],
+  "cs": {
+   "2-0": 7.1,
+   "2-1": 11.8,
+   "0-2": 1.45,
+   "1-2": 4.45
+  }
+ },
+ {
+  "event_id": "3209077638",
+  "home": "Myatovic J.",
+  "away": "Kikawada R.",
+  "league": "ITF. Monastir, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.7,
+   1.32
+  ],
+  "ml_H1": [
+   2.45,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.85,
+   "2-1": 6.5,
+   "0-2": 1.85,
+   "1-2": 3.7
+  }
+ },
+ {
+  "event_id": "3208788416",
+  "home": "Mehrotra A.",
+  "away": "VU HA Minh Duc",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   1.33,
+   2.65
+  ],
+  "ml_H1": [
+   1.4,
+   2.4
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "2-1": 3.8,
+   "0-2": 5.35,
+   "1-2": 5.85
+  }
+ },
+ {
+  "event_id": "3209660147",
+  "home": "Ashley L.",
+  "away": "Hoedt M.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.32,
+   2.7
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ],
+  "cs": {
+   "2-0": 2.05,
+   "2-1": 3.7,
+   "0-2": 5.15,
+   "1-2": 5.65
+  }
+ },
+ {
+  "event_id": "3209660142",
+  "home": "Berecoechea N.",
+  "away": "Pace F.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.34
+  ],
+  "ml_H1": [
+   2.4,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.05,
+   "2-1": 5.8,
+   "0-2": 2.05,
+   "1-2": 3.6
+  }
+ },
+ {
+  "event_id": "3209311919",
+  "home": "Comino L.",
+  "away": "Paardekooper S.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.1,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.8,
+   "2-1": 4.75,
+   "0-2": 2.5,
+   "1-2": 3.9
+  }
+ },
+ {
+  "event_id": "3209311914",
+  "home": "Filar K.",
+  "away": "Spierle J.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.6,
+   "2-1": 4.55,
+   "0-2": 2.65,
+   "1-2": 3.95
+  }
+ },
+ {
+  "event_id": "3209521478",
+  "home": "Orlov V.",
+  "away": "Eichenseher D.",
+  "league": "ITF Pozzuoli, Men",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.33,
+   2.65
+  ],
+  "ml_H1": [
+   1.35,
+   2.5
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "2-1": 3.7,
+   "0-2": 5.55,
+   "1-2": 5.9
+  }
+ },
+ {
+  "event_id": "3209659109",
+  "home": "Safina Popa G.",
+  "away": "Buculei I.M.",
+  "league": "ITF Campulung, Women",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.3,
+   2.8
+  ],
+  "ml_H1": [
+   1.35,
+   2.55
+  ],
+  "cs": {
+   "2-0": 1.85,
+   "2-1": 3.7,
+   "0-2": 6.15,
+   "1-2": 6.6
+  }
+ },
+ {
+  "event_id": "3210871674",
+  "home": "Shin S.",
+  "away": "Tange S.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-10T01:00:00+00:00",
+  "ml_FT": [
+   1.18,
+   3.5
+  ],
+  "ml_H1": [
+   1.25,
+   3.05
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "2-1": 3.95,
+   "0-2": 6.9,
+   "1-2": 6.9
+  }
+ },
+ {
+  "event_id": "3210693171",
+  "home": "Chung Y.",
+  "away": "Kikuchi Y.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-10T01:00:00+00:00",
+  "ml_FT": [
+   1.18,
+   3.5
+  ],
+  "ml_H1": [
+   1.23,
+   3.2
+  ],
+  "cs": {
+   "2-0": 1.6,
+   "2-1": 4.5,
+   "0-2": 6.5,
+   "1-2": 7.5
+  }
+ },
+ {
+  "event_id": "3210942443",
+  "home": "Borg L.",
+  "away": "Alexander Chang",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-10T02:00:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.25
+  ],
+  "ml_H1": [
+   1.5,
+   2.15
+  ],
+  "cs": {
+   "2-0": 2.3,
+   "2-1": 4.05,
+   "0-2": 4.05,
+   "1-2": 5.05
+  }
+ },
+ {
+  "event_id": "3207784312",
+  "home": "Cecchinato M./Pellegrino A.",
+  "away": "Kalender A / Serdarusic N",
+  "league": "Challenger. Genoa, Italy Men Doubles",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   3.55,
+   1.19
+  ],
+  "ml_H1": [
+   3.05,
+   1.26
+  ],
+  "cs": {
+   "2-0": 7.95,
+   "0-2": 1.5,
+   "2-1": 6.75,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3207787514",
+  "home": "Sabanov I./Sabanov M.",
+  "away": "Ajdukovic D./Guillen Meza A.",
+  "league": "Challenger. Genoa, Italy Men Doubles",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.2
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ],
+  "cs": {
+   "2-0": 2.2,
+   "0-2": 3.85,
+   "2-1": 4.2,
+   "1-2": 4.9
+  }
+ },
+ {
+  "event_id": "3207786608",
+  "home": "Dodig M./Popovic S.",
+  "away": "Forcano Aparicio I / Vervoort M",
+  "league": "Challenger. Genoa, Italy Men Doubles",
+  "start_time": "2026-09-08T18:10:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.7,
+   "2-1": 4.2,
+   "1-2": 4.85
+  }
+ },
+ {
+  "event_id": "3209699662",
+  "home": "Siniakova K / Townsend T",
+  "away": "Bucsa C / Melichar-Martinez N",
+  "league": "US Open, Open Women Doubles",
+  "start_time": "2026-09-08T19:00:00+00:00",
+  "ml_FT": [
+   1.12,
+   4.35
+  ],
+  "ml_H1": [
+   1.22,
+   3.35
+  ],
+  "cs": {
+   "2-0": 1.45,
+   "0-2": 9.1,
+   "2-1": 3.85,
+   "1-2": 9.9
+  }
+ },
+ {
+  "event_id": "3207259962",
+  "home": "Agamenone F / Agostini S",
+  "away": "Ruehl T./Veldheer M.",
+  "league": "Challenger. Genoa, Italy Men Doubles",
+  "start_time": "2026-09-08T19:10:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.35
+  ],
+  "ml_H1": [
+   2.4,
+   1.4
+  ],
+  "cs": {
+   "2-0": 4.9,
+   "0-2": 1.9,
+   "2-1": 5.45,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3207921412",
+  "home": "Carpico B / Filin N S",
+  "away": "Ram R./Salisbury J.",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   2.5,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.5
+  ],
+  "cs": {
+   "2-0": 4.6,
+   "0-2": 2.2,
+   "2-1": 5.3,
+   "1-2": 3.4
+  }
+ },
+ {
+  "event_id": "3209397822",
+  "home": "Gonzalez M./Molteni A",
+  "away": "Granollers M / Zeballos H",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   2.7,
+   1.33
+  ],
+  "ml_H1": [
+   2.4,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.25,
+   "0-2": 2.05,
+   "2-1": 5.7,
+   "1-2": 3.3
+  }
+ },
+ {
+  "event_id": "3209704847",
+  "home": "Jiang X / Zhang S",
+  "away": "Dabrowski G / Stefani L",
+  "league": "US Open, Open Women Doubles",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   4.1,
+   1.14
+  ],
+  "ml_H1": [
+   3.3,
+   1.23
+  ],
+  "cs": {
+   "2-0": 8.8,
+   "0-2": 1.5,
+   "2-1": 9.1,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3209694386",
+  "home": "Hsieh S-w / Ostapenko J",
+  "away": "Mertens E./Shnaider D.",
+  "league": "US Open, Open Women Doubles",
+  "start_time": "2026-09-08T20:10:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.0
+  ],
+  "cs": {
+   "2-0": 2.4,
+   "0-2": 3.5,
+   "2-1": 3.95,
+   "1-2": 4.85
+  }
+ },
+ {
+  "event_id": "3209357502",
+  "home": "Miedler L / Polmans M",
+  "away": "Arevalo M / Pavic M",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T21:00:00+00:00",
+  "ml_FT": [
+   2.55,
+   1.35
+  ],
+  "ml_H1": [
+   2.25,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.8,
+   "0-2": 2.15,
+   "2-1": 5.4,
+   "1-2": 3.35
+  }
+ },
+ {
+  "event_id": "3208241610",
+  "home": "Nys H / Roger-Vasselin E",
+  "away": "Andreozzi G / Guinard M",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T21:10:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 3.05,
+   "0-2": 3.05,
+   "2-1": 4.0,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3209355735",
+  "home": "Krawietz K./Puetz T.",
+  "away": "Cash J / Glasspool L",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T21:10:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.55,
+   "0-2": 2.6,
+   "2-1": 4.5,
+   "1-2": 3.7
+  }
+ },
+ {
+  "event_id": "3209697675",
+  "home": "Routliffe E / Sutjiadi A",
+  "away": "Krueger A./Montgomery R.",
+  "league": "US Open, Open Women Doubles",
+  "start_time": "2026-09-08T21:10:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.3
+  ],
+  "ml_H1": [
+   1.5,
+   2.15
+  ],
+  "cs": {
+   "2-0": 2.2,
+   "0-2": 4.1,
+   "2-1": 3.75,
+   "1-2": 5.15
+  }
+ },
+ {
+  "event_id": "3209690037",
+  "home": "Schnaitter J / Wallner M",
+  "away": "Harrison C./Skupski N.",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T21:20:00+00:00",
+  "ml_FT": [
+   2.5,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.5
+  ],
+  "cs": {
+   "2-0": 4.7,
+   "0-2": 2.2,
+   "2-1": 5.2,
+   "1-2": 3.35
+  }
+ },
+ {
+  "event_id": "3209691097",
+  "home": "Bolelli S / Vavassori A",
+  "away": "Krajicek A / Mektic N",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T22:10:00+00:00",
+  "ml_FT": [
+   1.4,
+   2.45
+  ],
+  "ml_H1": [
+   1.5,
+   2.2
+  ],
+  "cs": {
+   "2-0": 2.2,
+   "0-2": 4.65,
+   "2-1": 3.35,
+   "1-2": 5.1
+  }
+ },
+ {
+  "event_id": "3209353083",
+  "home": "Heliovaara H / Patten H",
+  "away": "Cabral F / Tracy J",
+  "league": "US Open, Open Men Doubles",
+  "start_time": "2026-09-08T22:30:00+00:00",
+  "ml_FT": [
+   1.22,
+   3.35
+  ],
+  "ml_H1": [
+   1.33,
+   2.75
+  ],
+  "cs": {
+   "2-0": 1.75,
+   "0-2": 6.65,
+   "2-1": 3.35,
+   "1-2": 7.05
+  }
+ },
+ {
+  "event_id": "3209681005",
+  "home": "Bax F./Weber A.",
+  "away": "Ichikawa T./Jeong Y.S.",
+  "league": "Challenger. Phan Thiet 3, Men Doubles",
+  "start_time": "2026-09-09T03:35:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.2
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.8,
+   "2-1": 4.2,
+   "1-2": 4.85
+  }
+ },
+ {
+  "event_id": "3209054853",
+  "home": "Jin Y.",
+  "away": "Han X.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T05:00:00+00:00",
+  "ml_FT": [
+   1.95,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.5,
+   "2-1": 4.45,
+   "0-2": 2.75,
+   "1-2": 3.95
+  }
+ },
+ {
+  "event_id": "3209678650",
+  "home": "Callejon Hernando S./Jones M.",
+  "away": "Sueoka Y / Tajima N",
+  "league": "Challenger. Phan Thiet 3, Men Doubles",
+  "start_time": "2026-09-09T05:20:00+00:00",
+  "ml_FT": [
+   1.95,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.25,
+   "0-2": 2.5,
+   "2-1": 4.6,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3209047861",
+  "home": "Mdlulwa W.",
+  "away": "Herazo Gonzalez M.",
+  "league": "ITF Hurghada, Women",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.9,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.6,
+   "2-1": 4.4,
+   "0-2": 2.65,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3208511284",
+  "home": "Nam J / Park U",
+  "away": "Loof T / Uesugi K",
+  "league": "Challenger. Shanghai, China Men Doubles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.85
+  ],
+  "ml_H1": [
+   1.75,
+   1.85
+  ],
+  "cs": {
+   "2-0": 2.7,
+   "0-2": 2.95,
+   "2-1": 4.35,
+   "1-2": 4.45
+  }
+ },
+ {
+  "event_id": "3207068792",
+  "home": "Basel V / Ribero F",
+  "away": "Genov A / Wehnelt K",
+  "league": "Challenger.Tulln, Men Doubles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.85,
+   "0-2": 2.85,
+   "2-1": 4.4,
+   "1-2": 4.4
+  }
+ },
+ {
+  "event_id": "3209684298",
+  "home": "Huang T / Kadhe A",
+  "away": "Bar Biryukov P / Binda A",
+  "league": "Challenger. Shanghai, China Men Doubles",
+  "start_time": "2026-09-09T08:10:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.6
+  ],
+  "ml_H1": [
+   1.4,
+   2.4
+  ],
+  "cs": {
+   "2-0": 1.85,
+   "0-2": 5.0,
+   "2-1": 4.15,
+   "1-2": 5.45
+  }
+ },
+ {
+  "event_id": "3209687886",
+  "home": "Ho R / Stalder R",
+  "away": "Hsieh C-P./Isaro P.",
+  "league": "Challenger. Shanghai, China Men Doubles",
+  "start_time": "2026-09-09T08:10:00+00:00",
+  "ml_FT": [
+   1.22,
+   3.35
+  ],
+  "ml_H1": [
+   1.3,
+   2.85
+  ],
+  "cs": {
+   "2-0": 1.6,
+   "0-2": 7.1,
+   "2-1": 4.25,
+   "1-2": 6.4
+  }
+ },
+ {
+  "event_id": "3207475666",
+  "home": "Arinc K./Kirci K.",
+  "away": "Ficovich J P / Tobon M",
+  "league": "Challenger. Istanbul 3, Men Doubles",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   4.55,
+   1.11
+  ],
+  "ml_H1": [
+   3.85,
+   1.16
+  ],
+  "cs": {
+   "2-0": 12.9,
+   "0-2": 1.32,
+   "2-1": 8.45,
+   "1-2": 4.8
+  }
+ },
+ {
+  "event_id": "3207801295",
+  "home": "Ingildsen J./Poulsen O.B.",
+  "away": "Holmgren A./Overbeck S.E.",
+  "league": "Challenger. Istanbul 3, Men Doubles",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   1.65,
+   1.95
+  ],
+  "ml_H1": [
+   1.7,
+   1.9
+  ],
+  "cs": {
+   "2-0": 2.55,
+   "0-2": 3.2,
+   "2-1": 4.25,
+   "1-2": 4.55
+  }
+ },
+ {
+  "event_id": "3207787782",
+  "home": "Latinovic S / Poljicak M",
+  "away": "Bordoni F / Virgili A",
+  "league": "Challenger. Genoa, Italy Men Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.06,
+   5.75
+  ],
+  "ml_H1": [
+   1.1,
+   4.75
+  ],
+  "cs": {
+   "2-0": 1.2,
+   "0-2": 20.6,
+   "2-1": 5.4,
+   "1-2": 10.8
+  }
+ },
+ {
+  "event_id": "3207084402",
+  "home": "Grevelius E / Heinonen A",
+  "away": "Forejtek J / Kellovsky D",
+  "league": "Challenger. Seville, Men Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.45
+  ],
+  "ml_H1": [
+   1.27,
+   3.0
+  ],
+  "cs": {
+   "2-0": 1.55,
+   "0-2": 7.55,
+   "2-1": 4.35,
+   "1-2": 6.65
+  }
+ },
+ {
+  "event_id": "3207807193",
+  "home": "Kielan S./Vliegen J.",
+  "away": "Rodriguez Taverna S./Winter Lopez B.",
+  "league": "Challenger. Seville, Men Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.85,
+   1.75
+  ],
+  "ml_H1": [
+   1.85,
+   1.75
+  ],
+  "cs": {
+   "2-0": 2.95,
+   "0-2": 2.7,
+   "2-1": 4.5,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3207807628",
+  "home": "Stevenson D / Willis M",
+  "away": "Mansilla Diez M./Pereira T.",
+  "league": "Challenger. Seville, Men Doubles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.6
+  ],
+  "ml_H1": [
+   1.4,
+   2.4
+  ],
+  "cs": {
+   "2-0": 1.85,
+   "0-2": 5.0,
+   "2-1": 4.15,
+   "1-2": 5.5
+  }
+ },
+ {
+  "event_id": "3207260020",
+  "home": "Merino A./Zhu M.",
+  "away": "Karol M / Paulson A",
+  "league": "Challenger.Tulln, Men Doubles",
+  "start_time": "2026-09-09T09:10:00+00:00",
+  "ml_FT": [
+   4.0,
+   1.15
+  ],
+  "ml_H1": [
+   3.4,
+   1.21
+  ],
+  "cs": {
+   "2-0": 9.7,
+   "0-2": 1.4,
+   "2-1": 7.45,
+   "1-2": 4.55
+  }
+ },
+ {
+  "event_id": "3209753140",
+  "home": "Jasika O./Tomic B.",
+  "away": "NOGUCHI R / WANG A",
+  "league": "Challenger. Shanghai, China Men Doubles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.55
+  ],
+  "ml_H1": [
+   2.05,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.7,
+   "0-2": 2.25,
+   "2-1": 4.8,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3208846885",
+  "home": "Hsu Y H / Sun F",
+  "away": "Pankin S / Ymer E",
+  "league": "Challenger. Shanghai, China Men Doubles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.4,
+   2.4
+  ],
+  "ml_H1": [
+   1.45,
+   2.25
+  ],
+  "cs": {
+   "2-0": 2.0,
+   "0-2": 4.45,
+   "2-1": 4.15,
+   "1-2": 5.15
+  }
+ },
+ {
+  "event_id": "3209677384",
+  "home": "Fancutt T / Watanabe S",
+  "away": "Covato M / Voelzke G",
+  "league": "Challenger. Cassis, Men Doubles",
+  "start_time": "2026-09-09T09:40:00+00:00",
+  "ml_FT": [
+   1.14,
+   4.1
+  ],
+  "ml_H1": [
+   1.2,
+   3.45
+  ],
+  "cs": {
+   "2-0": 1.4,
+   "0-2": 10.2,
+   "2-1": 4.55,
+   "1-2": 7.55
+  }
+ },
+ {
+  "event_id": "3208846897",
+  "home": "Xiao L / Zeng Y",
+  "away": "Delaney JA / Delaney Je",
+  "league": "Challenger. Shanghai, China Men Doubles",
+  "start_time": "2026-09-09T09:50:00+00:00",
+  "ml_FT": [
+   3.1,
+   1.25
+  ],
+  "ml_H1": [
+   2.8,
+   1.31
+  ],
+  "cs": {
+   "2-0": 6.6,
+   "0-2": 1.65,
+   "2-1": 6.15,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3208933907",
+  "home": "Kuzmanov D./Wessels L.",
+  "away": "Hernandez A./Marrero Curbelo I.",
+  "league": "Challenger. Istanbul 3, Men Doubles",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   2.2,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.8,
+   "0-2": 2.25,
+   "2-1": 4.85,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3206964684",
+  "home": "Betov S / Nedunchezhiyan J",
+  "away": "Azkara A./Erel Y.",
+  "league": "Challenger. Istanbul 3, Men Doubles",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.35,
+   "0-2": 2.45,
+   "2-1": 4.65,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3209676604",
+  "home": "Bertrand R./Soriano Barrera A.",
+  "away": "Johansson O./Kalyanpur A.",
+  "league": "Challenger. Cassis, Men Doubles",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.8
+  ],
+  "ml_H1": [
+   1.75,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.8,
+   "0-2": 2.9,
+   "2-1": 4.35,
+   "1-2": 4.4
+  }
+ },
+ {
+  "event_id": "3207802387",
+  "home": "Martos Gornes S / Walkow S",
+  "away": "Barrientos N./Kestelboim M.",
+  "league": "Challenger. Seville, Men Doubles",
+  "start_time": "2026-09-09T10:10:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.7,
+   "2-1": 4.2,
+   "1-2": 4.85
+  }
+ },
+ {
+  "event_id": "3207500651",
+  "home": "Bass F / Duncan S",
+  "away": "Cervantes I / Molchanov D",
+  "league": "Challenger. Seville, Men Doubles",
+  "start_time": "2026-09-09T10:10:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.5,
+   "0-2": 2.35,
+   "2-1": 4.75,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3207808872",
+  "home": "Cukierman D / Poljak D",
+  "away": "Kolar Z./Pokorny L",
+  "league": "Challenger.Tulln, Men Doubles",
+  "start_time": "2026-09-09T10:20:00+00:00",
+  "ml_FT": [
+   1.65,
+   1.95
+  ],
+  "ml_H1": [
+   1.65,
+   1.9
+  ],
+  "cs": {
+   "2-0": 2.5,
+   "0-2": 3.25,
+   "2-1": 4.3,
+   "1-2": 4.6
+  }
+ },
+ {
+  "event_id": "3209311899",
+  "home": "Marino P.",
+  "away": "Maria Noce G.",
+  "league": "ITF. Budapest, Men | Singles",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   1.7,
+   1.85
+  ],
+  "ml_H1": [
+   1.7,
+   1.85
+  ],
+  "cs": {
+   "2-0": 2.85,
+   "2-1": 4.1,
+   "0-2": 3.3,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3207792072",
+  "home": "Kusuhara Y / Nakagawa S",
+  "away": "Barry C./Whitehouse M.",
+  "league": "Challenger. Istanbul 3, Men Doubles",
+  "start_time": "2026-09-09T11:10:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   2.0,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.4,
+   "0-2": 2.4,
+   "2-1": 4.65,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3207792633",
+  "home": "Kravchenko G./Ribecai M.",
+  "away": "Ozdemir S M / Turker M N",
+  "league": "Challenger. Istanbul 3, Men Doubles",
+  "start_time": "2026-09-09T11:10:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.85,
+   "0-2": 2.85,
+   "2-1": 4.4,
+   "1-2": 4.4
+  }
+ },
+ {
+  "event_id": "3209673637",
+  "home": "Scaglia M / Tepmahc N",
+  "away": "Boulais J./Dalmasso G.",
+  "league": "Challenger. Cassis, Men Doubles",
+  "start_time": "2026-09-09T11:10:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.35
+  ],
+  "ml_H1": [
+   2.4,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.0,
+   "0-2": 1.85,
+   "2-1": 5.45,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3207025307",
+  "home": "Misolic F / Neumayer L",
+  "away": "Jans J / Visker N",
+  "league": "Challenger.Tulln, Men Doubles",
+  "start_time": "2026-09-09T11:50:00+00:00",
+  "ml_FT": [
+   3.65,
+   1.18
+  ],
+  "ml_H1": [
+   3.2,
+   1.24
+  ],
+  "cs": {
+   "2-0": 8.5,
+   "0-2": 1.5,
+   "2-1": 6.95,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3209672574",
+  "home": "Arneodo R./Blanchet U.",
+  "away": "Hands T / Summers M",
+  "league": "Challenger. Cassis, Men Doubles",
+  "start_time": "2026-09-09T12:00:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.6
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.45,
+   "0-2": 2.4,
+   "2-1": 4.7,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3209673010",
+  "home": "Erhard M./Gueymard Wayenburg S.",
+  "away": "Fuchs Z / Perez B",
+  "league": "Challenger. Cassis, Men Doubles",
+  "start_time": "2026-09-09T12:20:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.7
+  ],
+  "ml_H1": [
+   1.85,
+   1.7
+  ],
+  "cs": {
+   "2-0": 3.05,
+   "0-2": 2.65,
+   "2-1": 4.5,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3210410166",
+  "home": "Schenekenberg G.",
+  "away": "Wendler Filho J.",
+  "league": "ITF Leme, Men",
+  "start_time": "2026-09-09T13:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.85,
+   1.7
+  ],
+  "cs": {
+   "2-0": 3.5,
+   "2-1": 4.45,
+   "0-2": 2.75,
+   "1-2": 3.95
+  }
+ },
+ {
+  "event_id": "3211036716",
+  "home": "Yuki Mochizuki",
+  "away": "Ferguson C.",
+  "league": "ITF Sapporo, Men",
+  "start_time": "2026-09-10T01:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.8,
+   1.7
+  ],
+  "cs": {
+   "2-0": 3.4,
+   "2-1": 4.5,
+   "0-2": 2.75,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3210479455",
+  "home": "Gobbi Monllau A.V.",
+  "away": "Arabarco I.",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-08T17:23:00+00:00",
+  "ml_FT": [
+   1.08,
+   4.8
+  ],
+  "ml_H1": [
+   1.21,
+   3.25
+  ],
+  "cs": {
+   "2-0": 1.5,
+   "2-1": 4.05,
+   "0-2": 7.7,
+   "1-2": 10.8
+  }
+ },
+ {
+  "event_id": "3210547312",
+  "home": "Hewitt C.",
+  "away": "Derepasko T.",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-09T05:20:00+00:00",
+  "ml_FT": [
+   1.17,
+   3.8
+  ],
+  "ml_H1": [
+   1.26,
+   3.05
+  ],
+  "cs": {
+   "2-0": 1.55,
+   "0-2": 7.9,
+   "2-1": 3.9,
+   "1-2": 8.25
+  }
+ },
+ {
+  "event_id": "3210884096",
+  "home": "Ursu V.",
+  "away": "Kuzmanov D.",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   3.05,
+   1.26
+  ],
+  "ml_H1": [
+   2.6,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.75,
+   "0-2": 1.75,
+   "2-1": 6.65,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3209660152",
+  "home": "Hesse A.",
+  "away": "Zeltina B.",
+  "league": "ITF. Reus, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.85,
+   1.7
+  ],
+  "ml_H1": [
+   1.85,
+   1.7
+  ],
+  "cs": {
+   "2-0": 3.1,
+   "2-1": 4.3,
+   "0-2": 3.0,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3210801516",
+  "home": "Maestrelli F.",
+  "away": "Ayeni A",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-09T08:10:00+00:00",
+  "ml_FT": [
+   1.18,
+   3.65
+  ],
+  "ml_H1": [
+   1.28,
+   2.95
+  ],
+  "cs": {
+   "2-0": 1.55,
+   "0-2": 7.35,
+   "2-1": 3.85,
+   "1-2": 7.85
+  }
+ },
+ {
+  "event_id": "3210805308",
+  "home": "Boitan G.A.",
+  "away": "Mayot H.",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   2.95,
+   1.28
+  ],
+  "ml_H1": [
+   2.55,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.55,
+   "0-2": 1.75,
+   "2-1": 6.5,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3210881519",
+  "home": "Brancaccio R.",
+  "away": "Llamas Ruiz P.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-09T17:10:00+00:00",
+  "ml_FT": [
+   3.2,
+   1.24
+  ],
+  "ml_H1": [
+   2.7,
+   1.33
+  ],
+  "cs": {
+   "2-0": 6.15,
+   "0-2": 1.7,
+   "2-1": 7.05,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3210547682",
+  "home": "Sach T.L.",
+  "away": "Weber A.",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-10T03:00:00+00:00",
+  "ml_FT": [
+   2.95,
+   1.28
+  ],
+  "ml_H1": [
+   2.55,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.55,
+   "0-2": 1.75,
+   "2-1": 6.5,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3210863322",
+  "home": "Sekulic P.",
+  "away": "Matsuda K.",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-10T03:00:00+00:00",
+  "ml_FT": [
+   1.4,
+   2.45
+  ],
+  "ml_H1": [
+   1.5,
+   2.2
+  ],
+  "cs": {
+   "2-0": 2.05,
+   "0-2": 4.25,
+   "2-1": 3.9,
+   "1-2": 5.5
+  }
+ },
+ {
+  "event_id": "3210862568",
+  "home": "Miyoshi, Kenta (2004)",
+  "away": "Peliwo F.",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-10T03:00:00+00:00",
+  "ml_FT": [
+   1.09,
+   4.85
+  ],
+  "ml_H1": [
+   1.18,
+   3.7
+  ],
+  "cs": {
+   "2-0": 1.35,
+   "0-2": 11.6,
+   "2-1": 4.1,
+   "1-2": 10.7
+  }
+ },
+ {
+  "event_id": "3210900770",
+  "home": "Tomic B.",
+  "away": "Ivashka I.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.25,
+   "0-2": 2.5,
+   "2-1": 4.7,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3211087422",
+  "home": "Nam J.S.",
+  "away": "Yevseyev D.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.85,
+   "0-2": 2.85,
+   "2-1": 4.4,
+   "1-2": 4.4
+  }
+ },
+ {
+  "event_id": "3210918961",
+  "home": "Tobon M.",
+  "away": "Butvilas E.",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   3.2,
+   1.24
+  ],
+  "ml_H1": [
+   2.7,
+   1.34
+  ],
+  "cs": {
+   "2-0": 6.15,
+   "0-2": 1.7,
+   "2-1": 6.95,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3210804932",
+  "home": "Hamza Reguig S.",
+  "away": "Friend J.",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   6.75,
+   1.03
+  ],
+  "ml_H1": [
+   4.95,
+   1.09
+  ],
+  "cs": {
+   "2-0": 23.1,
+   "0-2": 1.18,
+   "2-1": 17.4,
+   "1-2": 4.75
+  }
+ },
+ {
+  "event_id": "3211087386",
+  "home": "Max B.",
+  "away": "Mert Alkaya",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.0
+  ],
+  "cs": {
+   "2-0": 2.35,
+   "0-2": 3.55,
+   "2-1": 4.05,
+   "1-2": 4.9
+  }
+ },
+ {
+  "event_id": "3211173588",
+  "home": "Erel Y.",
+  "away": "Albot R.",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.2
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.75,
+   "2-1": 4.0,
+   "1-2": 5.1
+  }
+ },
+ {
+  "event_id": "3210961444",
+  "home": "Gueymard Wayenburg S.",
+  "away": "Lajal M.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-10T08:30:00+00:00",
+  "ml_FT": [
+   2.9,
+   1.29
+  ],
+  "ml_H1": [
+   2.5,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.45,
+   "0-2": 1.8,
+   "2-1": 6.4,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3211161621",
+  "home": "Budkov Kjaer N.",
+  "away": "Ghazouani Durand Y.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-10T08:30:00+00:00",
+  "ml_FT": [
+   1.07,
+   5.5
+  ],
+  "ml_H1": [
+   1.14,
+   4.1
+  ],
+  "cs": {
+   "2-0": 1.28,
+   "0-2": 14.5,
+   "2-1": 4.3,
+   "1-2": 12.6
+  }
+ },
+ {
+  "event_id": "3209050770",
+  "home": "Echargui M.",
+  "away": "Harris B.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-10T08:30:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.75
+  ],
+  "ml_H1": [
+   1.8,
+   1.75
+  ],
+  "cs": {
+   "2-0": 2.9,
+   "0-2": 2.8,
+   "2-1": 4.45,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3211121243",
+  "home": "Perot R.",
+  "away": "Bertrand R.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-10T08:30:00+00:00",
+  "ml_FT": [
+   1.24,
+   3.2
+  ],
+  "ml_H1": [
+   1.34,
+   2.7
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "0-2": 6.15,
+   "2-1": 3.85,
+   "1-2": 6.95
+  }
+ },
+ {
+  "event_id": "3209154702",
+  "home": "AW Brune Olsen",
+  "away": "Fornasieri Ch.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.85,
+   1.7
+  ]
+ },
+ {
+  "event_id": "3209665248",
+  "home": "Shintaro Imai",
+  "away": "Nirundorn T",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.3
+  ],
+  "ml_H1": [
+   1.29,
+   2.8
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "2-1": 4.2,
+   "0-2": 5.25,
+   "1-2": 8.2
+  }
+ },
+ {
+  "event_id": "3208871462",
+  "home": "Wang J.",
+  "away": "Huang Y.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.55
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.4,
+   "2-1": 5.25,
+   "0-2": 2.4,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3209307966",
+  "home": "Kuzmova K.",
+  "away": "Lacasse R.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.6
+  ],
+  "ml_H1": [
+   1.4,
+   2.45
+  ],
+  "cs": {
+   "2-0": 2.0,
+   "2-1": 4.2,
+   "0-2": 4.45,
+   "1-2": 5.95
+  }
+ },
+ {
+  "event_id": "3209557329",
+  "home": "Tian F.",
+  "away": "Han Shi",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   2.45,
+   1.4
+  ],
+  "ml_H1": [
+   2.3,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.2,
+   "2-1": 6.05,
+   "0-2": 2.1,
+   "1-2": 4.05
+  }
+ },
+ {
+  "event_id": "3208871434",
+  "home": "Kosaka R.",
+  "away": "Ju H.W.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.08,
+   4.95
+  ],
+  "ml_H1": [
+   1.16,
+   3.75
+  ],
+  "cs": {
+   "2-0": 1.45,
+   "2-1": 4.4,
+   "0-2": 7.4,
+   "1-2": 11.8
+  }
+ },
+ {
+  "event_id": "3209665243",
+  "home": "Arcon A.",
+  "away": "Malaszszak M.",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   4.7,
+   1.09
+  ],
+  "ml_H1": [
+   3.45,
+   1.19
+  ],
+  "cs": {
+   "2-0": 6.9,
+   "2-1": 11.0,
+   "0-2": 1.5,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3208716982",
+  "home": "Yodpetch K.",
+  "away": "Kim Y.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.22,
+   3.25
+  ],
+  "ml_H1": [
+   1.32,
+   2.7
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "2-1": 4.2,
+   "0-2": 5.25,
+   "1-2": 8.35
+  }
+ },
+ {
+  "event_id": "3208922306",
+  "home": "Choi Seo Yun",
+  "away": "Oh J.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.17,
+   3.65
+  ],
+  "ml_H1": [
+   1.26,
+   2.95
+  ],
+  "cs": {
+   "2-0": 1.6,
+   "2-1": 4.35,
+   "0-2": 5.7,
+   "1-2": 9.5
+  }
+ },
+ {
+  "event_id": "3209665268",
+  "home": "Chen Dong",
+  "away": "Javia D.",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   3.6,
+   1.17
+  ],
+  "ml_H1": [
+   2.9,
+   1.28
+  ],
+  "cs": {
+   "2-0": 5.55,
+   "2-1": 8.75,
+   "0-2": 1.65,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3209665273",
+  "home": "Van Herzeele J.",
+  "away": "Charoenphon Y.",
+  "league": "ITF. Nonthaburi, Men",
+  "start_time": "2026-09-09T04:00:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.6
+  ],
+  "ml_H1": [
+   1.45,
+   2.3
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "2-1": 4.3,
+   "0-2": 4.1,
+   "1-2": 6.85
+  }
+ },
+ {
+  "event_id": "3210462295",
+  "home": "Navarro Oliva M.F.",
+  "away": "Britez Risso L F",
+  "league": "ITF. Pilar, Women",
+  "start_time": "2026-09-08T16:51:00+00:00",
+  "ml_FT": [
+   4.65,
+   1.09
+  ],
+  "ml_H1": [
+   3.4,
+   1.2
+  ],
+  "cs": {
+   "2-0": 7.6,
+   "2-1": 10.3,
+   "0-2": 1.55,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3210410211",
+  "home": "Dickerson R.",
+  "away": "Scramin Do Lago J.V.",
+  "league": "ITF Leme, Men",
+  "start_time": "2026-09-08T17:47:00+00:00",
+  "ml_FT": [
+   1.14,
+   3.95
+  ],
+  "ml_H1": [
+   1.23,
+   3.15
+  ],
+  "cs": {
+   "2-0": 1.6,
+   "2-1": 4.3,
+   "0-2": 5.9,
+   "1-2": 9.6
+  }
+ },
+ {
+  "event_id": "3208871429",
+  "home": "Naklo Th.",
+  "away": "Ahn Y.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   1.12,
+   4.25
+  ],
+  "ml_H1": [
+   1.23,
+   3.2
+  ],
+  "cs": {
+   "2-0": 1.55,
+   "2-1": 4.25,
+   "0-2": 6.55,
+   "1-2": 10.5
+  }
+ },
+ {
+  "event_id": "3208711260",
+  "home": "Da Costa R.A.",
+  "away": "Heisnam S.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   1.32,
+   2.7
+  ],
+  "ml_H1": [
+   1.4,
+   2.35
+  ],
+  "cs": {
+   "2-0": 1.9,
+   "2-1": 4.4,
+   "0-2": 4.2,
+   "1-2": 7.3
+  }
+ },
+ {
+  "event_id": "3208724565",
+  "home": "Sinclair C.",
+  "away": "Zhang B.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.1,
+   4.55
+  ],
+  "ml_H1": [
+   1.22,
+   3.25
+  ],
+  "cs": {
+   "2-0": 1.55,
+   "2-1": 4.25,
+   "0-2": 6.85,
+   "1-2": 10.3
+  }
+ },
+ {
+  "event_id": "3208711028",
+  "home": "Matthew Shearer",
+  "away": "Bruce-Smith J.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.05
+  ],
+  "ml_H1": [
+   1.6,
+   1.95
+  ],
+  "cs": {
+   "2-0": 2.4,
+   "2-1": 4.6,
+   "0-2": 3.15,
+   "1-2": 5.55
+  }
+ },
+ {
+  "event_id": "3208875153",
+  "home": "Shaoyun L.",
+  "away": "Chen S.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T02:30:00+00:00",
+  "ml_FT": [
+   1.1,
+   4.5
+  ],
+  "ml_H1": [
+   1.23,
+   3.15
+  ],
+  "cs": {
+   "2-0": 1.5,
+   "2-1": 4.55,
+   "0-2": 6.3,
+   "1-2": 11.0
+  }
+ },
+ {
+  "event_id": "3208922106",
+  "home": "Muramatsu Ch.",
+  "away": "Kim D.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   2.5,
+   1.35
+  ],
+  "ml_H1": [
+   2.3,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.0,
+   "2-1": 6.45,
+   "0-2": 2.05,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3208788907",
+  "home": "Taguchi R.",
+  "away": "Visaya A.",
+  "league": "ITF Bali, Men",
+  "start_time": "2026-09-09T01:00:00+00:00",
+  "ml_FT": [
+   1.22,
+   3.2
+  ],
+  "ml_H1": [
+   1.33,
+   2.65
+  ],
+  "cs": {
+   "2-0": 1.75,
+   "2-1": 4.25,
+   "0-2": 4.9,
+   "1-2": 8.0
+  }
+ },
+ {
+  "event_id": "3208876097",
+  "home": "Satara, Harrison",
+  "away": "Shin M.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.6,
+   2.0
+  ],
+  "ml_H1": [
+   1.6,
+   1.95
+  ],
+  "cs": {
+   "2-0": 2.35,
+   "2-1": 4.75,
+   "0-2": 3.15,
+   "1-2": 5.65
+  }
+ },
+ {
+  "event_id": "3208519341",
+  "home": "Sawashiro K.",
+  "away": "Jang G.",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.1
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.3,
+   "2-1": 4.6,
+   "0-2": 3.3,
+   "1-2": 5.75
+  }
+ },
+ {
+  "event_id": "3209658507",
+  "home": "Khomutsianskaya D.",
+  "away": "Okamura K",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.2
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "2-1": 4.35,
+   "0-2": 3.55,
+   "1-2": 5.7
+  }
+ },
+ {
+  "event_id": "3208724751",
+  "home": "Zhengyu S.",
+  "away": "Xiaoyin Y.",
+  "league": "ITF. Wuning, Men",
+  "start_time": "2026-09-09T02:30:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.9,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.15,
+   "2-1": 5.45,
+   "0-2": 2.4,
+   "1-2": 4.6
+  }
+ },
+ {
+  "event_id": "3208871568",
+  "home": "Ha Yoon Son",
+  "away": "Fang An Lin",
+  "league": "ITF Yeongwol, Women",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   2.5,
+   1.35
+  ],
+  "ml_H1": [
+   2.2,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.95,
+   "2-1": 6.55,
+   "0-2": 2.05,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3209307961",
+  "home": "Micic E.",
+  "away": "Gao X.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   3.65,
+   1.17
+  ],
+  "ml_H1": [
+   3.1,
+   1.24
+  ],
+  "cs": {
+   "2-0": 7.15,
+   "2-1": 8.05,
+   "0-2": 1.6,
+   "1-2": 4.05
+  }
+ },
+ {
+  "event_id": "3210384243",
+  "home": "Lares E.",
+  "away": "Jacquemot E.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T19:40:00+00:00",
+  "ml_FT": [
+   8.15,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3209307981",
+  "home": "Koevermans A.",
+  "away": "Visscher S.J.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   1.08,
+   5.0
+  ],
+  "ml_H1": [
+   1.16,
+   3.75
+  ],
+  "cs": {
+   "2-0": 1.4,
+   "2-1": 4.3,
+   "0-2": 9.9,
+   "1-2": 10.7
+  }
+ },
+ {
+  "event_id": "3209307956",
+  "home": "Jorge F.",
+  "away": "Fick G.D.S.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   1.1,
+   4.55
+  ],
+  "ml_H1": [
+   1.19,
+   3.45
+  ],
+  "cs": {
+   "2-0": 1.5,
+   "2-1": 4.15,
+   "0-2": 8.55,
+   "1-2": 9.7
+  }
+ },
+ {
+  "event_id": "3209307941",
+  "home": "Klugman H.",
+  "away": "Voloshchuk A.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.3
+  ],
+  "ml_H1": [
+   1.27,
+   2.9
+  ],
+  "cs": {
+   "2-0": 1.75,
+   "2-1": 3.95,
+   "0-2": 6.3,
+   "1-2": 6.9
+  }
+ },
+ {
+  "event_id": "3209307946",
+  "home": "Ito A.",
+  "away": "Fruhvirtova L.",
+  "league": "ITF Evora, Women",
+  "start_time": "2026-09-09T11:00:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.45
+  ],
+  "ml_H1": [
+   2.15,
+   1.5
+  ],
+  "cs": {
+   "2-0": 3.9,
+   "2-1": 5.15,
+   "0-2": 2.35,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3209150913",
+  "home": "Ren .Y",
+  "away": "Bai Zh.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   3.05,
+   1.25
+  ],
+  "ml_H1": [
+   2.55,
+   1.35
+  ],
+  "cs": {
+   "2-0": 4.95,
+   "2-1": 7.35,
+   "0-2": 1.8,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3208845008",
+  "home": "Joanna Garland",
+  "away": "Wei S",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   1.25,
+   3.0
+  ],
+  "ml_H1": [
+   1.35,
+   2.55
+  ],
+  "cs": {
+   "2-0": 1.85,
+   "2-1": 4.2,
+   "0-2": 4.75,
+   "1-2": 7.3
+  }
+ },
+ {
+  "event_id": "3209557252",
+  "home": "Wang Y.",
+  "away": "Saigo R.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T02:00:00+00:00",
+  "ml_FT": [
+   2.7,
+   1.32
+  ],
+  "ml_H1": [
+   2.35,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.25,
+   "2-1": 6.45,
+   "0-2": 2.0,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3210786339",
+  "home": "Bastiaansen P.",
+  "away": "Martinez de Freitas O.A.",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   2.45,
+   1.4
+  ],
+  "ml_H1": [
+   2.3,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.25,
+   "0-2": 1.95,
+   "2-1": 5.75,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3210827395",
+  "home": "Barendse L",
+  "away": "Hendricks F.",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   1.06,
+   5.75
+  ],
+  "ml_H1": [
+   1.12,
+   4.5
+  ],
+  "cs": {
+   "2-0": 1.23,
+   "0-2": 13.7,
+   "2-1": 4.9,
+   "1-2": 14.7
+  }
+ },
+ {
+  "event_id": "3210798343",
+  "home": "Dowdell E.",
+  "away": "Bjork J.",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   3.85,
+   1.16
+  ],
+  "ml_H1": [
+   3.2,
+   1.24
+  ],
+  "cs": {
+   "2-0": 7.25,
+   "0-2": 1.45,
+   "2-1": 9.15,
+   "1-2": 4.45
+  }
+ },
+ {
+  "event_id": "3209577988",
+  "home": "Okhtenberg N.",
+  "away": "Niewiadomska P.",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.75
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.7,
+   "0-2": 2.65,
+   "2-1": 4.95,
+   "1-2": 4.9
+  }
+ },
+ {
+  "event_id": "3210787743",
+  "home": "Moreno A.",
+  "away": "Gonzales C.V.F.",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T17:35:00+00:00",
+  "ml_FT": [
+   1.11,
+   4.6
+  ],
+  "ml_H1": [
+   1.16,
+   3.85
+  ],
+  "cs": {
+   "2-0": 1.33,
+   "0-2": 10.0,
+   "2-1": 4.65,
+   "1-2": 10.4
+  }
+ },
+ {
+  "event_id": "3209602258",
+  "home": "Yli-Piipari S.",
+  "away": "Crowder R.",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T17:55:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.75
+  ],
+  "ml_H1": [
+   1.8,
+   1.75
+  ],
+  "cs": {
+   "2-0": 2.7,
+   "0-2": 2.6,
+   "2-1": 4.95,
+   "1-2": 4.9
+  }
+ },
+ {
+  "event_id": "3210464088",
+  "home": "Pitchford I.",
+  "away": "Pradkin L.",
+  "league": "UTR, PTT Newport Beach Women 21",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   5.7,
+   1.06
+  ],
+  "ml_H1": [
+   4.45,
+   1.12
+  ],
+  "cs": {
+   "2-0": 13.6,
+   "0-2": 1.23,
+   "2-1": 14.6,
+   "1-2": 4.9
+  }
+ },
+ {
+  "event_id": "3209602264",
+  "home": "Wuelfing M.",
+  "away": "Day, Jp",
+  "league": "UTR, PTT Newport Beach Men 21",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   2.25,
+   1.5
+  ],
+  "ml_H1": [
+   2.15,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.7,
+   "0-2": 2.15,
+   "2-1": 5.3,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3209533235",
+  "home": "Cruz C.",
+  "away": "Brumm J.",
+  "league": "UTR, PTT Newport Beach Men 21",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.8
+  ],
+  "ml_H1": [
+   1.75,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.7,
+   "0-2": 2.8,
+   "2-1": 4.55,
+   "1-2": 4.65
+  }
+ },
+ {
+  "event_id": "3209534541",
+  "home": "Nguyen A.",
+  "away": "Stephens Z.",
+  "league": "UTR, PTT Newport Beach Men 21",
+  "start_time": "2026-09-08T18:00:00+00:00",
+  "ml_FT": [
+   1.13,
+   4.3
+  ],
+  "ml_H1": [
+   1.18,
+   3.7
+  ],
+  "cs": {
+   "2-0": 1.35,
+   "0-2": 8.8,
+   "2-1": 4.8,
+   "1-2": 10.0
+  }
+ },
+ {
+  "event_id": "3209560052",
+  "home": "Mayoral A.",
+  "away": "Kopilevich D.",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T18:10:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.45,
+   "2-1": 4.3,
+   "1-2": 5.1
+  }
+ },
+ {
+  "event_id": "3210792901",
+  "home": "Battesti A.",
+  "away": "Kasday S.",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T18:10:00+00:00",
+  "ml_FT": [
+   1.65,
+   1.9
+  ],
+  "ml_H1": [
+   1.7,
+   1.9
+  ],
+  "cs": {
+   "2-0": 2.45,
+   "0-2": 2.9,
+   "2-1": 4.75,
+   "1-2": 5.15
+  }
+ },
+ {
+  "event_id": "3210795513",
+  "home": "Roberts H.",
+  "away": "Maeland C.",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T18:10:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.65,
+   "0-2": 2.65,
+   "2-1": 4.9,
+   "1-2": 4.95
+  }
+ },
+ {
+  "event_id": "3209602219",
+  "home": "Thornton M.",
+  "away": "Aulia A.",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T19:05:00+00:00",
+  "ml_FT": [
+   1.6,
+   2.05
+  ],
+  "ml_H1": [
+   1.6,
+   2.0
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.2,
+   "2-1": 4.6,
+   "1-2": 5.4
+  }
+ },
+ {
+  "event_id": "3209289604",
+  "home": "Gilbert A.",
+  "away": "Salibayeva A.",
+  "league": "UTR, PTT Tallahassee Women 03",
+  "start_time": "2026-09-08T19:30:00+00:00",
+  "ml_FT": [
+   3.0,
+   1.27
+  ],
+  "ml_H1": [
+   2.7,
+   1.34
+  ],
+  "cs": {
+   "2-0": 5.25,
+   "0-2": 1.65,
+   "2-1": 7.3,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3209604898",
+  "home": "Mattioli F.",
+  "away": "Moore E.",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T19:40:00+00:00",
+  "ml_FT": [
+   1.08,
+   5.25
+  ],
+  "ml_H1": [
+   1.14,
+   4.1
+  ],
+  "cs": {
+   "2-0": 1.27,
+   "0-2": 11.5,
+   "2-1": 4.75,
+   "1-2": 12.8
+  }
+ },
+ {
+  "event_id": "3210793967",
+  "home": "Duran D.",
+  "away": "Abarca A.J.",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   1.4,
+   2.45
+  ],
+  "ml_H1": [
+   1.45,
+   2.3
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "0-2": 4.2,
+   "2-1": 4.2,
+   "1-2": 5.75
+  }
+ },
+ {
+  "event_id": "3209311050",
+  "home": "Duran B.",
+  "away": "Kalinin A.",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   2.75,
+   1.32
+  ],
+  "ml_H1": [
+   2.5,
+   1.4
+  ],
+  "cs": {
+   "2-0": 4.85,
+   "0-2": 1.8,
+   "2-1": 6.25,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3209311058",
+  "home": "Pade, Leo",
+  "away": "Benoit J.",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T20:00:00+00:00",
+  "ml_FT": [
+   4.1,
+   1.14
+  ],
+  "ml_H1": [
+   3.5,
+   1.2
+  ],
+  "cs": {
+   "2-0": 8.45,
+   "0-2": 1.4,
+   "2-1": 9.2,
+   "1-2": 4.5
+  }
+ },
+ {
+  "event_id": "3209311053",
+  "home": "Doskocil M.",
+  "away": "Bao, D",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T21:10:00+00:00",
+  "ml_FT": [
+   1.95,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.7
+  ],
+  "cs": {
+   "2-0": 3.05,
+   "0-2": 2.5,
+   "2-1": 4.85,
+   "1-2": 4.45
+  }
+ },
+ {
+  "event_id": "3209560278",
+  "home": "Garcia J.",
+  "away": "Onofrei, Matei Cristian",
+  "league": "UTR, PTT Knoxville Men 03",
+  "start_time": "2026-09-08T21:10:00+00:00",
+  "ml_FT": [
+   1.06,
+   5.55
+  ],
+  "ml_H1": [
+   1.11,
+   4.6
+  ],
+  "cs": {
+   "2-0": 1.23,
+   "0-2": 13.7,
+   "2-1": 5.05,
+   "1-2": 13.0
+  }
+ },
+ {
+  "event_id": "3209615770",
+  "home": "Di Genova Ch.",
+  "away": "Soulie A.",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T21:30:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.7
+  ],
+  "cs": {
+   "2-0": 2.9,
+   "0-2": 2.45,
+   "2-1": 5.15,
+   "1-2": 4.75
+  }
+ },
+ {
+  "event_id": "3209615771",
+  "home": "Kamigata L.",
+  "away": "Zhu j.",
+  "league": "UTR, PTT Knoxville Women 03",
+  "start_time": "2026-09-08T21:30:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.7
+  ],
+  "cs": {
+   "2-0": 2.9,
+   "0-2": 2.45,
+   "2-1": 5.15,
+   "1-2": 4.75
+  }
+ },
+ {
+  "event_id": "3210268218",
+  "home": "Alamy S.",
+  "away": "Beale J.",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-08T23:00:00+00:00",
+  "ml_FT": [
+   4.85,
+   1.09
+  ],
+  "ml_H1": [
+   4.0,
+   1.15
+  ],
+  "cs": {
+   "2-0": 10.7,
+   "0-2": 1.31,
+   "2-1": 10.9,
+   "1-2": 4.75
+  }
+ },
+ {
+  "event_id": "3210693456",
+  "home": "Staley J.",
+  "away": "Burton C.",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-08T23:00:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.75,
+   "0-2": 2.75,
+   "2-1": 4.6,
+   "1-2": 4.6
+  }
+ },
+ {
+  "event_id": "3210692403",
+  "home": "Bagaric D.",
+  "away": "Estephan J.",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-09T00:10:00+00:00",
+  "ml_FT": [
+   2.5,
+   1.4
+  ],
+  "ml_H1": [
+   2.35,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.3,
+   "0-2": 1.95,
+   "2-1": 5.8,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3210693060",
+  "home": "Boniel, Nathan",
+  "away": "Ito K.",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-09T00:10:00+00:00",
+  "ml_FT": [
+   2.45,
+   1.4
+  ],
+  "ml_H1": [
+   2.3,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.25,
+   "0-2": 1.95,
+   "2-1": 5.75,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3210268003",
+  "home": "Cham E.",
+  "away": "Bulte A.",
+  "league": "UTR, PTT Sydney Men 02",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.2
+  ],
+  "ml_H1": [
+   1.55,
+   2.1
+  ],
+  "cs": {
+   "2-0": 2.2,
+   "0-2": 3.6,
+   "2-1": 4.3,
+   "1-2": 5.25
+  }
+ },
+ {
+  "event_id": "3210736612",
+  "home": "Arnautovic L.",
+  "away": "Mickoska S.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.6
+  ],
+  "ml_H1": [
+   1.45,
+   2.4
+  ],
+  "cs": {
+   "2-0": 1.85,
+   "0-2": 4.3,
+   "2-1": 4.4,
+   "1-2": 6.4
+  }
+ },
+ {
+  "event_id": "3210419728",
+  "home": "Fakih, Kate",
+  "away": "Fairclough L.",
+  "league": "UTR, PTT Newport Beach Women 21",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.29,
+   2.9
+  ],
+  "ml_H1": [
+   1.35,
+   2.6
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "0-2": 5.05,
+   "2-1": 4.35,
+   "1-2": 7.1
+  }
+ },
+ {
+  "event_id": "3209543293",
+  "home": "Holmes M.A.",
+  "away": "Mar Tricia",
+  "league": "UTR, PTT Newport Beach Women 21",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.7
+  ],
+  "cs": {
+   "2-0": 2.9,
+   "0-2": 2.45,
+   "2-1": 5.15,
+   "1-2": 4.75
+  }
+ },
+ {
+  "event_id": "3210357450",
+  "home": "van Loben Sels E.",
+  "away": "Djakouris C.",
+  "league": "UTR, PTT Newport Beach Men 21",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   1.28,
+   2.95
+  ],
+  "ml_H1": [
+   1.35,
+   2.65
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "0-2": 5.35,
+   "2-1": 4.2,
+   "1-2": 6.65
+  }
+ },
+ {
+  "event_id": "3210357443",
+  "home": "Clark M.",
+  "away": "Castro Fabra M.",
+  "league": "UTR, PTT Newport Beach Men 21",
+  "start_time": "2026-09-09T01:30:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.25,
+   "0-2": 2.4,
+   "2-1": 4.95,
+   "1-2": 4.4
+  }
+ },
+ {
+  "event_id": "3208790263",
+  "home": "Back D.",
+  "away": "Morvayova V.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.2,
+   "2-1": 4.55,
+   "0-2": 3.5,
+   "1-2": 5.95
+  }
+ },
+ {
+  "event_id": "3208876029",
+  "home": "Saito S.",
+  "away": "Yao X.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.8
+  ],
+  "ml_H1": [
+   1.75,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.75,
+   "2-1": 4.75,
+   "0-2": 2.85,
+   "1-2": 4.95
+  }
+ },
+ {
+  "event_id": "3209557238",
+  "home": "Zhang J.",
+  "away": "Yang Y.Y.",
+  "league": "ITF Guiyang, Women | Singles",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   2.15,
+   1.5
+  ],
+  "ml_H1": [
+   2.05,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.5,
+   "2-1": 5.8,
+   "0-2": 2.25,
+   "1-2": 4.45
+  }
+ },
+ {
+  "event_id": "3209338472",
+  "home": "Zylberman, A",
+  "away": "Simes A.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   1.65,
+   1.95
+  ],
+  "ml_H1": [
+   1.7,
+   1.9
+  ],
+  "cs": {
+   "2-0": 2.4,
+   "0-2": 2.95,
+   "2-1": 4.75,
+   "1-2": 5.2
+  }
+ },
+ {
+  "event_id": "3209338556",
+  "home": "Arnautovic L.",
+  "away": "Mihulka B.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.4
+  ],
+  "ml_H1": [
+   1.5,
+   2.25
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "0-2": 3.85,
+   "2-1": 4.45,
+   "1-2": 6.0
+  }
+ },
+ {
+  "event_id": "3209338842",
+  "home": "Thompson B.",
+  "away": "Apisah V.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   3.3,
+   1.23
+  ],
+  "ml_H1": [
+   2.85,
+   1.3
+  ],
+  "cs": {
+   "2-0": 5.85,
+   "0-2": 1.6,
+   "2-1": 7.85,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3209338845",
+  "home": "Schwarz M.",
+  "away": "Dodaj C.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   3.7,
+   1.18
+  ],
+  "ml_H1": [
+   3.15,
+   1.25
+  ],
+  "cs": {
+   "2-0": 6.95,
+   "0-2": 1.5,
+   "2-1": 8.85,
+   "1-2": 4.4
+  }
+ },
+ {
+  "event_id": "3209338461",
+  "home": "Thompson B.",
+  "away": "Dodaj C.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   1.19,
+   3.55
+  ],
+  "ml_H1": [
+   1.26,
+   3.05
+  ],
+  "cs": {
+   "2-0": 1.5,
+   "0-2": 6.55,
+   "2-1": 4.4,
+   "1-2": 8.5
+  }
+ },
+ {
+  "event_id": "3209338431",
+  "home": "Khan L.",
+  "away": "Simes A.",
+  "league": "UTR, PTT Sydney Women 02",
+  "start_time": "2026-09-09T23:00:00+00:00",
+  "ml_FT": [
+   1.4,
+   2.5
+  ],
+  "ml_H1": [
+   1.45,
+   2.3
+  ],
+  "cs": {
+   "2-0": 1.9,
+   "0-2": 4.1,
+   "2-1": 4.4,
+   "1-2": 6.25
+  }
+ },
+ {
+  "event_id": "3207745621",
+  "home": "Ortenzi J.",
+  "away": "Stoiana M.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T23:00:00+00:00",
+  "ml_FT": [
+   7.1,
+   1.02
+  ],
+  "ml_H1": [
+   5.45,
+   1.07
+  ]
+ },
+ {
+  "event_id": "3208757362",
+  "home": "Trevisan M.",
+  "away": "Ruggeri J",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   1.3,
+   2.85
+  ],
+  "ml_H1": [
+   1.35,
+   2.55
+  ],
+  "cs": {
+   "2-0": 1.75,
+   "0-2": 5.0,
+   "2-1": 4.25,
+   "1-2": 6.85
+  }
+ },
+ {
+  "event_id": "3208954447",
+  "home": "Campana Lee G.",
+  "away": "Alcala Gurri M.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-08T17:20:00+00:00",
+  "ml_FT": [
+   3.15,
+   1.24
+  ],
+  "ml_H1": [
+   2.7,
+   1.34
+  ],
+  "cs": {
+   "2-0": 6.05,
+   "0-2": 1.7,
+   "2-1": 7.0,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3208943239",
+  "home": "Gaubas V.",
+  "away": "Lagutin P.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-08T17:40:00+00:00",
+  "ml_FT": [
+   1.35,
+   2.6
+  ],
+  "ml_H1": [
+   1.45,
+   2.35
+  ],
+  "cs": {
+   "2-0": 1.95,
+   "0-2": 4.65,
+   "2-1": 3.9,
+   "1-2": 5.85
+  }
+ },
+ {
+  "event_id": "3205799714",
+  "home": "Lajovic D.",
+  "away": "Landaluce M.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-08T18:15:00+00:00",
+  "ml_FT": [
+   2.0,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.35,
+   "0-2": 2.45,
+   "2-1": 4.7,
+   "1-2": 4.05
+  }
+ },
+ {
+  "event_id": "3207753291",
+  "home": "You X.",
+  "away": "Liu C.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   3.3,
+   1.23
+  ],
+  "ml_H1": [
+   2.85,
+   1.3
+  ],
+  "cs": {
+   "2-0": 5.95,
+   "0-2": 1.6,
+   "2-1": 7.7,
+   "1-2": 4.25
+  }
+ },
+ {
+  "event_id": "3210384189",
+  "home": "Quevedo K.",
+  "away": "Rogers A.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   1.13,
+   4.25
+  ],
+  "ml_H1": [
+   1.21,
+   3.45
+  ],
+  "cs": {
+   "2-0": 1.4,
+   "0-2": 8.5,
+   "2-1": 4.35,
+   "1-2": 9.85
+  }
+ },
+ {
+  "event_id": "3210382136",
+  "home": "Jeanjean L.",
+  "away": "Alves C.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   1.08,
+   5.2
+  ],
+  "ml_H1": [
+   1.15,
+   4.05
+  ],
+  "cs": {
+   "2-0": 1.29,
+   "0-2": 11.7,
+   "2-1": 4.55,
+   "1-2": 12.3
+  }
+ },
+ {
+  "event_id": "3205790312",
+  "home": "Napolitano S.",
+  "away": "Travaglia S.",
+  "league": "Challenger. Genoa, Men",
+  "start_time": "2026-09-08T18:30:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.5,
+   "0-2": 2.35,
+   "2-1": 4.9,
+   "1-2": 4.05
+  }
+ },
+ {
+  "event_id": "3207748057",
+  "home": "Brace C.",
+  "away": "Soribes Tormo S.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T19:40:00+00:00",
+  "ml_FT": [
+   2.7,
+   1.33
+  ],
+  "ml_H1": [
+   2.45,
+   1.4
+  ],
+  "cs": {
+   "2-0": 4.65,
+   "0-2": 1.8,
+   "2-1": 6.6,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3210388415",
+  "home": "Koike E.",
+  "away": "Podoroska N.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T19:40:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.35
+  ],
+  "ml_H1": [
+   2.4,
+   1.4
+  ],
+  "cs": {
+   "2-0": 4.5,
+   "0-2": 1.85,
+   "2-1": 6.15,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3207753290",
+  "home": "Salkova D.",
+  "away": "Riera J.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-08T20:50:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.15,
+   "0-2": 3.35,
+   "2-1": 4.55,
+   "1-2": 5.5
+  }
+ },
+ {
+  "event_id": "3207963125",
+  "home": "Pegula J.",
+  "away": "Navarro E.",
+  "league": "US Open, Women",
+  "start_time": "2026-09-08T23:00:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.45
+  ],
+  "ml_H1": [
+   1.3,
+   2.85
+  ],
+  "cs": {
+   "2-0": 1.65,
+   "0-2": 6.65,
+   "2-1": 3.75,
+   "1-2": 7.75
+  }
+ },
+ {
+  "event_id": "3210547358",
+  "home": "Jones M.",
+  "away": "Moriya H.",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   1.6,
+   2.05
+  ],
+  "ml_H1": [
+   1.65,
+   2.0
+  ],
+  "cs": {
+   "2-0": 2.4,
+   "0-2": 3.45,
+   "2-1": 4.05,
+   "1-2": 4.8
+  }
+ },
+ {
+  "event_id": "3210687890",
+  "home": "Samreji K.",
+  "away": "Shimizu Y.",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-09T03:00:00+00:00",
+  "ml_FT": [
+   2.45,
+   1.4
+  ],
+  "ml_H1": [
+   2.25,
+   1.5
+  ],
+  "cs": {
+   "2-0": 4.35,
+   "0-2": 2.05,
+   "2-1": 5.55,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3210547522",
+  "home": "Ellis B.",
+  "away": "Max Purcell",
+  "league": "Challenger. Phan Thiet 3, Vietnam Men Singles",
+  "start_time": "2026-09-09T04:10:00+00:00",
+  "ml_FT": [
+   5.75,
+   1.06
+  ],
+  "ml_H1": [
+   4.15,
+   1.14
+  ],
+  "cs": {
+   "2-0": 16.3,
+   "0-2": 1.28,
+   "2-1": 13.0,
+   "1-2": 4.15
+  }
+ },
+ {
+  "event_id": "3210800985",
+  "home": "Kotov P.",
+  "away": "Delaney J.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   1.23,
+   3.25
+  ],
+  "ml_H1": [
+   1.33,
+   2.7
+  ],
+  "cs": {
+   "2-0": 1.7,
+   "0-2": 6.55,
+   "2-1": 3.6,
+   "1-2": 6.75
+  }
+ },
+ {
+  "event_id": "3210881716",
+  "home": "Noguchi R.",
+  "away": "Jasika O.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.4
+  ],
+  "ml_H1": [
+   1.5,
+   2.25
+  ],
+  "cs": {
+   "2-0": 2.05,
+   "0-2": 4.2,
+   "2-1": 4.0,
+   "1-2": 5.6
+  }
+ },
+ {
+  "event_id": "3209022197",
+  "home": "Langmo C.",
+  "away": "Kasnikowski M.",
+  "league": "Challenger. Istanbul 3, Men Singles",
+  "start_time": "2026-09-09T07:00:00+00:00",
+  "ml_FT": [
+   3.35,
+   1.22
+  ],
+  "ml_H1": [
+   2.75,
+   1.32
+  ],
+  "cs": {
+   "2-0": 6.75,
+   "0-2": 1.7,
+   "2-1": 7.0,
+   "1-2": 3.65
+  }
+ },
+ {
+  "event_id": "3208749157",
+  "home": "Xiao L.",
+  "away": "Galarneau A.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-09T07:30:00+00:00",
+  "ml_FT": [
+   6.55,
+   1.03
+  ],
+  "ml_H1": [
+   4.85,
+   1.09
+  ],
+  "cs": {
+   "2-0": 21.9,
+   "0-2": 1.19,
+   "2-1": 16.8,
+   "1-2": 4.7
+  }
+ },
+ {
+  "event_id": "3210800990",
+  "home": "Kolar Z.",
+  "away": "Krumich M.",
+  "league": "Challenger.Tulln, Men Singles",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   2.2,
+   1.5
+  ],
+  "ml_H1": [
+   2.05,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.7,
+   "0-2": 2.25,
+   "2-1": 5.1,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3208986584",
+  "home": "Gjorcheska L.",
+  "away": "Zantedeschi A.",
+  "league": "WTA. Antalya 4, Women Singles",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   1.95,
+   1.65
+  ],
+  "ml_H1": [
+   1.9,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.05,
+   "0-2": 2.4,
+   "2-1": 5.05,
+   "1-2": 4.55
+  }
+ },
+ {
+  "event_id": "3210881861",
+  "home": "Blanchet U.",
+  "away": "Rincon D.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.8
+  ],
+  "ml_H1": [
+   1.75,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.85,
+   "0-2": 2.95,
+   "2-1": 4.25,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3210799973",
+  "home": "Erhard M.",
+  "away": "Glinka D.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   2.1,
+   1.55
+  ],
+  "ml_H1": [
+   2.0,
+   1.6
+  ],
+  "cs": {
+   "2-0": 3.6,
+   "0-2": 2.45,
+   "2-1": 4.7,
+   "1-2": 3.9
+  }
+ },
+ {
+  "event_id": "3208749190",
+  "home": "Sharipov M.",
+  "away": "Daniel T.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-09T08:40:00+00:00",
+  "ml_FT": [
+   2.55,
+   1.4
+  ],
+  "ml_H1": [
+   2.3,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.55,
+   "0-2": 2.0,
+   "2-1": 5.6,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3210769155",
+  "home": "Kulambayeva Zhibek",
+  "away": "Yaneva E.",
+  "league": "WTA. Antalya 4, Women Singles",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.9,
+   1.29
+  ],
+  "ml_H1": [
+   2.6,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.0,
+   "0-2": 1.7,
+   "2-1": 7.0,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3209435375",
+  "home": "Ajdukovic D.",
+  "away": "Sakellaridis S.",
+  "league": "Challenger. Genoa, Men",
+  "start_time": "2026-09-09T09:00:00+00:00",
+  "ml_FT": [
+   2.85,
+   1.3
+  ],
+  "ml_H1": [
+   2.45,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.4,
+   "0-2": 1.85,
+   "2-1": 6.05,
+   "1-2": 3.7
+  }
+ },
+ {
+  "event_id": "3209056614",
+  "home": "Moeller M.",
+  "away": "Soto M.",
+  "league": "Challenger.Tulln, Men Singles",
+  "start_time": "2026-09-09T09:10:00+00:00",
+  "ml_FT": [
+   1.34,
+   2.65
+  ],
+  "ml_H1": [
+   1.45,
+   2.35
+  ],
+  "cs": {
+   "2-0": 1.9,
+   "0-2": 4.8,
+   "2-1": 3.85,
+   "1-2": 5.95
+  }
+ },
+ {
+  "event_id": "3210881674",
+  "home": "Hipfl N.",
+  "away": "Barrena A.",
+  "league": "Challenger.Tulln, Men Singles",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   3.1,
+   1.25
+  ],
+  "ml_H1": [
+   2.65,
+   1.35
+  ],
+  "cs": {
+   "2-0": 5.9,
+   "0-2": 1.75,
+   "2-1": 6.7,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3210881773",
+  "home": "Masur D.",
+  "away": "Rodionov J.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-09T09:40:00+00:00",
+  "ml_FT": [
+   3.9,
+   1.16
+  ],
+  "ml_H1": [
+   3.05,
+   1.26
+  ],
+  "cs": {
+   "2-0": 8.3,
+   "0-2": 1.55,
+   "2-1": 8.05,
+   "1-2": 3.75
+  }
+ },
+ {
+  "event_id": "3210888951",
+  "home": "Ibragimova A.",
+  "away": "Romero Gormaz L.",
+  "league": "WTA. Antalya 4, Women Singles",
+  "start_time": "2026-09-09T10:10:00+00:00",
+  "ml_FT": [
+   2.05,
+   1.6
+  ],
+  "ml_H1": [
+   1.95,
+   1.65
+  ],
+  "cs": {
+   "2-0": 3.2,
+   "0-2": 2.35,
+   "2-1": 5.15,
+   "1-2": 4.45
+  }
+ },
+ {
+  "event_id": "3210804892",
+  "home": "Topo M.",
+  "away": "Sachko V.",
+  "league": "Challenger.Tulln, Men Singles",
+  "start_time": "2026-09-09T10:40:00+00:00",
+  "ml_FT": [
+   2.2,
+   1.5
+  ],
+  "ml_H1": [
+   2.1,
+   1.55
+  ],
+  "cs": {
+   "2-0": 3.85,
+   "0-2": 2.25,
+   "2-1": 5.0,
+   "1-2": 3.9
+  }
+ },
+ {
+  "event_id": "3211181881",
+  "home": "Burillo Escorihuela I.",
+  "away": "Bulgaru M.B.",
+  "league": "WTA. Antalya 4, Women Singles",
+  "start_time": "2026-09-09T10:50:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.1
+  ],
+  "ml_H1": [
+   1.6,
+   2.0
+  ],
+  "cs": {
+   "2-0": 2.25,
+   "0-2": 3.25,
+   "2-1": 4.5,
+   "1-2": 5.35
+  }
+ },
+ {
+  "event_id": "3209050822",
+  "home": "Droguet T.",
+  "away": "Brouwer G.",
+  "league": "Challenger. Cassis, Men Singles",
+  "start_time": "2026-09-09T10:50:00+00:00",
+  "ml_FT": [
+   1.04,
+   6.15
+  ],
+  "ml_H1": [
+   1.12,
+   4.45
+  ],
+  "cs": {
+   "2-0": 1.24,
+   "0-2": 18.0,
+   "2-1": 4.45,
+   "1-2": 14.3
+  }
+ },
+ {
+  "event_id": "3211160928",
+  "home": "Martinez Portero P.",
+  "away": "Zeitune M.",
+  "league": "Challenger. Genoa, Men",
+  "start_time": "2026-09-09T11:30:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.4
+  ],
+  "ml_H1": [
+   1.31,
+   2.8
+  ],
+  "cs": {
+   "2-0": 1.65,
+   "0-2": 6.8,
+   "2-1": 3.8,
+   "1-2": 7.35
+  }
+ },
+ {
+  "event_id": "3210881081",
+  "home": "Seyboth Wild Th.",
+  "away": "Giunta, Massimo",
+  "league": "Challenger. Genoa, Men",
+  "start_time": "2026-09-09T11:30:00+00:00",
+  "ml_FT": [
+   1.24,
+   3.2
+  ],
+  "ml_H1": [
+   1.34,
+   2.65
+  ],
+  "cs": {
+   "2-0": 1.75,
+   "0-2": 6.3,
+   "2-1": 3.65,
+   "1-2": 6.7
+  }
+ },
+ {
+  "event_id": "3210904550",
+  "home": "Lazaro Garcia A.",
+  "away": "Sobolieva A.",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-09T12:00:00+00:00",
+  "ml_FT": [
+   1.75,
+   1.85
+  ],
+  "ml_H1": [
+   1.75,
+   1.85
+  ],
+  "cs": {
+   "2-0": 2.6,
+   "0-2": 2.8,
+   "2-1": 4.65,
+   "1-2": 4.85
+  }
+ },
+ {
+  "event_id": "3211039795",
+  "home": "Brockmann T.J.",
+  "away": "Burel C.",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-09T12:00:00+00:00",
+  "ml_FT": [
+   4.8,
+   1.1
+  ],
+  "ml_H1": [
+   3.75,
+   1.17
+  ],
+  "cs": {
+   "2-0": 10.3,
+   "0-2": 1.34,
+   "2-1": 11.0,
+   "1-2": 4.35
+  }
+ },
+ {
+  "event_id": "3211140123",
+  "home": "Brancaccio N.",
+  "away": "Galfi D",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-09T13:10:00+00:00",
+  "ml_FT": [
+   1.8,
+   1.8
+  ],
+  "ml_H1": [
+   1.8,
+   1.8
+  ],
+  "cs": {
+   "2-0": 2.75,
+   "0-2": 2.75,
+   "2-1": 4.65,
+   "1-2": 4.65
+  }
+ },
+ {
+  "event_id": "3210954756",
+  "home": "Hibino N.",
+  "away": "Tikhonova A.",
+  "league": "WTA . Barranquilla, Women",
+  "start_time": "2026-09-09T15:00:00+00:00",
+  "ml_FT": [
+   1.21,
+   3.4
+  ],
+  "ml_H1": [
+   1.29,
+   2.9
+  ],
+  "cs": {
+   "2-0": 1.55,
+   "0-2": 6.3,
+   "2-1": 4.25,
+   "1-2": 7.95
+  }
+ },
+ {
+  "event_id": "3209624407",
+  "home": "Andreeva M.",
+  "away": "Gauff C.",
+  "league": "US Open, Women",
+  "start_time": "2026-09-09T15:30:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.45
+  ],
+  "ml_H1": [
+   2.2,
+   1.5
+  ],
+  "cs": {
+   "2-0": 4.0,
+   "0-2": 2.1,
+   "2-1": 5.55,
+   "1-2": 4.0
+  }
+ },
+ {
+  "event_id": "3209384014",
+  "home": "Zheng Q.",
+  "away": "Rybakina E.",
+  "league": "US Open, Women",
+  "start_time": "2026-09-09T15:30:00+00:00",
+  "ml_FT": [
+   2.95,
+   1.28
+  ],
+  "ml_H1": [
+   2.45,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.35,
+   "0-2": 1.85,
+   "2-1": 6.5,
+   "1-2": 3.6
+  }
+ },
+ {
+  "event_id": "3209423127",
+  "home": "Diaz Acosta F.",
+  "away": "Moro Canas A.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-09T16:00:00+00:00",
+  "ml_FT": [
+   1.29,
+   2.9
+  ],
+  "ml_H1": [
+   1.4,
+   2.5
+  ],
+  "cs": {
+   "2-0": 1.8,
+   "0-2": 5.4,
+   "2-1": 3.8,
+   "1-2": 6.35
+  }
+ },
+ {
+  "event_id": "3210992842",
+  "home": "Granwehr A.",
+  "away": "Noha Akugue N",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-09T16:30:00+00:00",
+  "ml_FT": [
+   2.5,
+   1.4
+  ],
+  "ml_H1": [
+   2.3,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.15,
+   "0-2": 1.9,
+   "2-1": 6.05,
+   "1-2": 4.3
+  }
+ },
+ {
+  "event_id": "3211076042",
+  "home": "Jones F.",
+  "away": "Dencheva R.",
+  "league": "WTA. Antalya 4, Women Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.35
+  ],
+  "ml_H1": [
+   1.5,
+   2.2
+  ],
+  "cs": {
+   "2-0": 2.0,
+   "0-2": 3.9,
+   "2-1": 4.35,
+   "1-2": 5.9
+  }
+ },
+ {
+  "event_id": "3210991874",
+  "home": "Carle M.",
+  "away": "Vedder E.",
+  "league": "WTA. Antalya 4, Women Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.2,
+   "0-2": 3.4,
+   "2-1": 4.45,
+   "1-2": 5.45
+  }
+ },
+ {
+  "event_id": "3210881761",
+  "home": "Wu T.-L.",
+  "away": "Castelnuovo L.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   1.28,
+   2.95
+  ],
+  "ml_H1": [
+   1.4,
+   2.5
+  ],
+  "cs": {
+   "2-0": 1.85,
+   "0-2": 5.65,
+   "2-1": 3.65,
+   "1-2": 6.2
+  }
+ },
+ {
+  "event_id": "3210881702",
+  "home": "Cui J.",
+  "away": "Zhou Y.",
+  "league": "Challenger. Shanghai, Men Singles",
+  "start_time": "2026-09-10T07:00:00+00:00",
+  "ml_FT": [
+   2.6,
+   1.35
+  ],
+  "ml_H1": [
+   2.35,
+   1.45
+  ],
+  "cs": {
+   "2-0": 4.75,
+   "0-2": 1.95,
+   "2-1": 5.75,
+   "1-2": 3.8
+  }
+ },
+ {
+  "event_id": "3210963619",
+  "home": "La Serna J.M.",
+  "away": "Neumayer L.",
+  "league": "Challenger.Tulln, Men Singles",
+  "start_time": "2026-09-10T08:00:00+00:00",
+  "ml_FT": [
+   2.75,
+   1.32
+  ],
+  "ml_H1": [
+   2.45,
+   1.4
+  ],
+  "cs": {
+   "2-0": 5.0,
+   "0-2": 1.85,
+   "2-1": 6.15,
+   "1-2": 3.85
+  }
+ },
+ {
+  "event_id": "3211110594",
+  "home": "Misolic F.",
+  "away": "Brunold M.",
+  "league": "Challenger.Tulln, Men Singles",
+  "start_time": "2026-09-10T08:00:00+00:00",
+  "ml_FT": [
+   1.45,
+   2.25
+  ],
+  "ml_H1": [
+   1.55,
+   2.15
+  ],
+  "cs": {
+   "2-0": 2.15,
+   "0-2": 3.9,
+   "2-1": 4.0,
+   "1-2": 5.25
+  }
+ },
+ {
+  "event_id": "3211178361",
+  "home": "Olivieri G.A.",
+  "away": "Pereira T.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-10T09:00:00+00:00",
+  "ml_FT": [
+   1.7,
+   1.85
+  ],
+  "ml_H1": [
+   1.75,
+   1.85
+  ],
+  "cs": {
+   "2-0": 2.7,
+   "0-2": 3.0,
+   "2-1": 4.3,
+   "1-2": 4.5
+  }
+ },
+ {
+  "event_id": "3211178363",
+  "home": "Rocha H.",
+  "away": "Rodriguez Taverna S.",
+  "league": "Challenger. Seville, Men",
+  "start_time": "2026-09-10T09:00:00+00:00",
+  "ml_FT": [
+   1.07,
+   5.3
+  ],
+  "ml_H1": [
+   1.16,
+   3.85
+  ],
+  "cs": {
+   "2-0": 1.33,
+   "0-2": 13.4,
+   "2-1": 4.1,
+   "1-2": 11.5
+  }
+ },
+ {
+  "event_id": "3211232689",
+  "home": "Ferro F.",
+  "away": "Palicova B.",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-10T09:30:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.15
+  ],
+  "ml_H1": [
+   1.55,
+   2.05
+  ],
+  "cs": {
+   "2-0": 2.15,
+   "0-2": 3.4,
+   "2-1": 4.55,
+   "1-2": 5.55
+  }
+ },
+ {
+  "event_id": "3210992821",
+  "home": "Ciric-Bagaric L.",
+  "away": "Havlickova L.",
+  "league": "WTA. Montreux, Women",
+  "start_time": "2026-09-10T09:30:00+00:00",
+  "ml_FT": [
+   2.35,
+   1.45
+  ],
+  "ml_H1": [
+   2.25,
+   1.5
+  ],
+  "cs": {
+   "2-0": 4.0,
+   "0-2": 2.0,
+   "2-1": 5.75,
+   "1-2": 4.2
+  }
+ },
+ {
+  "event_id": "3207708179",
+  "home": "Tiafoe F.",
+  "away": "Michelsen A.",
+  "league": "US Open, Men",
+  "start_time": "2026-09-08T17:00:00+00:00",
+  "ml_FT": [
+   1.55,
+   2.15
+  ],
+  "ml_H1": [
+   1.6,
+   2.0
+  ],
+  "cs": {
+   "3-0": 3.85,
+   "0-3": 6.95,
+   "3-1": 4.2,
+   "1-3": 5.75,
+   "3-2": 5.45,
+   "2-3": 6.2
+  }
+ },
+ {
+  "event_id": "3207857310",
+  "home": "Shelton B.",
+  "away": "Alcaraz C.",
+  "league": "US Open, Men",
+  "start_time": "2026-09-09T00:10:00+00:00",
+  "ml_FT": [
+   3.45,
+   1.21
+  ],
+  "ml_H1": [
+   2.55,
+   1.35
+  ],
+  "cs": {
+   "3-0": 16.1,
+   "0-3": 2.45,
+   "3-1": 9.95,
+   "1-3": 3.4,
+   "3-2": 8.85,
+   "2-3": 5.45
+  }
+ },
+ {
+  "event_id": "3210332307",
+  "home": "Zverev A.",
+  "away": "Van De Zandschulp B.",
+  "league": "US Open, Men",
+  "start_time": "2026-09-09T15:30:00+00:00",
+  "ml_FT": [
+   1.08,
+   5.2
+  ],
+  "ml_H1": [
+   1.21,
+   3.45
+  ],
+  "cs": {
+   "3-0": 1.75,
+   "0-3": 36.9,
+   "3-1": 3.3,
+   "1-3": 19.6,
+   "3-2": 6.9,
+   "2-3": 15.1
+  }
+ },
+ {
+  "event_id": "3209742793",
+  "home": "Khachanov K.",
+  "away": "Blockx A.",
+  "league": "US Open, Men",
+  "start_time": "2026-09-09T15:30:00+00:00",
+  "ml_FT": [
+   1.5,
+   2.2
+  ],
+  "ml_H1": [
+   1.6,
+   2.05
+  ],
+  "cs": {
+   "3-0": 3.7,
+   "0-3": 7.4,
+   "3-1": 4.1,
+   "1-3": 5.95,
+   "3-2": 5.45,
+   "2-3": 6.35
+  }
+ },
+ {
+  "event_id": "3208035375",
+  "home": "Dean T./Tripathi A.",
+  "away": "Jong S./Muller R.",
+  "league": "ITF Gijon, Men. Doubles",
+  "start_time": "2026-09-08T17:24:00+00:00",
+  "ml_FT": [
+   1.65,
+   1.95
+  ]
+ },
+ {
+  "event_id": "3211157123",
+  "home": "Polakovicova A.",
+  "away": "Husar S.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   1.9,
+   1.65
+  ]
+ },
+ {
+  "event_id": "3211157128",
+  "home": "Kowalczyk N.",
+  "away": "Nemcsek G.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   6.3,
+   1.03
+  ]
+ },
+ {
+  "event_id": "3211200040",
+  "home": "Lorrimer k.",
+  "away": "Iliev S.",
+  "league": "ITF Dijon, Women",
+  "start_time": "2026-09-09T08:00:00+00:00",
+  "ml_FT": [
+   4.7,
+   1.09
+  ]
+ },
+ {
+  "event_id": "3211160908",
+  "home": "Valletta E.",
+  "away": "Vismane D.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   11.2,
+   1.01
+  ]
+ },
+ {
+  "event_id": "3211176150",
+  "home": "Pikkaart, Charlotte",
+  "away": "Giambelli C.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T08:30:00+00:00",
+  "ml_FT": [
+   4.25,
+   1.12
+  ]
+ },
+ {
+  "event_id": "3211178602",
+  "home": "Alvisi E.",
+  "away": "Novak K.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T09:30:00+00:00",
+  "ml_FT": [
+   1.6,
+   2.0
+  ]
+ },
+ {
+  "event_id": "3211190776",
+  "home": "Chiesa E.",
+  "away": "Janiszewska A.",
+  "league": "ITF. Radom, Women",
+  "start_time": "2026-09-09T10:00:00+00:00",
+  "ml_FT": [
+   1.01,
+   9.3
+  ]
+ },
+ {
+  "event_id": "3211161777",
+  "home": "Gentili A.",
+  "away": "Trevisan F.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T10:30:00+00:00",
+  "ml_FT": [
+   3.4,
+   1.2
+  ]
+ },
+ {
+  "event_id": "3211162272",
+  "home": "Sveva Sveva Fumagalli",
+  "away": "De Angelis G.",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T10:45:00+00:00",
+  "ml_FT": [
+   1.23,
+   3.15
+  ]
+ },
+ {
+  "event_id": "3211165045",
+  "home": "Petrillo G.",
+  "away": "Sevcikova L",
+  "league": "ITF Viserba, Women",
+  "start_time": "2026-09-09T12:45:00+00:00",
+  "ml_FT": [
+   7.1,
+   1.01
+  ]
+ }
+]
