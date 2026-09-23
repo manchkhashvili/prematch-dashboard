@@ -1318,3 +1318,92 @@ Replayed 11,639 CB events matched to Pinnacle, first crossing of ≥ 3% edge,
 - Alert sounds: both anomaly chimes were pure plucks (instant attack, decay
   across the whole slot) and the consistency bend ended at 294 Hz. Now hold
   then release; bend moved to 660→440 Hz with an octave partial.
+
+
+---
+
+## 2026-09-23 — `pickem_dominance` was dead: the bound was 1.0, the identity is `1 − P(draw)`
+
+Owner, on a `Pinheiros — Cascavel` row: *"scanner should detect something like
+on the screenshot which it didnt, or did on very low level when there was like
+very good arb/ev bet possible."*
+
+Right on both counts, and it is the same defect twice.
+
+### The check enforced a much weaker bound than the one it documents
+
+The relation is exact on fair prices:
+
+```
+AH0(side) / X12(side)  ==  1 − P(draw)
+```
+
+which is about **0.75** on a normal board. The code triggered on
+`ratio >= 1.0` and scored `(ratio − 1) × 100`. So a voider at 0.95 — already
+**25% longer** than the 1X2 puts it — was silent, and one that did cross 1.0
+was scored from the wrong origin.
+
+Measured on `data/ticks.db`, 4 608 CrystalBet soccer sides whose 1X2 and 0.0
+rung came from the **same fetch** (9 615 events dropped on >120 s skew):
+
+| | p1 | p50 | p99 | max |
+|---|---|---|---|---|
+| `ratio` | 0.651 | 0.736 | 0.850 | **0.900** |
+| `ratio / (1 − P(draw))` | 0.851 | 1.006 | 1.048 | 1.153 |
+
+**The ratio never reached 1.0. The check fired zero times.** Meanwhile 28
+sides sat 5%+ above their own identity and none was visible.
+
+### The identity does not hold on raw prices, and the error runs with price
+
+A 2-way voider and a 3-way 1X2 carry different margins, so the residual is
+not 1.000 — and it is not constant either:
+
+| voider price | n | median residual |
+|---|---|---|
+| 1.0–1.2 | 411 | **1.038** |
+| 1.2–1.5 | 1044 | 1.027 |
+| 1.5–2.0 | 1236 | 1.012 |
+| 2.0–3.0 | 1162 | 0.989 |
+| 3.0–5.0 | 701 | 0.940 |
+| 5.0+ | 54 | **0.826** |
+
+Monotone across the whole range — the book's margin is worst on longshots. A
+flat bound cannot serve both ends: at 1.05 the short-favourite band
+contributes 15 rows of pure noise, while a 6.30 voider has to be 27% out
+before anyone notices. So the score is taken against `PICKEM_DOM_CURVE`, and
+the banded residual is tight enough to threshold on — p50 0.996, p90 1.009,
+p99 1.021.
+
+### Result
+
+`PICKEM_DOM_Z = 1.08`, roughly four times the p99 excess:
+
+| | fires on 4 608 sides |
+|---|---|
+| before (`ratio >= 1.0`) | **0** |
+| after (banded) | **14** (0.30%), all mid-to-long prices |
+
+and the screenshot row goes from **13.3 → 46.7**, which is what
+*"did on very low level"* meant. The hard case survives inside the new one —
+a ratio at or above 1.0 scores far above the band wherever it lands — and the
+detail text still says which of the two it is, because *"the better bet cannot
+be the longer price"* needs no calibration and *"short of its band"* does.
+
+The top of what was invisible:
+
+```
+sev 29.0   6.30 vs 7.00   Deportivo Espanol Res — Centro Espanol Res
+sev 26.4   6.00 vs 6.80   Atletico Vega Real FC — Jarabacoa
+sev 23.2   5.15 vs 6.30   Singida Black Stars — Polisi Tanzania FC
+sev 20.8   3.55 vs 4.00   WFC Osijek W — Donat Zadar W
+sev 20.5   4.75 vs 5.55   Thitsar Arman U20 — Hantharwady United U20
+```
+
+### The note that got it wrong
+
+The original calibration measured the residual at a median of +0.003 and
+concluded *"the bound needs no slack: it is exact."* That is an argument for
+measuring **against** `1 − P(draw)`, not for keeping a bound at 1.0 that
+nothing ever crosses. A tight residual is what makes a check sensitive; it was
+read as a reason not to build one.
