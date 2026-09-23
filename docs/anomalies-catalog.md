@@ -832,6 +832,50 @@ Family E (soccer, in the `SOFT_SCAN` sweep): `SOCCER_FAV_MAX` (game gate, defaul
 
 ## Lider combo bounds — `combo_cover` / `combo_dominance`
 
+### The price ceiling — `CEILING_ODDS` (2026-09-23)
+
+**Lider's 101.0 is a refusal to quote, not an offer**, and the board says so
+without ambiguity. Over 25 743 priced outcomes on 40 live matches:
+
+| price | count | share |
+|---|---|---|
+| **100.0** | 854 | **3.32 %** |
+| **101.0** | 617 | **2.40 %** |
+| 35.0 | 379 | 1.47 % |
+| 50.0 | 367 | 1.43 % |
+
+Above 50 there are only **seven distinct values** on the whole board
+(50/60/70/80/90/100/101), and **101.0 is the maximum price anywhere**. A
+distribution of beliefs does not have its mode at its own ceiling.
+
+**Why it is load-bearing rather than cosmetic.** A leg at 101 adds
+`1/101 = 0.0099` to a cover's outlay — almost nothing — while being the leg
+that **completes** it. So the ceiling buys the arb its last corner for free,
+and the position only exists if the book will actually take that bet at size.
+
+Found from the owner's board, Barcelona v Paris FC (Champions League Women):
+three of the four `combo_cover` flags on that match were completed by a
+`Double chance / Total — Over/X2 @ 101` leg. Board-wide at a 48 h horizon,
+**2 of 3** covers leaned on one.
+
+Dropping `odds >= CEILING_ODDS` at `_dedup` — the single choke point both bet
+lists exit through, so the cover DP, the containment test and the duplicate
+scan are all covered by one filter — changes the board like this:
+
+```
+without   combo_cover 3   leaning on a >=100 leg: 2   severities [9.5, 7.1, 5.4]
+with      combo_cover 3   leaning on a >=100 leg: 0   severities [8.0, 7.1, 4.5]
+```
+
+**Nothing is lost** — the same three covers survive, rebuilt from real legs at
+their true value. The two inflated ones fall to what they are actually worth.
+
+**Third time for this shape in this project**, which is why it now has a named
+constant: CrystalBet's 100.0 on 88 552 positions (the old "grid
+opportunities"), the pinned longshot rungs in the ice-hockey pass, and now
+this. The tell is always the same — a price that is also the mode.
+
+
 *Built 2026-08-19. Engine: `src/lider_combos.py`. Scan toggle: Config → Scans →
 `lider_combo` (default OFF — it pays for its own detail fetch).*
 
@@ -1031,6 +1075,90 @@ corners 0.0 rung. Cards: 3. That is the ceiling on this whole direction, and
 no amount of extra classifiers raises it.
 
 ---
+
+## 2026-09-21 — the provider split: LSport, and the New inconsistencies tab
+
+The owner's tip, from bet tickets: CrystalBet runs two odds feeds, one of them
+**LSport**, and the mistakes live there — every anomaly/consistency bet placed
+came from an LSport match, and sports without LSport (table tennis) are all
+noise. The feed is readable off the list view (`data-game-code`, LSport at
+~20 M vs the other feed at 63–75 M, zero overlap across 400+ expanded games),
+which explains two things this file already recorded without the label: the
+tennis "two naming schemes" (B8) and flagged soccer matches carrying a
+"median 34 raw markets vs 114" in "reserves / U22 / cups / ITF". Same night:
+LSport is 9 % of the soccer board and **13 of 19** soccer flags, 8 % of
+basketball and 2 of 3, 46 % of tennis and 2 of 2.
+
+Every check in this file now also runs on `/new_inconsistencies.html`, over
+LSport games only, from a separate CB cycle (soccer: 70 games in 12.8 s).
+`docs/lsport.md` has the measurement, the cycle and the knobs.
+
+### Measured and NOT built — the uncovered sports (2026-09-21)
+
+Before the provider split was known: 16 sports snapshotted (list + detail),
+the same model-free identities run generically (ladders, DNB vs 0.0, voider
+vs 1X2, DC vs 1X2, AH ±0.5 twins, HT/FT vs legs, set-sport correct-score /
+handicap / exact-sets covers, baseball's extra-innings box), plus an exact
+min-cost cover DP over every priced set per game. **Zero locks** anywhere;
+cheapest full covers 1.004 (AFL `X @71.5 + DC 12 @1.01`) — CB's 1.01 floor
+caps a pinned leg's complement at 0.0099, so a lock needs odds > 101 there.
+
+What did show up, all on the OTHER feed (0 % LSport in every one of these
+sports), and none bettable without a reference: baseball prices the tie
+twice (`Will there be an extra inning: Yes @~6` vs `1X2 X @~9–10.5`, 18/18
+games, 50–63 % apart, the short side wrong); rugby's HT/FT grid is a template
+(`X/1` at 13.1 on four different games, shorter than the H1 draw at 14–16.6);
+rugby/AFL double-chance templates overprice the dog side against their own
+1X2 legs by 20–44 %; AFL Carlton v Richmond W 2-way `Winner '2' @5.60` vs
+3-way `'2' @4.60`. And the 1.01-floor artifact: when a favourite pins at
+1.01 the other side lands at a fixed ~8.0 regardless of truth (`1/1.01 +
+1/8.05 = 1.114`) — every volleyball `2(-2.5)` at 8.0 against a `0:3` at
+23–33. Always the short side; never generous. Table tennis: 129 games, all
+priced from one distribution to within vig.
+
+Where LSport does have games and no detector yet: futsal (100 %, soccer-
+shaped), handball (Brazil women / Luxembourg — 1X2, DNB, AH with a 0.0 rung,
+H1, HT/FT: B10/B11/B15/htft verbatim). Volleyball (75 %) is built — see
+below.
+
+### B17. Volleyball — `vb_set_match`, `vb_correct_score`, `vb_sets_*` · LSport-only sport
+
+The tennis set checks in best-of-5 plus the exact identities across the sets
+markets, on the first sport that runs only in the New inconsistencies cycle.
+Measured before building on 15 LSport games (`docs/volleyball.md`): the
+1st-set winner is an IID inversion of the match price (median 0.0pp, max
+1.3pp); the correct score is a correlated model of it (latent-strength fit
+`VB_CS_SIGMA2 = 0.032`, RMS 1.14pp vs 4.07pp IID, every leg 9–21 % under
+fair); the only independent seam is the sets handicap against the
+correct-score cell it equals. `vb_sets_duplicate` (≥ 8 % apart, row carries
+the model's view of the long side), `vb_sets_dominance` (subset shorter than
+its superset) and `vb_sets_cover` (locked) are model-free over the six
+outcomes, half lines only, 1.01-pinned rungs skipped — and, since
+2026-09-22, gated on the leg clearing the model fair by 5 % with the edge as
+severity: the first cut's three duplicate rows (8–22 % gaps) sat on top of the
+tab with every long side 5–15 % under fair. A row is a bet. Model rows only
+inside the fit's range (`VB_CS_MAX_FAV = 0.85`). `total_additivity` is exempt
+on set-period sports (`SETS_AS_PERIODS`) — it read set 1 + set 2 as halves.
+
+### Discovery — every LSport match, not a list of sports
+
+2026-09-22. The New inconsistencies cycle sweeps CB's live nav every 30 min,
+counts LSport matches on every sport it is not scanning, and activates any
+that has some — the dedicated module if one exists, else a generic title-only
+LSport classifier (`sports/lsport_generic.py`) that yields ladders and the
+sport-agnostic checks. Full census on the day: LSport in seven sports, six
+already dedicated, the seventh (sumo) a single 2-way price per bout; 0 on the
+other 26. `docs/lsport.md` §4b.
+
+### Futsal and handball — the LSport soccer template, same checks
+
+2026-09-22, `sports/soccerlike.py`: LSport-only, soccer-shaped, read by the
+identity checks as-is (`pickem_*`, `htft_combo`, ladders, `total_additivity`,
+`favourite_flip`); `half_result_vs_ft` and the E family stay soccer-only. A
+prelude classifies LSport's period titles the soccer classifier skips
+(`1st Period Winner`, `Asian Handicap 1st Period`, `Under/Over - Home Team`,
+`2nd Half 3 Way`). First pass: futsal 8 LSport games, one `htft_combo` at
++3 %; handball 3, one game with two ladder crossings (5.7 %).
 
 ## 2026-09-08 → 09-15 — four checks in, five candidates out, and when to watch
 

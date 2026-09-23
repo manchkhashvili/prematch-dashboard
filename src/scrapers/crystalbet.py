@@ -79,9 +79,9 @@ if __package__ in (None, ""):
 from src import horizon
 from src.models import Odds
 from src.normalize import is_simulated_league
-from src.scrapers import cb_detail, cb_http, cb_parse_pool, change_cache
-from src.scrapers.sports import (americanfootball, basketball, icehockey,
-                                 soccer, tennis)
+from src.scrapers import cb_detail, cb_http, cb_parse_pool, cb_provider, change_cache
+from src.scrapers.sports import (americanfootball, basketball, futsal, handball,
+                                 icehockey, soccer, tennis, volleyball)
 
 # Re-export basketball list-view parsers so existing imports still resolve.
 # Tests import these names from crystalbet directly (test_crystalbet_parser.py).
@@ -200,6 +200,12 @@ _SPORT_MODULES: dict[str, Any] = {
     tennis.SPORT_NAME: tennis,
     americanfootball.SPORT_NAME: americanfootball,
     icehockey.SPORT_NAME: icehockey,
+    # LSport-cycle-only sport (2026-09-21): no price poll, no Pinnacle, no
+    # saved-HTML sample — registered here so the parse pool and the New
+    # inconsistencies cycle can find its module by name.
+    volleyball.SPORT_NAME: volleyball,
+    futsal.SPORT_NAME: futsal,
+    handball.SPORT_NAME: handball,
 }
 _SPORT_SAMPLE_PATHS: dict[str, Path] = {
     basketball.SPORT_NAME: SAMPLE_OUT,
@@ -943,6 +949,13 @@ class _GameOnList:
     # paying for one — which is what makes it useful as a filter rather than a
     # statistic. None when CB didn't render the badge (all markets locked).
     market_count: Optional[int] = None
+    # The odds feed behind this game (2026-09-21): the provider's own fixture
+    # id from `data-game-code` on the title block, and its reading —
+    # "lsport" / "other" / None. Read off the list view, so it is known before
+    # any expansion is paid for; the New inconsistencies cycle filters on it.
+    # See src/scrapers/cb_provider.py for the measurement behind the split.
+    game_code: Optional[int] = None
+    provider: Optional[str] = None
 
 
 _PLUS_N_RE = re.compile(r"\+\s*(\d+)")
@@ -1035,11 +1048,19 @@ def _extract_games_from_list_html(
                     home, away, league_text, start_time, fetched_at,
                 )
 
+            game_code = cb_provider.game_code_of(container)
+            provider = cb_provider.provider_of(game_code)
+            # Stamp the list-view rows too, so a game that is never expanded
+            # still says which feed priced it.
+            for o in list_odds:
+                o.provider = provider
+
             games.append(_GameOnList(
                 event_id=event_id, home=home, away=away,
                 league=league_text, start_time=start_time,
                 loadinfo=loadinfo, list_odds=list_odds,
                 market_count=_market_count(container),
+                game_code=game_code, provider=provider,
             ))
     return games
 
@@ -1225,12 +1246,18 @@ async def _expand_game(
     anomaly scan run browser-free even on a Playwright main app."""
     http = _USE_HTTP_TRANSPORT if use_http is None else use_http
     if http:
-        return await _expand_and_parse_one_http(
+        rows = await _expand_and_parse_one_http(
             game, fetched_at, sport, classify=classify, ladder_mode=ladder_mode,
         )
-    return await _expand_and_parse_one(
-        game, fetched_at, sport, page, classify=classify, ladder_mode=ladder_mode,
-    )
+    else:
+        rows = await _expand_and_parse_one(
+            game, fetched_at, sport, page, classify=classify, ladder_mode=ladder_mode,
+        )
+    # The detail parser never sees the list-view container, so the provider is
+    # stamped here — the one place both transports and both parse paths pass.
+    for o in rows:
+        o.provider = game.provider
+    return rows
 
 
 async def _list_games_for_sport(

@@ -107,6 +107,57 @@ def georgian_chars(html: str) -> int:
     return len(_GEORGIAN_RE.findall(html))
 
 
+_RE_NAV_ID = re.compile(r"DoSportTypePostBack\(\s*(-?\d+)\s*\)")
+
+
+def parse_nav_sports(html: str) -> dict[int, str]:
+    """CB's sport nav from the Sports.aspx page: sport id -> label ("232 Table
+    Tennis"; the count prefix is CB's). Negative ids are tabs (TOP, LIVE) and
+    are dropped. Pure, so the discovery sweep can be tested on saved markup.
+
+    Walks the DOM rather than regexing the markup: the anchor's text sits in
+    nested spans, and a regex over the raw page read five sports with empty
+    labels where the parser reads thirty-three."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out: dict[int, str] = {}
+    for el in soup.select('[onclick*="DoSportTypePostBack"], [href*="DoSportTypePostBack"]'):
+        m = _RE_NAV_ID.search(el.get("onclick") or el.get("href") or "")
+        if not m:
+            continue
+        n = int(m.group(1))
+        if n <= 0 or n in out:
+            continue
+        label = re.sub(r"\s+", " ", el.get_text(" ", strip=True)).strip()
+        if label:
+            out[n] = label
+    return out
+
+
+def fetch_nav_sports() -> dict[int, str]:
+    """The live sport nav in ENGLISH, via a throwaway warmed session.
+
+    A plain GET of Sports.aspx answers in Georgian ('286 კალათბურთი'), and a
+    Georgian label slugs to nothing. The flip response itself carries no nav
+    (0 occurrences of DoSportTypePostBack in 438 KB), but the language sticks
+    to the session, so a SECOND GET on a warmed session renders the nav in
+    English — 33 sports, 0 Georgian glyphs, measured 2026-09-22. The New
+    inconsistencies cycle sweeps this so a sport LSport starts pricing is
+    scanned without anyone wiring it."""
+    sess = CbHttpSession(16)
+    try:
+        sess.warm()
+        _PIN.pin(sess.s)
+        r = sess.s.get(SPORTS_URL, headers=HEADERS, cookies=sess.cookies, timeout=GET_TIMEOUT)
+        r.raise_for_status()
+        nav = parse_nav_sports(r.text)
+        if not nav:
+            raise RuntimeError("CB nav: no DoSportTypePostBack anchors on the English page")
+        return nav
+    finally:
+        sess.close()
+
+
 # ── ASP.NET wire-format helpers (pure functions) ──────────────────────────────
 
 _RE_HIDDEN = re.compile(r'<input[^>]+type=["\']hidden["\'][^>]*>', re.I)
@@ -304,6 +355,29 @@ class CbHttpSession:
                 log.error("CB http: sport_id=%d still Georgian after re-warm",
                           self.sport_id)
         return normalize_soup(panel)
+
+    def fetch_list_raw(self) -> str:
+        """SelectAllChampionats → the UpdatePanelGames panel, RAW string.
+
+        The per-session twin of the module-level `fetch_list_raw`, for callers
+        that own their own CbHttpSession rather than the shared per-sport one
+        (the New inconsistencies cycle): warms on first use or after
+        REWARM_AFTER_SEC, and applies the same Georgian-flip check and one
+        re-warm. The caller normalises — that is the point of returning raw.
+        """
+        _ensure_warm_sync(self)
+        panel = self._list_panel()
+        if georgian_chars(panel) > _GEORGIAN_OK_MAX:
+            log.warning(
+                "CB http: sport_id=%d list came back Georgian (%d glyphs) — "
+                "re-warming to re-apply the English flip",
+                self.sport_id, georgian_chars(panel))
+            self.warm()
+            panel = self._list_panel()
+            if georgian_chars(panel) > _GEORGIAN_OK_MAX:
+                log.error("CB http: sport_id=%d still Georgian after re-warm",
+                          self.sport_id)
+        return panel
 
     def _list_panel(self) -> str:
         body = {**self.fields, SM: f"{UPDATE_PANELS_HOLDER}|{BTN_CHAMP}",

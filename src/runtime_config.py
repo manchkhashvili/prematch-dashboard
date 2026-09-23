@@ -66,7 +66,7 @@ def _env_float(name: str, default: float) -> float:
 # `kind` drives the UI widget and the validator.
 BOOKS = ("crystalbet", "liderbet", "betlive", "crocobet", "setanta", "xbet")
 SCANS = ("anomaly", "anomaly_extra", "anomaly_watch", "betlive_anomaly", "soft_scan",
-         "lider_combo", "live_dup")
+         "lider_combo", "live_dup", "lsport_scan")
 # Per-sport master switch (2026-08-14). Orthogonal to `books`: a book toggle is
 # "stop paying for this book, on every sport", a sport toggle is "stop paying
 # for this sport, at every book" — including the reference feeds and the scans,
@@ -105,6 +105,14 @@ CADENCES: dict[str, tuple] = {
     # Live-board duplicate tripwire: slow on purpose, it reads two enumeration
     # boards and nothing else. 60 s floor so it can never become a live feed.
     "live_dup_sec":        (lambda: _env_int("LIVE_DUP_SEC", 300), 60, 3600),
+    # New inconsistencies (2026-09-21): the LSport-only CrystalBet cycle. Its
+    # own session and its own clock, because it scrapes a different board —
+    # ~90 soccer games at ~120 markets, not ~900 at ~800 — so it can afford to
+    # run every few minutes where the full ladder scan cannot. 30 s floor.
+    "lsport_scan_sec":     (lambda: _env_int("LSPORT_SCAN_SEC", 180), 30, 21600),
+    # How often the cycle sweeps CB's whole sport nav for LSport matches on
+    # sports nobody wired (one list postback per sport, ~30 s for the lot).
+    "lsport_discover_sec": (lambda: _env_int("LSPORT_DISCOVER_SEC", 1800), 300, 86400),
 }
 
 # Cost/horizon knobs — the levers that cut per-cycle work without turning a
@@ -170,6 +178,14 @@ LIMITS: dict[str, tuple] = {
     # fitted score distribution carries real error — this is the only check
     # here that can be wrong about football rather than about arithmetic.
     "lider_combo_min_ev": (lambda: _env_float("LIDER_COMBO_MIN_EV", 25.0), 0.0, 1000.0),
+    # New inconsistencies horizon (hours). LSport fixtures land on the board
+    # ~22 h before kickoff at the median (the other feed: ~144 h), so 48 h is
+    # effectively the whole LSport board; narrow it to spend less per pass.
+    "lsport_horizon_h": (lambda: _env_float("LSPORT_HORIZON_H", 48.0), 1.0, 240.0),
+    # Wall-clock budget for one sport's expansion phase in that cycle. Measured
+    # 2026-09-21: 93 LSport soccer games expand in ~45 s with the parse pool on.
+    # Soonest-kickoff first, so a truncated pass is the useful prefix. 0 = off.
+    "lsport_max_sec": (lambda: _env_float("LSPORT_MAX_SEC", 120.0), 0.0, 7200.0),
 }
 
 
@@ -203,6 +219,11 @@ def _defaults() -> dict[str, Any]:
             # On by default: two cheap board reads every 5 min, and a
             # duplicated live fixture is exactly the thing worth an alert.
             "live_dup":        _env_on("LIVE_DUP", True),
+            # On by default, like live_dup: one small board per sport every
+            # few minutes (soccer 70 games in ~13 s, tennis 180 in ~41 s), and
+            # the LSport games are the ones worth watching. LSPORT_SCAN=0 pins
+            # it off; the Config tab toggles it live.
+            "lsport_scan":     _env_on("LSPORT_SCAN", True),
         },
         "cadence": {k: f() for k, (f, _lo, _hi) in CADENCES.items()},
         "limits": {k: f() for k, (f, _lo, _hi) in LIMITS.items()},

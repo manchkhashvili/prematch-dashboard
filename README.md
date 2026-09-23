@@ -3,7 +3,7 @@
 [![tests](https://github.com/manchkhashvili/prematch-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/manchkhashvili/prematch-dashboard/actions/workflows/tests.yml)
 
 **An odds-aggregation and market-inconsistency platform.** It ingests prematch
-prices from **seven bookmakers** across **five sports**, normalises their
+prices from **seven bookmakers** across **five sports** (plus volleyball, futsal and handball on the LSport-only cycle), normalises their
 mutually incompatible market vocabularies into one schema, and looks for two
 kinds of opportunity: prices that disagree *between* books, and prices that
 contradict *themselves* inside a single book.
@@ -165,7 +165,7 @@ Everything that used to need a restart is switchable at `/config.html`:
 | Everything | **Pause / Resume** — idles every poll loop (all books, Pinnacle, every scan) while leaving the server up, so you can resume from the page instead of killing the terminal. See below. |
 | Books | `crystalbet`, `liderbet`, `betlive`, `crocobet`, `setanta`, `xbet` (Pinnacle is the reference — always on) |
 | Sports | `basketball`, `soccer`, `tennis`, `americanfootball` — a **master switch per sport across every book**, including Pinnacle (which has no book toggle) and the scans (which no book toggle reaches). Off stops the fetch, parse, tick write and scans for that sport and clears its odds. `SPORTS=` still decides which sports the process runs at all; only those appear. |
-| Scans | `anomaly`, `anomaly_extra`, `anomaly_watch`, `betlive_anomaly`, `soft_scan` |
+| Scans | `anomaly`, `anomaly_extra`, `anomaly_watch`, `betlive_anomaly`, `soft_scan`, `lider_combo`, `live_dup`, `lsport_scan` (the LSport-only cycle behind the New inconsistencies tab) |
 | Cadence | per-loop poll intervals, clamped server-side to a safe range |
 | Limits | data horizon, CB expansion + anomaly horizons and their wall-clock budgets, the ladder market-count band, per-book detail horizons, and the API cache TTL |
 
@@ -193,6 +193,7 @@ back to the env-seeded defaults.
 | `OPP_REVERIFY_SEC`         | 120           | Re-pull CB detail for the games currently showing an opportunity, so an edge is confirmed on a fresh price. `0` disables. See "Stale prices" below. |
 | `OPP_REVERIFY_MAX_GAMES`   | 25            | Cap on the re-verify shortlist (edge-sorted, so the biggest claims are kept). |
 | `OPP_REVERIFY_MIN_EDGE`    | 3.0           | Only re-pull games whose edge is worth acting on. |
+| `LSPORT_SCAN`              | 1             | The LSport-only CB cycle behind `/new_inconsistencies.html` (`docs/lsport.md`). Its own CB session per sport, no sport lock, no change cache: every LSport game in horizon is re-expanded each pass. Live as Config → Scans → `lsport_scan`. `LSPORT_SCAN_SEC` (180), `LSPORT_HORIZON_H` (48), `LSPORT_MAX_SEC` (120) and `LSPORT_SPORTS` (all) tune it; the first three are live on the Config tab. `LSPORT_EXTRA_SPORTS` (default `volleyball,futsal,handball`) adds LSport-only sports that have no price poll or Pinnacle reference — see `docs/volleyball.md` and `src/scrapers/sports/soccerlike.py`. `LSPORT_DISCOVER_SEC` (1800) is the sweep of CB's whole sport nav that activates any other sport LSport prices, through a generic classifier (`docs/lsport.md` §4b). |
 | `ANOMALY_EXTRA_MAX_SEC`    | 240           | Budget for the ladder scan's **expansion phase** per sport per pass (timed by the scraper — the lock wait and league-tree refresh in front of it are unbounded and are reported separately). The scan holds the CB **per-sport lock**, so this is what stops a wide `anomaly_extra_horizon_h` from wedging the sport's price poll and re-verify loop (measured: 47 min, see `docs/performance.md`). Games are expanded soonest-kickoff first; the rest keep their cached ladder or list-view Odds. Live as `limits.anomaly_extra_max_sec`. |
 | `CB_EXPAND_MAX_SEC`        | 300           | Budget for a CB **price** cycle's expansion phase. The cycle holds the per-sport lock throughout, and one measured 3365 s (56 min) with no CB soccer on the board for any of it. Unreached games keep cached detail or list-view Odds and the next cycle resumes past them (every expansion is marked in the change cache). `0` = unlimited. Live as `limits.cb_expand_max_sec`. |
 | `ANOMALY_MIN_MARKETS`      | 0 (off)       | Ladder scan: skip games with FEWER markets than this, read from CB's own `+N` badge. Default off — the 50–300 band carries an HT/FT grid in a third of games, so a floor cuts `htft_combo`/`htft_fair` for ~3% of the cost. |
@@ -256,6 +257,13 @@ supersedes them when set.
   regulation-win-plus-tie. See
   `docs/anomalies-catalog.md` for every detector, its math and its thresholds,
   and "Anomaly alerts" below for chiming on them.
+- **`/new_inconsistencies.html`** — the Anomalies tab's two tables, run over
+  **only the CrystalBet games priced by its LSport feed** — the provider whose
+  prices carry the mistakes, read off each game's `data-game-code` (see
+  [`docs/lsport.md`](docs/lsport.md)). Fed by a separate CB cycle on its own
+  session and clock: the LSport board is ~10 % of soccer and expands in
+  ~13 s, so every LSport game is re-read each pass. Same detectors, same row
+  shapes, own stores; nothing here is merged into the Anomalies tab.
 - **`/calc.html`** — two calculators. **Devig + +EV**: Shin or proportional
   toggle, edge% and quarter-Kelly stake. **Half-time & HT/FT from the full-time
   market**: enter only the FT 1X2 and one total line and it derives fair prices

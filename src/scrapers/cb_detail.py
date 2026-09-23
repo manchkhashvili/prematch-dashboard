@@ -414,8 +414,16 @@ def parse_detail_page(
 
         if cls.market_type == "moneyline":
             # 2-way or 3-way based on classification.n_way
-            # (basketball: 2 = {home, away}; soccer 1X2: 3 = {home, draw, away})
-            if cls.n_way == 3:
+            # (basketball: 2 = {home, away}; soccer 1X2: 3 = {home, draw, away}).
+            # n_way=0 (the generic LSport classifier, which sees only the
+            # title) means AUTO: 3-way when an "X" label is on the page,
+            # 2-way otherwise — reading a 1X2 as 2-way would drop the draw
+            # and overstate both sides.
+            n_way = cls.n_way
+            if n_way == 0:
+                labels = {(_bt_pair(sn) or ("", ""))[0].strip() for sn in snatches}
+                n_way = 3 if "X" in labels else 2
+            if n_way == 3:
                 sels = _parse_ml_3way(snatches)
             else:
                 sels = _parse_ml(snatches)

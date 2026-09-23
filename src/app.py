@@ -644,6 +644,29 @@ ANOMALY_MARKETS = ("spread", "total")
 # full board scan. 0 disables the watch loop.
 ANOMALY_WATCH_SEC = int(os.environ.get("ANOMALY_WATCH_SEC", "300"))
 
+# ── New inconsistencies — the LSport-only CB cycle (2026-09-21) ──────────────
+# Same detectors as the Anomalies tab, run over ONLY the games CrystalBet
+# prices from its LSport feed, on a session and a clock of their own. Which
+# sports: the ones this process runs, unless narrowed here. American football
+# and ice hockey have no LSport games (measured 0 %), so on those the pass is
+# one list postback that selects nothing — cheap enough to leave in, and it
+# means the day CB moves a sport onto LSport the tab picks it up unasked.
+# See src/lsport_scan.py and src/scrapers/cb_provider.py.
+_LSPORT_SPORTS_RAW = os.environ.get("LSPORT_SPORTS", "")
+# Sports that exist ONLY in the LSport cycle — no price poll, no Pinnacle
+# reference, no Arbs tab — because the LSport share is what justifies them.
+# Volleyball (2026-09-21): 75 % of CB's board is LSport, and a best-of-5 match
+# is over-determined the way tennis is (see src/scrapers/sports/volleyball.py
+# and docs/volleyball.md). Futsal and handball (2026-09-22): soccer-shaped
+# LSport boards — the pick'em trio, half results and an HT/FT grid — that the
+# identity checks read as-is (sports/soccerlike.py). Must be registered in
+# crystalbet._SPORT_MODULES and consistency.CONSISTENCY_SPORTS to do anything.
+_LSPORT_EXTRA_RAW = os.environ.get("LSPORT_EXTRA_SPORTS", "volleyball,futsal,handball")
+LSPORT_SCAN_SEC = int(os.environ.get("LSPORT_SCAN_SEC", "180"))
+LSPORT_DISCOVER_SEC = int(os.environ.get("LSPORT_DISCOVER_SEC", "1800"))
+LSPORT_HORIZON_H = float(os.environ.get("LSPORT_HORIZON_H", "48"))
+LSPORT_MAX_SEC = float(os.environ.get("LSPORT_MAX_SEC", "120"))
+
 # Clock-aligned scan: run at each listed minute of every hour. Default "15,45"
 # = every 30 min, so a fresh scan lands a couple of minutes before :00 and :30.
 # Comma-separated; the scan takes ~3 min. Set ANOMALY_SCAN_AT_MINUTE to ""/"off"
@@ -875,6 +898,29 @@ _extra_anom_at: dict[str, str] = {}
 # "142/509 games" instead of leaving a partial snapshot looking complete.
 _extra_anom_progress: dict[str, dict] = {}
 _extra_anom_error: dict[str, str] = {}
+
+# ── New inconsistencies state (LSport-only cycle, src/lsport_scan.py) ────────
+# Its own set of stores, keyed by sport, never merged into the Anomalies
+# tab's lists: the whole point is a board that holds ONLY the LSport findings.
+_lsport_anomalies: dict[str, list[dict]] = {}
+_lsport_consistency: dict[str, list[dict]] = {}
+_lsport_odds: dict[str, list[Odds]] = {}
+_lsport_at: dict[str, str] = {}
+_lsport_error: dict[str, str] = {}
+_lsport_progress: dict[str, dict] = {}
+_lsport_stats: dict[str, dict] = {}
+# Stamped before the first pass, so "computed_at is null" can be told apart
+# from "never started" (docs/debugging-lessons.md #8).
+_lsport_started: datetime | None = None
+_lsport_passes: int = 0
+# Discovery (2026-09-22): every lsport_discover_sec the cycle sweeps CB's whole
+# sport nav, counts LSport matches on every sport it is not already scanning,
+# and registers a generic module for any that has some — so "all LSport
+# matches" is what the tab shows, not what someone remembered to wire.
+_lsport_census: dict[str, dict] = {}
+_lsport_census_at: datetime | None = None
+_lsport_generic_active: list[str] = []
+_lsport_nav_count: int = 0
 
 
 def _carry_first_seen(prev: list[dict], fresh: list[dict], ts_iso: str) -> list[dict]:
@@ -2197,6 +2243,147 @@ async def _live_duplicate_loop():
         await _sleep_gated(runtime_config.secs("live_dup_sec", 300), "scans", "live_dup")
 
 
+def _lsport_sports() -> list[str]:
+    """Sports the LSport cycle covers: LSPORT_SPORTS= if set, else every sport
+    this process runs — plus the LSport-only extras (LSPORT_EXTRA_SPORTS), which
+    need a module in crystalbet._SPORT_MODULES and nothing else."""
+    from src.scrapers.crystalbet import _SPORT_MODULES
+    if _LSPORT_SPORTS_RAW.strip():
+        base = [x.strip() for x in _LSPORT_SPORTS_RAW.split(",")
+                if x.strip() and x.strip() in SPORT_NAMES]
+    else:
+        base = list(SPORT_NAMES)
+    extra = [x.strip() for x in _LSPORT_EXTRA_RAW.split(",")
+             if x.strip() and x.strip() in _SPORT_MODULES and x.strip() not in base]
+    return base + extra
+
+
+async def _lsport_publish(sport: str, odds: list[Odds], ts: datetime, *,
+                          done: int | None = None, total: int | None = None,
+                          stats: dict | None = None) -> tuple[int, int]:
+    """Run the detectors on one sport's LSport odds and publish the result.
+    Shared by the partial-progress callback and the final publish so both carry
+    `first_seen` the same way."""
+    from src import lsport_scan as _ls
+    anoms, flags_raw = _ls.detect(odds)
+    rows = [_anomaly_base_row(a) for a in anoms]
+    flags = _merge_flag_first_seen(
+        [_consistency_to_dict(f) for f in flags_raw],
+        _lsport_consistency.get(sport, []), ts.isoformat())
+    # Mirror the Anomalies tab's soft flags (basketball favourite disagreement,
+    # soccer model EV) under the same switch, on this cycle's own snapshot.
+    soft: list[dict] = []
+    if runtime_config.is_on("scans", "soft_scan") and done is None:
+        try:
+            from src import soft_scan as _ss
+            if sport == "basketball":
+                soft = _ss.scan_cb_odds("basketball", odds)
+            elif sport == "soccer" and soft_scan_module_enabled():
+                soft = _ss.scan_cb_odds("soccer", odds)
+            # Soft flags key first_seen on (book, event, kind, outcome), like
+            # the Anomalies tab's _cb_soft_flags — without this they showed an
+            # empty First seen on the new tab.
+            soft = _carry_first_seen(_lsport_consistency.get(sport, []), soft, ts.isoformat())
+        except Exception:
+            log.exception("lsport scan %s: soft-flag detection failed", sport)
+    async with _state_lock:
+        _lsport_odds[sport] = odds
+        _lsport_anomalies[sport] = rows
+        _lsport_consistency[sport] = flags + soft
+        _lsport_at[sport] = ts.isoformat()
+        _lsport_progress[sport] = {"done": done, "total": total}
+        if stats is not None:
+            _lsport_stats[sport] = stats
+            _lsport_error.pop(sport, None)
+    return len(rows), len(flags) + len(soft)
+
+
+async def _lsport_scan_loop():
+    """New inconsistencies: the LSport-only CB cycle, every lsport_scan_sec.
+
+    One pass per sport per tick, each on the cycle's own CB session (never the
+    price poll's), detectors identical to the Anomalies tab, results kept in
+    their own stores and served on /api/new_inconsistencies. Partial results
+    are published every few games so the tab fills as a pass runs.
+    """
+    from src import lsport_scan as _ls
+    from src.scrapers.crystalbet import _SPORT_MODULES
+    global _lsport_started, _lsport_passes
+    global _lsport_census, _lsport_census_at, _lsport_generic_active, _lsport_nav_count
+    base = _lsport_sports()
+    if not base:
+        return
+    log.info("lsport scan ENABLED — %s every %ds (+ nav discovery every %ds)",
+             base, LSPORT_SCAN_SEC, LSPORT_DISCOVER_SEC)
+    await asyncio.sleep(20)          # let the main pollers warm first
+    last_discover = 0.0
+    while True:
+        if not await _gated("scans", "lsport_scan", "lsport scan"):
+            continue
+        _lsport_started = datetime.now(tz=timezone.utc)
+        # Discovery first when due, so a sport LSport started pricing today is
+        # in THIS pass, not the next one.
+        if (time.monotonic() - last_discover
+                >= runtime_config.secs("lsport_discover_sec", LSPORT_DISCOVER_SEC)):
+            last_discover = time.monotonic()
+            try:
+                known = {_SPORT_MODULES[n].SPORT_ID for n in base if n in _SPORT_MODULES}
+                census, active = await _ls.discover(
+                    known, horizon.capped_hours(
+                        runtime_config.num("limits", "lsport_horizon_h", LSPORT_HORIZON_H)))
+                async with _state_lock:
+                    _lsport_census = census
+                    _lsport_census_at = datetime.now(tz=timezone.utc)
+                    _lsport_generic_active = [n for n in active if n not in base]
+                    _lsport_nav_count = len(census) + len(known)
+                    # A sport that dropped out of discovery keeps nothing on
+                    # the tab: its stores go with it.
+                    for gone in [n for n in _lsport_anomalies if n not in base and n not in active]:
+                        for store in (_lsport_anomalies, _lsport_consistency, _lsport_odds,
+                                      _lsport_at, _lsport_stats, _lsport_progress):
+                            store.pop(gone, None)
+            except Exception:
+                log.exception("lsport discover failed")
+        sports = base + [n for n in _lsport_generic_active if n not in base]
+        for sport in sports:
+            if not runtime_config.sport_active(sport):
+                continue
+            if not runtime_config.active("scans", "lsport_scan"):
+                break
+            try:
+                async def _progress(partial, done, total, _sport=sport):
+                    if not runtime_config.active("scans", "lsport_scan"):
+                        return
+                    n_a, n_f = await _lsport_publish(
+                        _sport, partial, datetime.now(tz=timezone.utc),
+                        done=done, total=total)
+                    log.info("lsport scan %s: %d/%d games — %d anomalies, "
+                             "%d flags so far", _sport, done, total, n_a, n_f)
+
+                odds, stats = await _ls.scan_sport(
+                    sport,
+                    horizon_h=horizon.capped_hours(
+                        runtime_config.num("limits", "lsport_horizon_h", LSPORT_HORIZON_H)),
+                    max_sec=runtime_config.num("limits", "lsport_max_sec", LSPORT_MAX_SEC),
+                    should_continue=lambda: runtime_config.active("scans", "lsport_scan"),
+                    on_progress=_progress)
+                if not runtime_config.active("scans", "lsport_scan"):
+                    log.info("lsport scan %s: switched off mid-pass — keeping the "
+                             "previous snapshot", sport)
+                    break
+                ts = datetime.now(tz=timezone.utc)
+                n_a, n_f = await _lsport_publish(sport, odds, ts, stats=stats.to_dict())
+                log.info("lsport scan %s: %d odds, %d anomalies, %d flags",
+                         sport, len(odds), n_a, n_f)
+            except Exception as e:
+                log.exception("lsport scan failed (%s)", sport)
+                async with _state_lock:
+                    _lsport_error[sport] = str(e)[:200]
+        _lsport_passes += 1
+        await _sleep_gated(runtime_config.secs("lsport_scan_sec", LSPORT_SCAN_SEC),
+                           "scans", "lsport_scan")
+
+
 async def _lider_combo_loop():
     """Lider combo markets vs the primitives they are built from → Anomalies tab.
 
@@ -2305,10 +2492,15 @@ def _flag_expired(f: dict, now: datetime, stale_max: float) -> bool:
     return False
 
 
-def _enrich_anomaly_rows(base: list[dict]) -> list[dict]:
+def _enrich_anomaly_rows(base: list[dict],
+                         cb_odds_by_sport: dict[str, list[Odds]] | None = None) -> list[dict]:
     """Attach Pinnacle fair/edge/move context per (book, sport) group and sort.
     Runs in a worker thread (see api_anomalies) — reads global state snapshots;
-    the GIL makes list loads atomic and stale-by-one-poll is fine for a tab."""
+    the GIL makes list loads atomic and stale-by-one-poll is fine for a tab.
+
+    `cb_odds_by_sport` overrides where the CB rows come from — the New
+    inconsistencies tab passes its own snapshot, since its rows are not in the
+    anomaly scans' stores."""
     by_group: dict[tuple[str, str], list[dict]] = {}
     for r in base:
         by_group.setdefault((r.get("book") or "cb",
@@ -2317,7 +2509,9 @@ def _enrich_anomaly_rows(base: list[dict]) -> list[dict]:
     for (book, sport), grp_rows in by_group.items():
         st = _state.get(sport)
         pin_odds = st["pin"]["odds"] if st else []
-        if book == "cb":
+        if cb_odds_by_sport is not None and book == "cb":
+            book_odds = cb_odds_by_sport.get(sport, [])
+        elif book == "cb":
             book_odds = (_anomaly_cb_odds if sport == "basketball"
                          else _extra_anom_odds.get(sport, []))
         else:
@@ -2451,6 +2645,7 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(_soft_scan_loop(), name="soft_scan_loop"))
     tasks.append(asyncio.create_task(_lider_combo_loop(), name="lider_combo_loop"))
     tasks.append(asyncio.create_task(_live_duplicate_loop(), name="live_dup_loop"))
+    tasks.append(asyncio.create_task(_lsport_scan_loop(), name="lsport_scan_loop"))
     _rc = runtime_config.get()
     log.info("runtime config — books ON: %s | scans ON: %s (change live at /config.html)",
              ", ".join(k for k, v in _rc["books"].items() if v) or "none",
@@ -2466,6 +2661,12 @@ async def lifespan(app: FastAPI):
             await close_crystalbet()
         except Exception as e:
             log.warning("CB browser close on shutdown raised: %s", e)
+        # The LSport cycle's own CB sessions.
+        try:
+            from src import lsport_scan as _ls
+            _ls.close_all()
+        except Exception as e:
+            log.warning("lsport scan session close raised: %s", e)
         # Stop the CB parse workers, or the process lingers waiting on them.
         try:
             from src.scrapers import cb_parse_pool
@@ -2907,11 +3108,13 @@ async def api_anomalies_status() -> dict:
 ALERT_FEED_CAP = 500
 
 
-def _ladder_alert_rows() -> list[dict]:
-    """Compact ladder rows for the alert poller, biggest wrong-move first."""
-    src = (list(_recent_anomalies)
-           + [r for rows_ in _extra_anomalies.values() for r in rows_]
-           + [r for rows_ in _book_anomalies.values() for r in rows_])
+def _ladder_alert_rows(src: list[dict] | None = None) -> list[dict]:
+    """Compact ladder rows for the alert poller, biggest wrong-move first.
+    `src` overrides the Anomalies tab's stores (the LSport feed passes its own)."""
+    if src is None:
+        src = (list(_recent_anomalies)
+               + [r for rows_ in _extra_anomalies.values() for r in rows_]
+               + [r for rows_ in _book_anomalies.values() for r in rows_])
     out = []
     for a in src:
         lo, hi = a.get("line_lo"), a.get("line_hi")
@@ -2938,8 +3141,9 @@ def _ladder_alert_rows() -> list[dict]:
     return out[:ALERT_FEED_CAP]
 
 
-def _consistency_alert_rows() -> list[dict]:
+def _consistency_alert_rows(src: list[dict] | None = None) -> list[dict]:
     """Compact consistency rows for the alert poller, most severe first.
+    `src` overrides the Anomalies tab's stores (the LSport feed passes its own).
 
     `_lider_combo_flags` belongs here and was missing until 2026-08-27. The
     Anomalies TAB has always included it (see api_anomalies), so the Lider combo
@@ -2948,11 +3152,12 @@ def _consistency_alert_rows() -> list[dict]:
     feed that a settings panel can configure but never emits is worse than no
     feed, because the panel says otherwise.
     """
-    extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
-    book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
-    src = (_recent_consistency + _betlive_consistency + _soft_scan_flags
-           + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
-           + _lider_combo_flags + _live_dup_flags)
+    if src is None:
+        extra_cons = [f for flags_ in _extra_anom_consistency.values() for f in flags_]
+        book_cons = [f for flags_ in _book_consistency.values() for f in flags_]
+        src = (_recent_consistency + _betlive_consistency + _soft_scan_flags
+               + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
+               + _lider_combo_flags + _live_dup_flags)
     out = [{
         "book": f.get("book") or "cb",
         "sport": f.get("sport"),
@@ -2996,6 +3201,89 @@ async def api_anomalies_alerts() -> dict:
         "computed_at": _anomalies_computed_at.isoformat() if _anomalies_computed_at else None,
         "ladders": _ladder_alert_rows(),
         "consistency": _consistency_alert_rows(),
+    }
+
+
+# ── New inconsistencies — the LSport-only board ──────────────────────────────
+
+def _lsport_enabled() -> bool:
+    return runtime_config.is_on("scans", "lsport_scan")
+
+
+def _lsport_meta() -> dict:
+    latest = max(_lsport_at.values()) if _lsport_at else None
+    return {
+        "enabled": _lsport_enabled(),
+        "computed_at": latest,
+        "started_at": _lsport_started.isoformat() if _lsport_started else None,
+        "passes": _lsport_passes,
+        "scan_sec": runtime_config.secs("lsport_scan_sec", LSPORT_SCAN_SEC),
+        "horizon_h": runtime_config.num("limits", "lsport_horizon_h", LSPORT_HORIZON_H),
+        "max_sec": runtime_config.num("limits", "lsport_max_sec", LSPORT_MAX_SEC),
+        "sports": _lsport_sports(),
+        "computed_at_by_sport": dict(_lsport_at),
+        "errors": dict(_lsport_error),
+        "progress": dict(_lsport_progress),
+        "stats": dict(_lsport_stats),
+        # Every sport on CB's nav the cycle is NOT scanning by default, with
+        # its LSport count — so "all LSport matches" is a number on the tab.
+        "census": dict(_lsport_census),
+        "census_at": _lsport_census_at.isoformat() if _lsport_census_at else None,
+        "discover_sec": runtime_config.secs("lsport_discover_sec", LSPORT_DISCOVER_SEC),
+        "generic_active": list(_lsport_generic_active),
+        "nav_sports": _lsport_nav_count,
+    }
+
+
+@app.get("/api/new_inconsistencies")
+async def api_new_inconsistencies(
+    min_pct: float = Query(0.5, ge=0.0, le=1000.0,
+                           description="Minimum wrong-direction move (% of smaller price)"),
+    spread_only: bool = Query(False, description="Handicap ladders only; skip totals"),
+    min_severity: float = Query(0.0, ge=0.0, le=1000.0,
+                                description="Minimum severity for consistency flags"),
+) -> dict:
+    """The Anomalies tab's two tables, restricted to CrystalBet's LSport feed
+    and fed by the separate LSport cycle (src/lsport_scan.py). Same row shapes
+    as /api/anomalies so the page is a mirror, with Pinnacle context attached
+    against this cycle's own odds snapshot."""
+    base = [r for rows_ in _lsport_anomalies.values() for r in rows_
+            if r["pct"] >= min_pct and (not spread_only or r["market_type"] == "spread")]
+    snapshot = dict(_lsport_odds)
+    rows = await asyncio.to_thread(_enrich_anomaly_rows, base, snapshot)
+    cons = [f for flags_ in _lsport_consistency.values() for f in flags_
+            if f["severity"] >= min_severity]
+    cons.sort(key=lambda f: f["severity"], reverse=True)
+    return {
+        **_lsport_meta(),
+        "count": len(rows),
+        "anomalies": rows,
+        "consistency": cons,
+        "consistency_count": len(cons),
+    }
+
+
+@app.get("/api/new_inconsistencies/status")
+async def api_new_inconsistencies_status() -> dict:
+    """Cheap heartbeat — no Pinnacle matching."""
+    return {
+        **_lsport_meta(),
+        "anomalies": sum(len(v) for v in _lsport_anomalies.values()),
+        "consistency": sum(len(v) for v in _lsport_consistency.values()),
+    }
+
+
+@app.get("/api/new_inconsistencies/alerts")
+async def api_new_inconsistencies_alerts() -> dict:
+    """Compact feed of this board's rows, same shape as /api/anomalies/alerts,
+    so an alert poller can gate on it without the enrichment cost."""
+    lad = _ladder_alert_rows(src=[r for rows_ in _lsport_anomalies.values() for r in rows_])
+    cons = _consistency_alert_rows(src=[f for flags_ in _lsport_consistency.values() for f in flags_])
+    return {
+        "enabled": _lsport_enabled(),
+        "computed_at": _lsport_meta()["computed_at"],
+        "ladders": lad,
+        "consistency": cons,
     }
 
 

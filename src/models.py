@@ -67,7 +67,7 @@ Source     = Literal["crystalbet", "pinnacle", "xbet", "liderbet", "betlive", "c
 MarketType = Literal["moneyline", "spread", "total", "team_total", "htft", "fts",
                      "correct_score"]
 Period     = Literal["FT", "H1", "H2", "Q1", "Q2", "Q3", "Q4", "REG", "P1", "P2", "P3"]
-Submarket  = Literal["corners", "bookings"]
+Submarket  = Literal["corners", "bookings", "sets"]   # "sets": volleyball set markets
 TeamSide   = Literal["home", "away"]
 
 
@@ -123,6 +123,13 @@ class Odds:
     # name fuzzing (and Lider's occasional Cyrillic names). None on CrystalBet /
     # Pinnacle, which expose no SportRadar id — those legs match on name+time.
     sr_match_id: str | None = None
+    # CrystalBet only: which odds feed priced this row — "lsport" or "other",
+    # read off the list view's `data-game-code` (see scrapers/cb_provider.py).
+    # LSport is the feed whose prices carry the mistakes, so the New
+    # inconsistencies cycle scans only rows tagged with it. None on every other
+    # book, on saved-fixture rows and on CB rows whose game had no code. Not
+    # persisted (cache_persistence lists fields explicitly).
+    provider: str | None = None
 
     def __post_init__(self) -> None:
         # Sanity: all decimal odds must be > 1.0. CB renders 1.0 for suspended

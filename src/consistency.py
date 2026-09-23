@@ -170,7 +170,13 @@ HTFT_FAIR_ODDS_MAX = 4.5
 # set_vs_match below; tennis detail pages carry 15 markets that are all
 # functions of the same four best-of-3 outcomes).
 CONSISTENCY_SPORTS = ("basketball", "soccer", "tennis", "americanfootball",
-                      "icehockey")
+                      "icehockey", "volleyball", "futsal", "handball")
+# Sports whose H1/H2 are SETS 1 and 2, not halves of the whole: the period
+# checks that assume children sum to a parent do not apply.
+SETS_AS_PERIODS = ("tennis", "volleyball")
+# Sports the LSport cycle discovered and registered at runtime through
+# sports/lsport_generic.py (title-only classifier, sport-agnostic checks).
+GENERIC_SPORTS: set[str] = set()
 
 # ── what ice hockey does and does not contribute here ────────────────────────
 # Hockey is the cleanest board on the dashboard, and that is a finding rather
@@ -635,6 +641,239 @@ def _cs_partition(mu: float, nu: float) -> dict[str, float]:
 # tennis; src/scrapers/pinnacle.py already reaches it). Until then, treat
 # 0.0335 as a description of CB, not of tennis.
 CS_SIGMA2 = 0.04026
+
+# ── Volleyball: the same model in best-of-5 (2026-09-21) ─────────────────────
+#
+# LSport's volleyball correct score is generated from the match price by a
+# fixed set-to-set correlation, exactly as its tennis board is. Fitted the same
+# way — one variance for the board, least squares on the six devigged cells
+# over the 11 LSport games pricing both markets on 2026-09-21 — it reproduces
+# the board to 1.14pp RMS against 4.07pp for independent sets, and the shape
+# is what the correlation predicts: sweeps (3-0 / 0-3) sit ~5pp ABOVE the IID
+# value on every game, five-setters ~3-4pp below. Every posted leg was 9-21 %
+# under the model fair, i.e. the board is derived and carries its ~25 % vig.
+# So this check is a tripwire, like its tennis parent: it fires when a leg is
+# priced above its own feed's model, not on the ordinary board.
+#
+# Eleven games is a small fit and the number should be re-measured once the
+# LSport cycle has a few weeks of volleyball behind it; the docstring in
+# docs/volleyball.md records the residual table. Same bars as tennis: edge >=
+# CS_MIN_EDGE, leg odds <= CS_MAX_LEG_ODDS, moneyline legs >= CS_MIN_ML_ODDS.
+VB_CS_SIGMA2 = 0.032
+# The fit sample spanned devigged away probabilities of 0.31-0.63. Outside it
+# the model is extrapolating, and at the edges it is visibly wrong: USA W v
+# Canada W (favourite 88 %) priced 3-0 at 1.08 where the model said 1.62. No
+# model-based volleyball row is emitted when the favourite's devigged match
+# probability exceeds this; the exact identities (covers) do not need it.
+VB_CS_MAX_FAV = 0.85
+
+# vb_sets_*: the exact identities across the sets markets. A duplicate must be
+# at least this far apart to be worth a row — the same two-price test the
+# Lider combo engine runs at 8 %. Integer set lines PUSH and are not exact
+# atoms, so they never take part (measured: "over 4" vs "over 4.5" sets read
+# as a 46 % "duplicate" until they were excluded).
+VB_SETS_DUP_PCT = 8.0
+# ...but a gap alone is not a row. The first cut reported every duplicate with
+# the gap as its severity, and the three it found sat at the top of the tab
+# at 8-22 % while the longer price of each was still 5-15 % UNDER the fair the
+# match price implies — "one of the two is wrong" was true, and the wrong one
+# was the short one every time. Owner: a row on top with no +EV bet is not
+# nice. So the sets checks now price the leg they name off the same
+# latent-strength fair the correct-score check uses, and a row exists only
+# when that leg clears it. Severity is the EDGE, like tennis_correct_score,
+# and the structural gap goes in the text. Same shape as the Lider combo
+# engine's duplicate-plus-fair test: the gap is corroboration, the fair is
+# the claim.
+VB_SETS_MIN_EV = 0.05
+
+
+def _beta_raw_moments(mu: float, nu: float, k: int) -> list[float]:
+    """E[P^0..P^k] for P ~ Beta(mu*nu, (1-mu)*nu)."""
+    a, b = mu * nu, (1.0 - mu) * nu
+    out = [1.0]
+    for i in range(k):
+        out.append(out[-1] * (a + i) / (a + b + i))
+    return out
+
+
+def _cs5_partition(mu: float, nu: float) -> dict[str, float]:
+    """The six best-of-5 correct-score probabilities, keyed HOME-AWAY, with
+    `mu` the AWAY side's per-set strength (so "0-3" = away wins 3-0). Sums to 1
+    by construction."""
+    m = _beta_raw_moments(mu, nu, 5)
+    return {
+        "0-3": m[3],
+        "1-3": 3.0 * (m[3] - m[4]),
+        "2-3": 6.0 * (m[3] - 2.0 * m[4] + m[5]),
+        "3-2": 6.0 * (m[2] - 3.0 * m[3] + 3.0 * m[4] - m[5]),
+        "3-1": 3.0 * (m[1] - 3.0 * m[2] + 3.0 * m[3] - m[4]),
+        "3-0": 1.0 - 3.0 * m[1] + 3.0 * m[2] - m[3],
+    }
+
+
+def _cs5_match_prob(mu: float, nu: float) -> float:
+    """P(win a best-of-5) under the latent-strength model."""
+    m = _beta_raw_moments(mu, nu, 5)
+    return 10.0 * m[3] - 15.0 * m[4] + 6.0 * m[5]
+
+
+def _cs5_fair_from_match(p_match: float, sigma2: float = VB_CS_SIGMA2) -> dict[str, float]:
+    """Fair best-of-5 correct-score partition from the devigged match price
+    alone — the best-of-5 twin of _cs_fair_from_match. Stated on the AWAY side;
+    below 0.5 it recurses on the favourite and mirrors."""
+    if p_match < 0.5:
+        f = _cs5_fair_from_match(1.0 - p_match, sigma2)
+        return {k[::-1]: v for k, v in f.items()}
+    lo, hi = 0.5, 0.999
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        nu = mid * (1.0 - mid) / sigma2 - 1.0
+        if nu <= 0.0:
+            lo = mid
+            continue
+        if _cs5_match_prob(mid, nu) < p_match:
+            lo = mid
+        else:
+            hi = mid
+    mu = (lo + hi) / 2.0
+    return _cs5_partition(mu, mu * (1.0 - mu) / sigma2 - 1.0)
+
+
+def _bo5_match_prob_from_set(p: float) -> float:
+    """P(win a best-of-5) with a constant per-set p (independent sets)."""
+    q = 1.0 - p
+    return p ** 3 * (1.0 + 3.0 * q + 6.0 * q * q)
+
+
+def _bo5_set_prob_from_match(p_match: float) -> Optional[float]:
+    if not 0.0 < p_match < 1.0:
+        return None
+    lo, hi = 0.0, 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if _bo5_match_prob_from_set(mid) < p_match:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+# A 2-way rung with one side at CB's 1.01 floor is not two prices: the other
+# side is whatever absorbs the overround (~8.0 whatever the truth), so it must
+# not take part in an identity. See docs/lsport.md on the floor artifact.
+VB_FLOOR = 1.02
+
+
+def _vb_sets_identities(cs: dict[str, float], ml: Optional[dict[str, float]],
+                        sets_spread: list, sets_total: list,
+                        fair: Optional[dict[str, float]] = None) -> list[tuple]:
+    """Model-free identities across the sets markets of one best-of-5 match.
+
+    Every selection is a SET of the six correct-score cells; the correct score
+    itself is the atoms, the match winner is the two halves, a sets-handicap
+    rung is "home margin > line" and a total-sets rung is "sets played < / >
+    line". Half lines only — an integer line pushes and is not a subset of
+    anything. `fair` is the best-of-5 partition from the match price; the
+    duplicate and dominance rows exist only when the leg they name clears it
+    by VB_SETS_MIN_EV (severity = that edge); covers need no model. Returns
+    (kind, severity, detail, bet_label, bet_odds) tuples:
+
+      duplicate  — the same set priced twice, >= VB_SETS_DUP_PCT apart, and
+                   the LONGER price beats fair
+      dominance  — a subset priced SHORTER than a superset it sits inside
+                   (impossible on one distribution), and the superset beats fair
+      cover      — a set and its complement whose best prices sum < 1
+    """
+    atoms = sorted(cs)
+    full = frozenset(atoms)
+
+    def margin(k):
+        a, b = k.split("-")
+        return int(a) - int(b)
+
+    def nsets(k):
+        a, b = k.split("-")
+        return int(a) + int(b)
+
+    prices: list[tuple[frozenset, float, str]] = [(frozenset([k]), o, f"CS {k}") for k, o in cs.items()]
+    if ml and min(ml.values()) > VB_FLOOR:
+        prices.append((frozenset(k for k in atoms if margin(k) > 0), ml["home"], "match home"))
+        prices.append((frozenset(k for k in atoms if margin(k) < 0), ml["away"], "match away"))
+    for line, sels in sets_spread:
+        if line is None or float(line) == int(float(line)) or min(sels.values()) <= VB_FLOOR:
+            continue
+        if "home" in sels:
+            prices.append((frozenset(k for k in atoms if margin(k) + line > 0), sels["home"], f"sets home {line:+g}"))
+        if "away" in sels:
+            # away's own line is −line: away covers when away + (−line) > home,
+            # i.e. margin + line < 0 — the complement of the home rung.
+            prices.append((frozenset(k for k in atoms if margin(k) + line < 0), sels["away"], f"sets away {-line:+g}"))
+    for line, sels in sets_total:
+        if line is None or float(line) == int(float(line)) or min(sels.values()) <= VB_FLOOR:
+            continue
+        if "under" in sels:
+            prices.append((frozenset(k for k in atoms if nsets(k) < line), sels["under"], f"sets under {line:g}"))
+        if "over" in sels:
+            prices.append((frozenset(k for k in atoms if nsets(k) > line), sels["over"], f"sets over {line:g}"))
+
+    by: dict[frozenset, list[tuple[float, str]]] = {}
+    for st, o, lab in prices:
+        if st and st != full:
+            by.setdefault(st, []).append((o, lab))
+
+    def p_of(st: frozenset) -> Optional[float]:
+        if not fair:
+            return None
+        v = sum(fair.get(k, 0.0) for k in st)
+        return v if v > 0.0 else None
+
+    out: list[tuple] = []
+    for st, lst in by.items():
+        lst.sort()
+        lo, hi = lst[0], lst[-1]
+        p_st = p_of(st)
+        if len(lst) >= 2:
+            gap = (hi[0] - lo[0]) / lo[0] * 100.0
+            if gap >= VB_SETS_DUP_PCT and p_st is not None:
+                edge = hi[0] * p_st - 1.0
+                if edge >= VB_SETS_MIN_EV and hi[0] <= CS_MAX_LEG_ODDS:
+                    out.append(("vb_sets_duplicate", edge * 100.0,
+                                f"'{hi[1]}' @{hi[0]:.2f} against a fair {1.0 / p_st:.2f} from the "
+                                f"match price — {edge * 100:+.1f}% generous; the same outcome "
+                                f"({'/'.join(sorted(st))}) is also priced at {lo[0]:.2f} as "
+                                f"'{lo[1]}' ({gap:.0f}% apart), so the feed disagrees with itself "
+                                f"and the longer price is the side that clears fair",
+                                hi[1], hi[0]))
+        comp = full - st
+        if comp in by and sorted(st) < sorted(comp):
+            best_c = max(by[comp])
+            cost = 1.0 / hi[0] + 1.0 / best_c[0]
+            if cost < 1.0:
+                out.append(("vb_sets_cover", (1.0 / cost - 1.0) * 100.0,
+                            f"'{hi[1]}' @{hi[0]:.2f} and '{best_c[1]}' @{best_c[0]:.2f} cover every "
+                            f"outcome for {cost:.4f} — locked {(1/cost-1)*100:+.2f}%",
+                            hi[1], hi[0]))
+    sets_list = list(by)
+    for a in sets_list:
+        for b in sets_list:
+            if a < b:
+                worst_a = min(by[a])          # the SHORTEST price of the subset
+                best_b = min(by[b])           # against the superset's shortest
+                if worst_a[0] < best_b[0] * 0.98 and worst_a[0] > 1.02:
+                    p_b = p_of(b)
+                    if p_b is None:
+                        continue
+                    edge = best_b[0] * p_b - 1.0
+                    if edge < VB_SETS_MIN_EV or best_b[0] > CS_MAX_LEG_ODDS:
+                        continue
+                    out.append(("vb_sets_dominance", edge * 100.0,
+                                f"'{best_b[1]}' @{best_b[0]:.2f} against a fair {1.0 / p_b:.2f} from "
+                                f"the match price — {edge * 100:+.1f}% generous; and it is a bigger "
+                                f"event than '{worst_a[1]}' @{worst_a[0]:.2f}, which it contains yet "
+                                f"pays more than ({(best_b[0] / worst_a[0] - 1) * 100:.0f}% longer for "
+                                f"a superset — impossible on one distribution)",
+                                best_b[1], best_b[0]))
+    return out
 
 
 def _cs_fair_from_match(p_match: float, sigma2: float = CS_SIGMA2) -> dict[str, float]:
@@ -1257,7 +1496,7 @@ def find_consistency_flags(
     events: dict[Optional[str], dict[str, dict[str, list[Odds]]]] = {}
     meta: dict[Optional[str], Odds] = {}
     for o in odds:
-        if o.sport not in CONSISTENCY_SPORTS:
+        if o.sport not in CONSISTENCY_SPORTS and o.sport not in GENERIC_SPORTS:
             continue
         # Keyed by (event, SUBMARKET). Corners are a separate board that
         # happens to share an event id and a period vocabulary with goals: a
@@ -1354,14 +1593,21 @@ def find_consistency_flags(
                        (abs(ft_edge) + abs(edge)) * 100.0)
 
         # 3. total additivity (parent vs sum of children)
+        #
+        # Not for the set sports: tennis and volleyball file sets 1 and 2 under
+        # H1/H2 (the per-set winner is the tennis_set_match / vb_set_match
+        # input), and two sets do not make a match — a best-of-5 has three to
+        # five. Measured the day volleyball arrived: "H1+H2 = 91 vs FT = 182,
+        # off by 91 pts" on every game with per-set totals.
         def tc(p):
             vv = views.get(p)
             return vv.total_center if vv else None
-        for parent, kids in (("FT", ("H1", "H2")), ("H1", ("Q1", "Q2")),
+        for parent, kids in (() if m.sport in SETS_AS_PERIODS else (
+                             ("FT", ("H1", "H2")), ("H1", ("Q1", "Q2")),
                              ("H2", ("Q3", "Q4")), ("FT", ("Q1", "Q2", "Q3", "Q4")),
                              # hockey: three periods make the regulation game.
                              # Not FT — the incl-OT total is a different number.
-                             ("REG", ("P1", "P2", "P3"))):
+                             ("REG", ("P1", "P2", "P3")))):
             pv = tc(parent)
             kv = [tc(k) for k in kids]
             if pv is not None and all(x is not None for x in kv):
@@ -1494,6 +1740,75 @@ def find_consistency_flags(
                            f"makes {leg} a {fair[leg] * 100:.1f}% shot, so the "
                            f"board is {edge * 100:+.1f}% generous on it",
                            edge * 100.0, outcome=leg, odds=price)
+
+        # 4c-quinquies. VOLLEYBALL: the best-of-5 set structure (2026-09-21).
+        #
+        # Three checks, the tennis pair carried over plus the identities the
+        # sets markets add. All read one match's own prices; no reference book.
+        #
+        #   vb_set_match      — 1st set vs match, best-of-5 (tripwire; on LSport
+        #                       the 1st-set price is an IID inversion of the
+        #                       match price to 0.0pp median, so it never fires
+        #                       on a normal board)
+        #   vb_correct_score  — each cell vs the latent-strength fair from the
+        #                       match price, sigma^2 = VB_CS_SIGMA2 (see there)
+        #   vb_sets_*         — model-free: the correct score, the sets
+        #                       handicap, the total sets and the match winner
+        #                       are all sets of the same six outcomes
+        if m.sport == "volleyball" and submarket is None:
+            ftv, h1v = views.get("FT"), views.get("H1")
+            ml_rows = periods.get("FT", {}).get("moneyline", [])
+            ml = next((o.selections for o in ml_rows
+                       if {"home", "away"} <= set(o.selections)), None)
+            real_prices = bool(ml) and all(ml[k] >= CS_MIN_ML_ODDS for k in ("home", "away"))
+            if h1v and ftv and h1v.home_winprob is not None and ftv.home_winprob is not None:
+                p_set, p_ft = h1v.home_winprob, ftv.home_winprob
+                ps, pm = (p_set, p_ft) if p_set >= 0.5 else (1 - p_set, 1 - p_ft)
+                if (pm < ps and ps >= SET_MATCH_HARD_MIN_FAV
+                        and (ps - pm) * 100.0 >= SET_MATCH_HARD_MIN_PP):
+                    mk("vb_set_match", "H1 vs FT",
+                       f"first-set favourite {ps*100:.0f}% is only {pm*100:.0f}% to win "
+                       f"the MATCH — impossible in a best-of-5, where losing the opening "
+                       f"set still leaves a route to victory", (ps - pm) * 100.0)
+                else:
+                    implied = _bo5_set_prob_from_match(pm)
+                    if implied is not None and abs(implied - ps) * 100.0 >= ht_set_match_pp:
+                        gap = abs(implied - ps) * 100.0
+                        mk("vb_set_match", "H1 vs FT",
+                           f"match price implies a {implied*100:.0f}% per-set favourite "
+                           f"but the first set is priced at {ps*100:.0f}% — {gap:.0f}pp "
+                           f"apart on the same quantity", gap)
+            cs_rows = periods.get("FT", {}).get("correct_score") or []
+            cs = next((o.selections for o in cs_rows if len(o.selections) == 6), None)
+            in_range = (ftv is not None and ftv.ml_phome is not None
+                        and max(ftv.ml_phome, 1.0 - ftv.ml_phome) <= VB_CS_MAX_FAV)
+            if cs and real_prices and in_range:
+                p_away = 1.0 - ftv.ml_phome
+                fair = _cs5_fair_from_match(p_away)
+                if set(cs) == set(fair):
+                    for leg, price in cs.items():
+                        edge = price * fair[leg] - 1.0
+                        if edge < CS_MIN_EDGE or price > CS_MAX_LEG_ODDS:
+                            continue
+                        mk("vb_correct_score", "FT",
+                           f"correct score {leg} @ {price:.2f} against a fair "
+                           f"{1.0 / fair[leg]:.2f} — the match price ({p_away * 100:.0f}% "
+                           f"away, devigged) makes {leg} a {fair[leg] * 100:.1f}% shot, so "
+                           f"the board is {edge * 100:+.1f}% generous on it",
+                           edge * 100.0, outcome=leg, odds=price)
+            if cs:
+                # The sets markets sit on their own submarket (see
+                # sports/volleyball.py) — reach across for them.
+                sets_ev = events.get((eid, "sets"), {}).get("FT", {})
+                sets_spread = [(o.line, o.selections) for o in sets_ev.get("spread", [])]
+                sets_total = [(o.line, o.selections) for o in sets_ev.get("total", [])]
+                if sets_spread or sets_total or ml:
+                    fair5 = (_cs5_fair_from_match(1.0 - ftv.ml_phome)
+                             if real_prices and in_range else None)
+                    for kind, sev, detail, bet_label, bet_odds in _vb_sets_identities(
+                            cs, ml if real_prices else None, sets_spread, sets_total,
+                            fair=fair5):
+                        mk(kind, "FT", detail, sev, outcome=bet_label, odds=bet_odds)
 
         # 4c-quater. SOCCER: each HALF's result against the full-time result.
         #

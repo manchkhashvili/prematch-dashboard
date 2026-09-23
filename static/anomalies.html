@@ -20,6 +20,7 @@
       <a href="/arbs.html?ref=xbet" id="nav-xarbs">1xbet Arbs</a>
       <a href="/moves.html?ref=xbet" id="nav-xmoves">1xbet Moves</a>
       <a href="/anomalies.html" class="active">Anomalies</a>
+      <a href="/new_inconsistencies.html">New inconsistencies</a>
       <a href="/bets.html">Bets</a>
       <a href="/calc.html">Calc</a>
       <a href="/config.html">Config</a>
@@ -425,6 +426,13 @@ const KIND_LABEL = {
   soccer_fair: "soccer EV (model)",
   soccer_identity: "soccer identity",
   soccer_curve: "soccer curve",
+  // Volleyball (2026-09-21) — the tennis set checks in best-of-5, plus the
+  // model-free identities across the sets markets. See docs/volleyball.md.
+  vb_set_match: "volleyball: set vs match",
+  vb_correct_score: "volleyball: correct score",
+  vb_sets_duplicate: "volleyball: same outcome, two prices",
+  vb_sets_dominance: "volleyball: subset shorter than its superset",
+  vb_sets_cover: "volleyball: locked cover",
   combo_cover: "lider combo: locked cover",
   combo_dominance: "lider combo: containment",
   combo_duplicate: "lider combo: same event, two prices",
@@ -502,6 +510,11 @@ const KIND_UNIT = {
   // Both Lider combo kinds are a straight return on outlay: combo_cover is the
   // locked profit on a full cover, combo_dominance is how much more the
   // superset pays than the subset sitting inside it. Both %.
+  // Volleyball: vb_set_match is a probability gap in pp (like its tennis
+  // parent); vb_correct_score is the betting EDGE in %; the vb_sets_* three
+  // are % — a price gap, a free upgrade, a locked return on outlay.
+  vb_set_match: "pp", vb_correct_score: "%",
+  vb_sets_duplicate: "%", vb_sets_dominance: "%", vb_sets_cover: "%",
   combo_cover: "%", combo_dominance: "%",
   // combo_duplicate severity is how much more the longer of two prices for the
   // SAME event pays; combo_fair is model EV. Both %.

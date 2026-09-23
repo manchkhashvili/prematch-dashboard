@@ -593,3 +593,53 @@ def test_dominance_still_fires_when_the_superset_is_good():
     assert len(dom) == 1
     assert dom[0]["severity"] > 20, "severity is now the superset's EV, not the gap"
     assert "EV" in dom[0]["detail"] and "model fair" in dom[0]["detail"]
+
+
+# ── the price ceiling ────────────────────────────────────────────────────────
+
+def test_a_ceiling_leg_is_not_a_price_and_never_enters_a_bet_list():
+    """Lider's 101.0 is a refusal to quote, not an offer.
+
+    Measured over 25 743 priced outcomes on 40 live matches: the two MOST
+    COMMON prices anywhere are 100.0 (854, 3.3 %) and 101.0 (617, 2.4 %), above
+    50 there are only seven distinct values at all, and 101.0 is the maximum on
+    the board. A distribution of beliefs does not have its mode at its own
+    ceiling.
+    """
+    m = LC.t_mask("2", "o")
+    assert LC._dedup([(m, 101.0, "ceiling", True)]) == []
+    assert LC._dedup([(m, 100.0, "ceiling", True)]) == []
+    assert LC._dedup([(m, 99.0, "a real longshot", True)]) == [
+        (m, 99.0, "a real longshot", True)]
+
+
+def test_a_ceiling_leg_cannot_complete_a_cover():
+    """Why the guard is load-bearing rather than cosmetic.
+
+    A leg at 101 adds 1/101 = 0.0099 to the outlay — almost nothing — while
+    being the leg that COMPLETES the cover. So it buys the arb its last corner
+    for free, and the position only exists if the book will actually take that
+    bet at size. Three of the four combo_cover flags on the live board were
+    completed exactly this way, Barcelona v Paris FC among them at a reported
+    +10.3 % that was really +8.0 %.
+
+    Here the two real legs leave one atom uncovered; only the ceiling leg would
+    close it, so with the guard there must be no cover at all.
+    """
+    hole = LC.t_mask("2", "o")
+    rest = LC.T_FULL & ~hole
+    bets = LC._dedup([(rest, 1.05, "everything but 2/over", True),
+                      (hole, 101.0, "the ceiling leg", True)])
+    assert LC.min_cover(bets, LC.T_FULL, 6) is None, (
+        "a cover was completed by a price the book will not take")
+
+
+def test_a_genuine_longshot_still_completes_a_cover():
+    """The guard must cut the ceiling, not the tail: 99.0 is below it and a
+    cover that needs such a leg is still a real position."""
+    hole = LC.t_mask("2", "o")
+    rest = LC.T_FULL & ~hole
+    bets = LC._dedup([(rest, 1.05, "everything but 2/over", True),
+                      (hole, 99.0, "a real longshot", True)])
+    got = LC.min_cover(bets, LC.T_FULL, 6)
+    assert got is not None and got[0] < 1.0

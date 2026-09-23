@@ -107,11 +107,18 @@ def shutdown() -> None:
 # callable cannot be a closure or a lambda.
 
 def _classifier(sport_name: str, mode: str):
-    from src.scrapers.sports import (americanfootball, basketball, icehockey,
-                                     soccer, tennis)
+    from src.scrapers.sports import (americanfootball, basketball, futsal, handball,
+                                     icehockey, soccer, tennis, volleyball)
+    if mode == "generic":
+        # A sport the cycle discovered LSport matches on, with no module of
+        # its own: the title-only classifier needs no registry, which is the
+        # point — a worker process never sees the main process's registrations.
+        from src.scrapers.sports import lsport_generic
+        return lsport_generic.classify
     mod = {"soccer": soccer, "basketball": basketball, "tennis": tennis,
            "americanfootball": americanfootball,
-           "icehockey": icehockey}[sport_name]
+           "icehockey": icehockey, "volleyball": volleyball,
+           "futsal": futsal, "handball": handball}[sport_name]
     if mode == "permissive":
         return getattr(mod, "classify_market_title_permissive",
                        mod.classify_market_title)
@@ -186,11 +193,16 @@ async def parse_detail(
 def parse_list_job(job: dict) -> list:
     """Normalise + extract the list view. Runs in a worker process."""
     from src.scrapers import crystalbet, cb_http
-    from src.scrapers.sports import (americanfootball, basketball, icehockey,
-                                     soccer, tennis)
+    from src.scrapers.sports import (americanfootball, basketball, futsal, handball,
+                                     icehockey, soccer, tennis, volleyball)
     mod = {"soccer": soccer, "basketball": basketball, "tennis": tennis,
            "americanfootball": americanfootball,
-           "icehockey": icehockey}[job["sport_name"]]
+           "icehockey": icehockey, "volleyball": volleyball,
+           "futsal": futsal, "handball": handball}.get(job["sport_name"])
+    if mod is None:
+        # Generic (discovered) sport: the list parser only needs a name.
+        from src.scrapers.sports import lsport_generic
+        mod = lsport_generic.GenericSport(0, job["sport_name"])
     soup = cb_http.normalize_soup(job["html"])
     return crystalbet._extract_games_from_list_html(
         soup, job["fetched_at"], sport=mod)

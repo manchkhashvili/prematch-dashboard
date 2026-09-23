@@ -336,6 +336,26 @@ def duplicates(bets, min_gap_pct=0.0):
     return out
 
 
+# Lider's refusal-to-quote value. NOT a price, and the board says so plainly:
+# over 25 743 priced outcomes on 40 live matches, the two MOST COMMON prices
+# anywhere were 100.0 (854, 3.3 %) and 101.0 (617, 2.4 %), above 50 there are
+# only seven distinct values at all (50/60/70/80/90/100/101), and 101.0 is the
+# maximum price on the board. A genuine distribution of beliefs does not have
+# its mode at its own ceiling.
+#
+# Why this matters here rather than being cosmetic: a leg at 101 contributes
+# 1/101 = 0.0099 to a cover's outlay — almost nothing — while being the leg
+# that COMPLETES it. So a ceiling leg buys the arb its last corner for free,
+# and the position only exists if the book will actually take that bet. Three
+# of the four combo_cover flags on the live board were completed this way,
+# including Barcelona v Paris FC at a reported +10.3 %.
+#
+# This project has now been caught by the same shape twice before: CrystalBet's
+# 100.0 on 88 552 positions ("grid opportunities"), and the pinned longshot
+# rungs in the hockey pass. Third time, so it gets a named constant.
+CEILING_ODDS = 100.0
+
+
 def _dedup(bets):
     """One bet per distinct outcome set — keep the longest odds.
 
@@ -345,10 +365,14 @@ def _dedup(bets):
 
     Call `duplicates()` BEFORE this if you care about a set priced twice: this
     throws the losing price away.
+
+    Also the single choke point where CEILING_ODDS legs are dropped: both
+    bet lists exit through here, so one filter covers the cover DP, the
+    containment test and the duplicate scan rather than three.
     """
     best = {}
     for m, v, lab, exact in bets:
-        if not m:
+        if not m or v >= CEILING_ODDS:
             continue
         if m not in best or v > best[m][0]:
             best[m] = (v, lab, exact)
