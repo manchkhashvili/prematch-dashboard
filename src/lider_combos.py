@@ -557,7 +557,7 @@ def _mask_prob(mask, atom_p):
 
 # ── flags ───────────────────────────────────────────────────────────────────
 def _flag(kind, home, away, league, eid, detail, severity, start=None,
-          periods="FT", odds=None, basis=None):
+          periods="FT", odds=None, basis=None, dom_pct=None, ev_pct=None):
     """One flag row.
 
     `odds` is the price of the leg a bettor would actually back — the long side
@@ -585,6 +585,12 @@ def _flag(kind, home, away, league, eid, detail, severity, start=None,
         # "superset pays X% more" with no model behind it. Same kind, one is
         # money and one is not, so the kind table cannot decide it.
         **({"basis": basis} if basis else {}),
+        # Dominance rows rank on how IMPOSSIBLE they are, not on severity —
+        # the totals branch below reports an EV as its severity and the HT/FT
+        # branch reports the containment gain, so neither number alone can
+        # order the tier. See src/flag_rank.py.
+        **({"dom_pct": round(float(dom_pct), 2)} if dom_pct is not None else {}),
+        **({"ev_pct": round(float(ev_pct), 2)} if ev_pct is not None else {}),
     }
 
 
@@ -682,7 +688,8 @@ def analyse_match(g, home, away, league, eid, start=None,
                 f"{per} line {line:g}: '{la}' @ {oa:g} is contained in "
                 f"'{lb}' @ {ob:g} — the superset pays {gain:.2f}% more, and is "
                 f"EV {ev_sup:+.1f}% against model fair {1.0 / p_sup:.2f}",
-                ev_sup, start, periods=per, odds=ob))
+                ev_sup, start, periods=per, odds=ob,
+                dom_pct=gain, ev_pct=ev_sup))
     hb = htft_bets(g)
     if len(hb) >= 4:
         got = min_cover(hb, H_FULL, 9)
@@ -699,15 +706,16 @@ def analyse_match(g, home, away, league, eid, start=None,
                 # No atom model for the HT/FT grid, so unlike the totals
                 # branch above there is no fair to price this against: `gain`
                 # is how much longer the superset is than the subset, and a
-                # superset can pay 9% more and still be a terrible bet. Ranked
-                # as a signal, not as money.
+                # superset can pay 9% more and still be a terrible bet. So it
+                # carries dom_pct and NO ev_pct — the containment is certain,
+                # the profit is not.
                 out.append(_flag("combo_dominance", home, away, league, eid,
                                  f"HT/FT: '{la}' @ {oa:g} is contained in '{lb}' "
                                  f"@ {ob:g} — the superset pays {gain:.2f}% more "
                                  f"(a free upgrade over '{la}', not a priced edge: "
                                  f"the HT/FT grid has no fair to measure it against)",
                                  gain, start, periods="HT/FT", odds=ob,
-                                 basis="gap"))
+                                 dom_pct=gain))
     return out
 
 

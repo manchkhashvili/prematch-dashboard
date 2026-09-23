@@ -1604,6 +1604,10 @@ def _consistency_to_dict(f, book: str = "cb") -> dict:
         # emit two different quantities under one kind (htft_fair); None
         # elsewhere, and flag_rank falls back to the kind table.
         "basis": getattr(f, "basis", None),
+        # Set only where severity is not itself the ranking number — the
+        # dominance rows. flag_rank fills both in for everything else.
+        "dom_pct": getattr(f, "dom_pct", None),
+        "ev_pct": getattr(f, "ev_pct", None),
     }
 
 

@@ -537,6 +537,7 @@ const KIND_UNIT = {
 const BASIS_CLASS = {
   fault: "conf-weak",      // the board itself is broken — read it first
   locked: "conf-strong",   // arithmetic on displayed prices
+  dom: "conf-strong",      // one price impossible beside another; certain, uncashable
   ev: "conf-medium",       // real money, but only if the model is right
   gap: "conf-weak",        // no price attached
 };
@@ -805,8 +806,13 @@ function renderConsistency(flags) {
       <td class="dim mono">${f.periods}</td>
       <td>${f.detail}${f.stale ? ' <span class="dim">(stale — book unreachable last sweep)</span>' : ''}</td>
       <td><span class="conf ${BASIS_CLASS[f.basis] || "conf-weak"}">${f.basis || "gap"}</span></td>
-      <td class="num ${f.ev_pct == null ? "dim" : consClass(f.ev_pct)}">${
-        f.ev_pct == null ? "—" : Number(f.ev_pct).toFixed(2) + "%"}</td>
+      <td class="num ${f.ev_pct == null ? "dim" : consClass(f.ev_pct)}"${
+        f.ev_pct == null && f.dom_pct != null
+          ? ' title="No EV: a dominance row tells you which of two bets to take, not that either is worth taking. The number is how much longer the strictly better bet is priced."'
+          : ""}>${
+        f.ev_pct != null ? Number(f.ev_pct).toFixed(2) + "%"
+        : f.dom_pct != null ? "+" + Number(f.dom_pct).toFixed(1) + "% better"
+        : "—"}</td>
       <td class="num dim">${Number(f.severity).toFixed(1)}</td>
       <td><a class="log-bet-link" href="${buildConsistencyBetUrl(f)}"
              title="Log a bet on this match — market, price and line are left blank for you to fill from the book">Log</a>${Marks.buttonHTML(Marks.key(f), f)}</td>

@@ -122,18 +122,65 @@ def test_an_unknown_kind_does_not_raise_and_does_not_claim_money():
 # ── the split kinds ──────────────────────────────────────────────────────────
 
 def test_a_row_may_override_its_kind():
-    """combo_dominance emits EV on the totals branch and a raw 'pays X% more'
-    on the HT/FT branch. Same kind, only one of them is money."""
-    assert flag_rank.basis_of(_row("combo_dominance", 9.5)) == "ev"
-    assert flag_rank.basis_of(_row("combo_dominance", 9.5, basis="gap")) == "gap"
+    """htft_fair emits an EV on its EDGE branch and a distance between two
+    probabilities on its SHAPE branch. Same kind, only one is money."""
+    assert flag_rank.basis_of(_row("htft_fair", 13.6)) == "ev"
+    assert flag_rank.basis_of(_row("htft_fair", 13.6, basis="gap")) == "gap"
 
 
 def test_the_override_moves_the_row():
     rows = flag_rank.sort_flags([
-        _row("combo_dominance", 9.5, basis="gap"),   # HT/FT: no model behind it
+        _row("htft_fair", 13.6, basis="gap"),        # SHAPE: not an EV
         _row("combo_fair", 1.0),
     ])
-    assert [r["kind"] for r in rows] == ["combo_fair", "combo_dominance"]
+    assert [r["kind"] for r in rows] == ["combo_fair", "htft_fair"]
+
+
+# ── the dominance tier ───────────────────────────────────────────────────────
+
+def test_dominance_sits_between_locked_and_ev():
+    """Owner, on a pickem_dominance row that the first cut put in `gap`:
+    "they should be second before ev betts". A 0.0 handicap quoted LONGER
+    than the 1X2 on the same side is arithmetic on raw prices, not a soft
+    disagreement — the 0.0 voids the draw where the 1X2 loses, so it is the
+    strictly better bet, and the better bet cannot be the longer price."""
+    rows = flag_rank.sort_flags([
+        _row("soccer_fair", 40.0),          # ev
+        _row("pickem_dominance", 1.0),      # dom
+        _row("combo_cover", 0.1),           # locked
+        _row("ml_vs_spread", 30.0),         # gap
+    ])
+    assert [r["basis"] for r in rows] == ["locked", "dom", "ev", "gap"]
+
+
+def test_every_dominance_check_is_in_the_tier():
+    """All three are containments — outcome set A inside B, B quoted longer.
+    None of them may sit in `gap` or be ranked as a plain model EV."""
+    for kind in ("pickem_dominance", "combo_dominance", "vb_sets_dominance"):
+        assert flag_rank.BASIS[kind] == "dom", kind
+
+
+def test_the_tier_ranks_on_the_impossibility_not_on_severity():
+    """The tier mixes rows whose severity is an EV with rows whose severity is
+    a price improvement, so severity cannot order it — that is the same
+    category error one tier down."""
+    rows = flag_rank.sort_flags([
+        _row("combo_dominance", 9.0, dom_pct=2.0, ev_pct=9.0),   # priced
+        _row("pickem_dominance", 4.0),                            # dom_pct = 4.0
+    ])
+    assert [r["kind"] for r in rows] == ["pickem_dominance", "combo_dominance"]
+
+
+def test_an_unpriced_dominance_row_defaults_its_size_to_severity():
+    f = flag_rank.annotate(_row("pickem_dominance", 13.3))
+    assert f["dom_pct"] == 13.3 and f["ev_pct"] is None
+
+
+def test_a_priced_dominance_row_keeps_both_numbers():
+    """combo_dominance's totals branch and vb_sets_dominance gate on a model
+    fair before firing, so they carry an EV on top of the impossibility."""
+    f = flag_rank.annotate(_row("vb_sets_dominance", 6.4, dom_pct=18.0, ev_pct=6.4))
+    assert f["dom_pct"] == 18.0 and f["ev_pct"] == 6.4
 
 
 def test_htft_fair_splits_its_two_branches():
@@ -150,14 +197,25 @@ def test_htft_fair_splits_its_two_branches():
     )
 
 
-def test_lider_htft_dominance_is_not_ranked_as_money():
+def test_lider_htft_dominance_carries_no_ev():
+    """The HT/FT grid has no atom model, so 'the superset pays X% more' is a
+    real impossibility with no fair behind it: dom_pct, and no ev_pct."""
     from src import lider_combos
     src = Path(lider_combos.__file__).read_text()
     i = src.index('f"HT/FT: \'{la}\'')
-    assert 'basis="gap"' in src[i:i + 600], (
-        "the HT/FT containment row no longer overrides its basis — 'the "
-        "superset pays X% more' has no fair behind it and is not an EV"
+    tail = src[i:i + 700]
+    assert "dom_pct=gain" in tail
+    assert "ev_pct" not in tail, (
+        "the HT/FT containment row claims an expected value, but nothing "
+        "prices it — a superset can pay 9% more and still be EV -40%"
     )
+
+
+def test_lider_totals_dominance_carries_both():
+    from src import lider_combos
+    src = Path(lider_combos.__file__).read_text()
+    i = src.index("dom_pct=gain, ev_pct=ev_sup")
+    assert i > 0, "the priced containment row lost one of its two numbers"
 
 
 # ── the wiring ───────────────────────────────────────────────────────────────
