@@ -776,9 +776,7 @@ def _vb_sets_identities(cs: dict[str, float], ml: Optional[dict[str, float]],
     anything. `fair` is the best-of-5 partition from the match price; the
     duplicate and dominance rows exist only when the leg they name clears it
     by VB_SETS_MIN_EV (severity = that edge); covers need no model. Returns
-    (kind, severity, detail, bet_label, bet_odds, dom_pct) tuples, where
-    dom_pct is the % by which the superset is the longer price — the number
-    the dominance tier ranks on, and None on the rows that are not dominance:
+    (kind, severity, detail, bet_label, bet_odds) tuples:
 
       duplicate  — the same set priced twice, >= VB_SETS_DUP_PCT apart, and
                    the LONGER price beats fair
@@ -845,7 +843,7 @@ def _vb_sets_identities(cs: dict[str, float], ml: Optional[dict[str, float]],
                                 f"({'/'.join(sorted(st))}) is also priced at {lo[0]:.2f} as "
                                 f"'{lo[1]}' ({gap:.0f}% apart), so the feed disagrees with itself "
                                 f"and the longer price is the side that clears fair",
-                                hi[1], hi[0], None))
+                                hi[1], hi[0]))
         comp = full - st
         if comp in by and sorted(st) < sorted(comp):
             best_c = max(by[comp])
@@ -854,7 +852,7 @@ def _vb_sets_identities(cs: dict[str, float], ml: Optional[dict[str, float]],
                 out.append(("vb_sets_cover", (1.0 / cost - 1.0) * 100.0,
                             f"'{hi[1]}' @{hi[0]:.2f} and '{best_c[1]}' @{best_c[0]:.2f} cover every "
                             f"outcome for {cost:.4f} — locked {(1/cost-1)*100:+.2f}%",
-                            hi[1], hi[0], None))
+                            hi[1], hi[0]))
     sets_list = list(by)
     for a in sets_list:
         for b in sets_list:
@@ -874,8 +872,7 @@ def _vb_sets_identities(cs: dict[str, float], ml: Optional[dict[str, float]],
                                 f"event than '{worst_a[1]}' @{worst_a[0]:.2f}, which it contains yet "
                                 f"pays more than ({(best_b[0] / worst_a[0] - 1) * 100:.0f}% longer for "
                                 f"a superset — impossible on one distribution)",
-                                best_b[1], best_b[0],
-                                (best_b[0] / worst_a[0] - 1) * 100.0))
+                                best_b[1], best_b[0]))
     return out
 
 
@@ -940,26 +937,6 @@ class ConsistencyFlag:
     # "corners" for the corner markets, and so on. Every check runs
     # INDEPENDENTLY per submarket — see the grouping in find_consistency_flags.
     submarket: Optional[str] = None
-    # Per-ROW override of src.flag_rank.BASIS — what this flag's `severity`
-    # actually is ("locked" / "ev" / "gap" / "fault"), and therefore whether
-    # the tab may rank it as money. None means "use the kind's entry".
-    #
-    # Only needed where one kind emits two different quantities. htft_fair is
-    # the case: its EDGE branch reports posted x p_fair - 1, an expected value,
-    # while its SHAPE branch reports |ratio - 1| between two probabilities.
-    # Under one name they were sorted as if both were EV, which put a shape
-    # disagreement above every locked cover on the board.
-    basis: Optional[str] = None
-    # "dom" rows only: the % by which the strictly better bet is the LONGER
-    # price — the size of the impossibility, and what the dominance tier is
-    # ordered on. Defaults to `severity`, which is already that number on the
-    # rows whose severity is a price improvement; the rows whose severity is
-    # an EV instead (vb_sets_dominance) pass it explicitly.
-    dom_pct: Optional[float] = None
-    # Set only where `severity` is NOT itself the expected value but one
-    # exists anyway — again the priced dominance rows. Elsewhere flag_rank
-    # reads the EV off severity for the kinds whose severity is an EV.
-    ev_pct: Optional[float] = None
 
     @property
     def match_label(self) -> str:
@@ -1542,7 +1519,7 @@ def find_consistency_flags(
         views = {per: _build_period_view(mkts) for per, mkts in periods.items()}
 
         def mk(kind, per_label, detail, severity, outcome=None, odds=None,
-               basis=None, dom_pct=None, ev_pct=None, _sub=submarket):
+               _sub=submarket):
             flags.append(ConsistencyFlag(
                 sport=m.sport, league=m.league, home=m.home, away=m.away,
                 start_time=m.start_time, event_id=eid,
@@ -1550,8 +1527,7 @@ def find_consistency_flags(
                 detail=(f"[{_sub}] {detail}" if _sub else detail),
                 severity=round(severity, 2), outcome=outcome,
                 odds=round(float(odds), 3) if odds is not None else None,
-                submarket=_sub, basis=basis,
-                dom_pct=dom_pct, ev_pct=ev_pct,
+                submarket=_sub,
             ))
 
         # 1. ML vs spread win-prob (per period)
@@ -1829,15 +1805,10 @@ def find_consistency_flags(
                 if sets_spread or sets_total or ml:
                     fair5 = (_cs5_fair_from_match(1.0 - ftv.ml_phome)
                              if real_prices and in_range else None)
-                    for (kind, sev, detail, bet_label, bet_odds,
-                         dom) in _vb_sets_identities(
+                    for kind, sev, detail, bet_label, bet_odds in _vb_sets_identities(
                             cs, ml if real_prices else None, sets_spread, sets_total,
                             fair=fair5):
-                        # vb_sets_dominance reports an EV as its severity, so
-                        # the dominance tier cannot rank it on that — it hands
-                        # over the containment size separately.
-                        mk(kind, "FT", detail, sev, outcome=bet_label, odds=bet_odds,
-                           dom_pct=dom, ev_pct=(sev if dom is not None else None))
+                        mk(kind, "FT", detail, sev, outcome=bet_label, odds=bet_odds)
 
         # 4c-quater. SOCCER: each HALF's result against the full-time result.
         #
@@ -2074,10 +2045,10 @@ def find_consistency_flags(
         # 6. HT/FT vs the bivariate-normal fair model (basketball only —
         #    sigma/rho are calibrated to basketball margins)
         if combo and m.sport == "basketball":
-            for (kind, periods_label, detail, severity, outcome, odds,
-                 basis) in _htft_fair_signals(combo, views, m.league):
-                mk(kind, periods_label, detail, severity, outcome=outcome,
-                   odds=odds, basis=basis)
+            for kind, periods_label, detail, severity, outcome in _htft_fair_signals(
+                combo, views, m.league,
+            ):
+                mk(kind, periods_label, detail, severity, outcome=outcome)
 
     flags.sort(key=lambda f: f.severity, reverse=True)
     # 7. DUPLICATE FIXTURE — the only CROSS-event rule here. Runs after the
@@ -2091,16 +2062,8 @@ def _htft_fair_signals(
     combo: dict[str, float],
     views: dict[str, "_PeriodView"],
     league: Optional[str],
-) -> list[tuple[str, str, str, float, str, float, str]]:
-    """Model-based HT/FT signals for one event (check 6 — see module doc).
-
-    Returns (kind, periods, detail, severity, outcome, odds, basis). The last
-    two exist because the two branches below are NOT the same quantity: EDGE
-    reports an expected value, SHAPE reports how far two probabilities are
-    apart. Both used to ship as bare `htft_fair` rows with no price, so the
-    tab ranked a shape disagreement as money and the odds band could not
-    reach either of them.
-    """
+) -> list[tuple[str, str, str, float, str]]:
+    """Model-based HT/FT signals for one event (check 6 — see module doc)."""
     ft = views.get("FT")
     if ft is None:
         return []
@@ -2129,7 +2092,7 @@ def _htft_fair_signals(
     overround = sum(inv.values())
     shape = (nine and len(inv) >= 7) or (not nine and len(inv) >= 5)
 
-    out: list[tuple[str, str, str, float, str, float, str]] = []
+    out: list[tuple[str, str, str, float, str]] = []
     params = (f"mu={mu:+.1f}" + (f", mu1={mu1:+.1f}" if mu1 is not None else "")
               + f", sigma={sigma:g}, rho={htft_model.RHO:g}, "
               + ("9" if nine else "6") + "-outcome")
@@ -2149,7 +2112,7 @@ def _htft_fair_signals(
                 "htft_fair", "HT/FT",
                 f"HT/FT {label} @{cb:g} vs model fair {fair_odds:.2f} "
                 f"(+{edge_pct:.0f}% over fair, before their vig — possible "
-                f"+EV; {params})", round(edge_pct, 2), label, cb, "ev",
+                f"+EV; {params})", round(edge_pct, 2), label,
             ))
             continue
         # SHAPE: devigged prob disagrees with the model by a big factor.
@@ -2162,9 +2125,7 @@ def _htft_fair_signals(
                     "htft_fair", "HT/FT",
                     f"HT/FT {label} devigs to {p_cb*100:.0f}% but the model "
                     f"says {p_fair*100:.0f}% (x{ratio:.2f}) — market shape "
-                    f"off vs model; this is a disagreement about the SHAPE of "
-                    f"the board, not an edge on a price ({params})",
-                    round(off_pct, 2), label, cb, "gap",
+                    f"off vs model ({params})", round(off_pct, 2), label,
                 ))
     return out
 

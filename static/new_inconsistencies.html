@@ -122,14 +122,12 @@
           <th>Check</th>
           <th>Periods</th>
           <th>What's wrong</th>
-          <th title="What this row's number IS. locked = the profit follows by arithmetic from prices the book is showing right now, no model. ev = one named leg against a model fair price. gap = two markets contradict each other with no price attached. fault = the book has listed one match twice.">Basis</th>
-          <th class="num" title="Expected value of the leg this row names, in % of stake. Blank on gap rows — a probability gap only becomes an EV after deciding which of the two disagreeing markets is wrong, and that is a model. The table is SORTED by this.">EV %</th>
-          <th class="num" title="The raw per-check number, in that check's own unit (pp / points / %). Not comparable across checks.">Severity</th>
+          <th class="num" title="Bigger = weirder (pp or points)">Severity</th>
           <th title="Log a bet on this match. Prefills match, book, start time and the finding as a note — you fill in market, price and line yourself, because a consistency flag says 'something is wrong here' without naming one bettable rung."></th>
         </tr>
       </thead>
       <tbody id="cons-body">
-        <tr><td colspan="12" class="empty">loading…</td></tr>
+        <tr><td colspan="10" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -368,14 +366,6 @@ const KIND_LABEL = {
   combo_duplicate: "lider combo: same event, two prices",
   combo_fair: "lider combo: vs model fair",
 };
-// Mirrors static/anomalies.html — both tabs are ordered server-side by
-// src/flag_rank.py and neither re-sorts. See that module for why one
-// sort(key=severity) over 33 checks was a category error.
-const BASIS_CLASS = {
-  fault: "conf-weak", locked: "conf-strong", dom: "conf-strong",
-  ev: "conf-medium", gap: "conf-weak",
-};
-
 function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
 
 // Build a /bets.html prefill for a consistency flag.
@@ -437,11 +427,11 @@ function buildConsistencyBetUrl(f) {
 function renderConsistency(flags) {
   const body = document.getElementById("cons-body");
   if (!meta.enabled) {
-    body.innerHTML = `<tr><td colspan="12" class="empty">LSport cycle off — enable `
+    body.innerHTML = `<tr><td colspan="10" class="empty">LSport cycle off — enable `
       + `<b>lsport_scan</b> under <a href="/config.html">Config</a> &rarr; Scans</td></tr>`; return;
   }
   if (!flags.length) {
-    body.innerHTML = `<tr><td colspan="12" class="empty">no consistency flags</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="10" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
     <tr class="${Marks.rowClass(Marks.key(f))}"${f.stale ? ' style="opacity:.5"' : ''}>
@@ -453,15 +443,7 @@ function renderConsistency(flags) {
       <td>${KIND_LABEL[f.kind] || f.kind}</td>
       <td class="dim mono">${f.periods}</td>
       <td>${f.detail}${f.stale ? ' <span class="dim">(stale — book unreachable last sweep)</span>' : ''}</td>
-      <td><span class="conf ${BASIS_CLASS[f.basis] || "conf-weak"}">${f.basis || "gap"}</span></td>
-      <td class="num ${f.ev_pct == null ? "dim" : consClass(f.ev_pct)}"${
-        f.ev_pct == null && f.dom_pct != null
-          ? ' title="No EV: a dominance row tells you which of two bets to take, not that either is worth taking. The number is how much longer the strictly better bet is priced."'
-          : ""}>${
-        f.ev_pct != null ? Number(f.ev_pct).toFixed(2) + "%"
-        : f.dom_pct != null ? "+" + Number(f.dom_pct).toFixed(1) + "% better"
-        : "—"}</td>
-      <td class="num dim">${Number(f.severity).toFixed(1)}</td>
+      <td class="num ${consClass(f.severity)}">${Number(f.severity).toFixed(1)}</td>
       <td><a class="log-bet-link" href="${buildConsistencyBetUrl(f)}"
              title="Log a bet on this match — market, price and line are left blank for you to fill from the book">Log</a>${Marks.buttonHTML(Marks.key(f), f)}</td>
     </tr>
