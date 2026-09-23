@@ -819,6 +819,10 @@ Family E (soccer, in the `SOFT_SCAN` sweep): `SOCCER_FAV_MAX` (game gate, defaul
 6. **Cross-fit divergence** — diagnostic ("one family is stale"), not EV.
 
 ## Confidence ranking (all families, current)
+> Enforced in code since 2026-09-23 — see `src/flag_rank.py` and the
+> "one ranking currency" section at the end of this file. The tab is
+> ordered `fault` → `locked` → `ev` → `gap`, not by raw severity.
+
 1. **A (ladder monotonicity)** — hard, bettable, single-book. Trust most.
 2. **C (Betlive OT-fold)** — hard structural bound, single-book, but short-lived.
 3. **E (soccer model + identities + curves)** — the soccer research core;
@@ -1318,3 +1322,94 @@ Replayed 11,639 CB events matched to Pinnacle, first crossing of ≥ 3% edge,
 - Alert sounds: both anomaly chimes were pure plucks (instant attack, decay
   across the whole slot) and the consistency bend ended at 294 Hz. Now hold
   then release; bend moved to 660→440 Hz with an octave partial.
+
+---
+
+## 2026-09-23 — one ranking currency: `src/flag_rank.py`
+
+Owner: *"they were hiding in the bottom when its locked, and when sometimes
+they are not even locked and it shows on the top of the chart — I think
+everything should be calculated by +EV instead of some locked and being on
+bottom."*
+
+### The category error
+
+Every check reports a `severity`, and the tab ordered all 33 of them with one
+`cons.sort(key=lambda f: f["severity"], reverse=True)`. But severity is not
+one quantity, and the page had said so for months — `KIND_UNIT` in
+`static/anomalies.html` maps each kind to `pp`, `pts` or `%`. **The sort
+ignored its own units table.**
+
+The top of the board on 2026-09-23 (60 flags, CB + Lider):
+
+| sev | kind | what the number actually is |
+|---|---|---|
+| 13.62 | `htft_fair` | model EV, % — money, if the model is right |
+| 12.78 | `htft_combo` | model EV vs correlation-fair, % |
+| **9.50** | `combo_dominance` | **"the superset pays 9.5% more"** — not money |
+| 8.50 | `combo_duplicate` | model EV, % |
+| **7.99** | `ml_vs_spread` | **a 8pp probability gap** — names no bet at all |
+
+Everything arithmetic-certain sorted below that. Counterfactual on the same
+board, inserting one `combo_cover`:
+
+| locked | old rank | new rank |
+|---|---|---|
+| +8.0 % | 5th | 1st |
+| +7.1 % | 7th | 1st |
+| **+4.5 %** | **17th** | 1st |
+| **+2.0 %** | **44th of 61** | 1st |
+
+A guaranteed +2% sorted 44th. That is the report, reproduced.
+
+### The four bases
+
+Each kind is classified by **what its severity is**, read off the code that
+builds the flag rather than inferred from the name:
+
+- **`fault`** — the book's board is broken (`duplicate_fixture`,
+  `duplicate_live`). Flat severity 100 by design; keeps its pin at the top.
+- **`locked`** — the profit follows by *arithmetic* from prices on screen
+  right now. `pickem_arb`, `pickem_duplicate`, `combo_cover`, `vb_sets_cover`.
+  Severity **is** the return on outlay.
+- **`ev`** — one named leg, at a known price, against a reference fair.
+  Severity **is** the expected value, and is only as true as the model.
+- **`gap`** — a contradiction with no money on it: a probability gap (pp), a
+  total that misses its children (pts), or a price longer than one it
+  dominates (a free upgrade, not a standalone bet). **No `ev_pct`.**
+
+Order: `fault` → `locked` → `ev` → `gap`, by EV inside the paying tiers.
+Locked above model EV because that is this project's own repeated lesson — the
+measured zeros and the artifacts have all been on the model-relative side of
+the line; the money that paid has been arithmetic on two prices on one screen.
+
+### `ev_pct` is deliberately absent on gap rows
+
+A pp gap *can* be turned into an EV — multiply by the leg's price — but only
+after deciding **which of the two disagreeing markets is the wrong one**, and
+that decision is a model. Deriving it here would put the least trustworthy
+rows back on top of the board wearing a money sign.
+
+### Two kinds were lying about themselves
+
+One name, two quantities, so the kind table cannot be the last word — the
+emitter overrides with `basis=` on the row:
+
+- **`combo_dominance`** — the totals branch gates on the atom model and
+  reports EV; the **HT/FT branch has no model** and reports the raw
+  `gain` ("the superset pays X% more"). That is the 9.50 above: it can be
+  true, and the bet can still be EV −40%.
+- **`htft_fair`** — the EDGE branch reports `posted × p_fair − 1` (an EV);
+  the SHAPE branch reports `|ratio − 1|` between two probabilities. Both
+  shipped as bare `htft_fair` with **no `odds`**, so they also escaped the
+  odds band the panel says applies to them. Both now carry their price.
+
+### Blast radius
+
+`ALERT_FEED_CAP` truncates the alert feed at 500 after sorting. Under the old
+order a locked cover could be cut off by unpriced gap rows before the poller
+ever saw it; the alert feed now carries `basis` and shares the ranking.
+
+Pinned by `tests/test_flag_rank.py` (54 tests), including a totality guard:
+every kind in the tab's `KIND_LABEL` must appear in `flag_rank.BASIS`, so a
+new detector cannot silently join the sort unclassified.

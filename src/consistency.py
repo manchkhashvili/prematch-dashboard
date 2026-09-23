@@ -937,6 +937,16 @@ class ConsistencyFlag:
     # "corners" for the corner markets, and so on. Every check runs
     # INDEPENDENTLY per submarket — see the grouping in find_consistency_flags.
     submarket: Optional[str] = None
+    # Per-ROW override of src.flag_rank.BASIS — what this flag's `severity`
+    # actually is ("locked" / "ev" / "gap" / "fault"), and therefore whether
+    # the tab may rank it as money. None means "use the kind's entry".
+    #
+    # Only needed where one kind emits two different quantities. htft_fair is
+    # the case: its EDGE branch reports posted x p_fair - 1, an expected value,
+    # while its SHAPE branch reports |ratio - 1| between two probabilities.
+    # Under one name they were sorted as if both were EV, which put a shape
+    # disagreement above every locked cover on the board.
+    basis: Optional[str] = None
 
     @property
     def match_label(self) -> str:
@@ -1519,7 +1529,7 @@ def find_consistency_flags(
         views = {per: _build_period_view(mkts) for per, mkts in periods.items()}
 
         def mk(kind, per_label, detail, severity, outcome=None, odds=None,
-               _sub=submarket):
+               basis=None, _sub=submarket):
             flags.append(ConsistencyFlag(
                 sport=m.sport, league=m.league, home=m.home, away=m.away,
                 start_time=m.start_time, event_id=eid,
@@ -1527,7 +1537,7 @@ def find_consistency_flags(
                 detail=(f"[{_sub}] {detail}" if _sub else detail),
                 severity=round(severity, 2), outcome=outcome,
                 odds=round(float(odds), 3) if odds is not None else None,
-                submarket=_sub,
+                submarket=_sub, basis=basis,
             ))
 
         # 1. ML vs spread win-prob (per period)
@@ -2045,10 +2055,10 @@ def find_consistency_flags(
         # 6. HT/FT vs the bivariate-normal fair model (basketball only —
         #    sigma/rho are calibrated to basketball margins)
         if combo and m.sport == "basketball":
-            for kind, periods_label, detail, severity, outcome in _htft_fair_signals(
-                combo, views, m.league,
-            ):
-                mk(kind, periods_label, detail, severity, outcome=outcome)
+            for (kind, periods_label, detail, severity, outcome, odds,
+                 basis) in _htft_fair_signals(combo, views, m.league):
+                mk(kind, periods_label, detail, severity, outcome=outcome,
+                   odds=odds, basis=basis)
 
     flags.sort(key=lambda f: f.severity, reverse=True)
     # 7. DUPLICATE FIXTURE — the only CROSS-event rule here. Runs after the
@@ -2062,8 +2072,16 @@ def _htft_fair_signals(
     combo: dict[str, float],
     views: dict[str, "_PeriodView"],
     league: Optional[str],
-) -> list[tuple[str, str, str, float, str]]:
-    """Model-based HT/FT signals for one event (check 6 — see module doc)."""
+) -> list[tuple[str, str, str, float, str, float, str]]:
+    """Model-based HT/FT signals for one event (check 6 — see module doc).
+
+    Returns (kind, periods, detail, severity, outcome, odds, basis). The last
+    two exist because the two branches below are NOT the same quantity: EDGE
+    reports an expected value, SHAPE reports how far two probabilities are
+    apart. Both used to ship as bare `htft_fair` rows with no price, so the
+    tab ranked a shape disagreement as money and the odds band could not
+    reach either of them.
+    """
     ft = views.get("FT")
     if ft is None:
         return []
@@ -2092,7 +2110,7 @@ def _htft_fair_signals(
     overround = sum(inv.values())
     shape = (nine and len(inv) >= 7) or (not nine and len(inv) >= 5)
 
-    out: list[tuple[str, str, str, float, str]] = []
+    out: list[tuple[str, str, str, float, str, float, str]] = []
     params = (f"mu={mu:+.1f}" + (f", mu1={mu1:+.1f}" if mu1 is not None else "")
               + f", sigma={sigma:g}, rho={htft_model.RHO:g}, "
               + ("9" if nine else "6") + "-outcome")
@@ -2112,7 +2130,7 @@ def _htft_fair_signals(
                 "htft_fair", "HT/FT",
                 f"HT/FT {label} @{cb:g} vs model fair {fair_odds:.2f} "
                 f"(+{edge_pct:.0f}% over fair, before their vig — possible "
-                f"+EV; {params})", round(edge_pct, 2), label,
+                f"+EV; {params})", round(edge_pct, 2), label, cb, "ev",
             ))
             continue
         # SHAPE: devigged prob disagrees with the model by a big factor.
@@ -2125,7 +2143,9 @@ def _htft_fair_signals(
                     "htft_fair", "HT/FT",
                     f"HT/FT {label} devigs to {p_cb*100:.0f}% but the model "
                     f"says {p_fair*100:.0f}% (x{ratio:.2f}) — market shape "
-                    f"off vs model ({params})", round(off_pct, 2), label,
+                    f"off vs model; this is a disagreement about the SHAPE of "
+                    f"the board, not an edge on a price ({params})",
+                    round(off_pct, 2), label, cb, "gap",
                 ))
     return out
 

@@ -57,6 +57,7 @@ from fastapi.staticfiles import StaticFiles
 from src import bets, capital, horizon, ticks
 from src.anomalies import find_ladder_anomalies
 from src.consistency import find_consistency_flags
+from src import flag_rank
 from src.edge import LINE_MATCH_TOLERANCE, compute_opportunities, match_confidence
 from src.matcher import (
     MatchedEvent, UnmatchedEvent, log_unmatched,
@@ -1599,6 +1600,10 @@ def _consistency_to_dict(f, book: str = "cb") -> dict:
         # and the odds filter treats them as unfilterable rather than dropping
         # them, because "no price" is not "a bad price".
         "odds": getattr(f, "odds", None),
+        # Per-row override of src.flag_rank.BASIS. Set only by checks that
+        # emit two different quantities under one kind (htft_fair); None
+        # elsewhere, and flag_rank falls back to the kind table.
+        "basis": getattr(f, "basis", None),
     }
 
 
@@ -3008,7 +3013,12 @@ async def api_anomalies(
                         + _cb_soft_flags + _betlive_soft_flags + extra_cons + book_cons
                         + _lider_combo_flags + _live_dup_flags)
             if f["severity"] >= min_severity]
-    cons.sort(key=lambda f: f["severity"], reverse=True)
+    # Ranked by what each severity MEANS, not by its magnitude — see
+    # src/flag_rank.py. One sort over 33 checks whose severity is variously a
+    # locked return on outlay, a model EV, a probability gap in pp and a
+    # difference in goals put every arithmetic-certain row below the
+    # model-relative ones.
+    cons = flag_rank.sort_flags(cons)
     return {
         # Read the LIVE config, not the boot env: the Config tab can switch
         # these on/off at runtime, and reporting the env value made the tab say
@@ -3170,8 +3180,14 @@ def _consistency_alert_rows(src: list[dict] | None = None) -> list[dict]:
         # The price of the leg you would actually back, so the client can gate
         # on it. None where the check does not identify a single bettable leg.
         "odds": f.get("odds"),
+        # What this row's `severity` is: "locked" (arithmetic on displayed
+        # prices), "ev" (against a model fair), "gap" (a contradiction with no
+        # price on it) or "fault". The poller needs it to rank chimes the way
+        # the tab ranks rows, and ALERT_FEED_CAP truncates this list — so
+        # without it a locked cover can be cut off by unpriced gap rows.
+        "basis": flag_rank.basis_of(f),
     } for f in src]
-    out.sort(key=lambda r: (r["severity"] or 0.0), reverse=True)
+    out = flag_rank.sort_flags(out)
     return out[:ALERT_FEED_CAP]
 
 
@@ -3253,7 +3269,7 @@ async def api_new_inconsistencies(
     rows = await asyncio.to_thread(_enrich_anomaly_rows, base, snapshot)
     cons = [f for flags_ in _lsport_consistency.values() for f in flags_
             if f["severity"] >= min_severity]
-    cons.sort(key=lambda f: f["severity"], reverse=True)
+    cons = flag_rank.sort_flags(cons)
     return {
         **_lsport_meta(),
         "count": len(rows),

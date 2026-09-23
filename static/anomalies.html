@@ -190,12 +190,14 @@
           <th>Check</th>
           <th>Periods</th>
           <th>What's wrong</th>
-          <th class="num" title="Bigger = weirder (pp or points)">Severity</th>
+          <th title="What this row's number IS. locked = the profit follows by arithmetic from prices the book is showing right now, no model. ev = one named leg against a model fair price. gap = two markets contradict each other with no price attached — a probability gap is not money, however big. fault = the book has listed one match twice.">Basis</th>
+          <th class="num" title="Expected value of the leg this row names, in % of stake. Blank on gap rows: turning a probability gap into an EV means first deciding which of the two disagreeing markets is the wrong one, and that is a model, not arithmetic. The table is SORTED by this — locked first, then ev, then the unpriced rows.">EV %</th>
+          <th class="num" title="The raw per-check number, in that check's own unit (pp / points / %) — see the alert panel. Not comparable ACROSS checks, which is why the table no longer sorts by it.">Severity</th>
           <th title="Log a bet on this match. Prefills match, book, start time and the finding as a note — you fill in market, price and line yourself, because a consistency flag says 'something is wrong here' without naming one bettable rung."></th>
         </tr>
       </thead>
       <tbody id="cons-body">
-        <tr><td colspan="10" class="empty">loading…</td></tr>
+        <tr><td colspan="12" class="empty">loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -461,6 +463,10 @@ const CONS_MAXODDS = "anom_cons_alert_max_odds";
 const CONS_MINODDS = "anom_cons_alert_min_odds";
 
 // Severity means a different quantity per check, so the panel labels each one.
+// This table is the ALERT PANEL's label; what the tab SORTS by is
+// src/flag_rank.py, which classifies the same kinds by whether their
+// severity is money at all. Keep the two in step — a check missing from
+// either one is caught by tests/test_flag_rank.py.
 // Verified against the code that builds the flag, not guessed:
 //   pp  — ml_vs_spread (gap), favourite_flip (summed edges), quarter_ml_extreme,
 //         betlive_* (gap_pp), basketball_fav (gap_pp), soccer_identity,
@@ -519,6 +525,20 @@ const KIND_UNIT = {
   // combo_duplicate severity is how much more the longer of two prices for the
   // SAME event pays; combo_fair is model EV. Both %.
   combo_duplicate: "%", combo_fair: "%",
+};
+
+// The tab is ordered by src/flag_rank.py, server-side, and the client does NOT
+// re-sort: fault, then locked, then ev, then gap, by EV inside the paying
+// tiers. Before that (fixed 2026-09-23) one `sort(key=severity)` ranked all 33
+// checks together although KIND_UNIT above has always said their severities
+// are three different units. On the 60-row board that afternoon a +4.5%
+// LOCKED cover would have sorted 17th and a +2.0% one 44th, under rows like
+// "the superset pays 9.5% more" — which is not money at all.
+const BASIS_CLASS = {
+  fault: "conf-weak",      // the board itself is broken — read it first
+  locked: "conf-strong",   // arithmetic on displayed prices
+  ev: "conf-medium",       // real money, but only if the model is right
+  gap: "conf-weak",        // no price attached
 };
 
 function lsGet(k, dflt) {
@@ -768,11 +788,11 @@ function buildConsistencyBetUrl(f) {
 function renderConsistency(flags) {
   const body = document.getElementById("cons-body");
   if (!meta.enabled) {
-    body.innerHTML = `<tr><td colspan="10" class="empty">scanner off — enable under `
+    body.innerHTML = `<tr><td colspan="12" class="empty">scanner off — enable under `
       + `<a href="/config.html">Config</a> &rarr; Scans</td></tr>`; return;
   }
   if (!flags.length) {
-    body.innerHTML = `<tr><td colspan="10" class="empty">no consistency flags</td></tr>`; return;
+    body.innerHTML = `<tr><td colspan="12" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
     <tr class="${Marks.rowClass(Marks.key(f))}"${f.stale ? ' style="opacity:.5"' : ''}>
@@ -784,7 +804,10 @@ function renderConsistency(flags) {
       <td>${KIND_LABEL[f.kind] || f.kind}</td>
       <td class="dim mono">${f.periods}</td>
       <td>${f.detail}${f.stale ? ' <span class="dim">(stale — book unreachable last sweep)</span>' : ''}</td>
-      <td class="num ${consClass(f.severity)}">${Number(f.severity).toFixed(1)}</td>
+      <td><span class="conf ${BASIS_CLASS[f.basis] || "conf-weak"}">${f.basis || "gap"}</span></td>
+      <td class="num ${f.ev_pct == null ? "dim" : consClass(f.ev_pct)}">${
+        f.ev_pct == null ? "—" : Number(f.ev_pct).toFixed(2) + "%"}</td>
+      <td class="num dim">${Number(f.severity).toFixed(1)}</td>
       <td><a class="log-bet-link" href="${buildConsistencyBetUrl(f)}"
              title="Log a bet on this match — market, price and line are left blank for you to fill from the book">Log</a>${Marks.buttonHTML(Marks.key(f), f)}</td>
     </tr>

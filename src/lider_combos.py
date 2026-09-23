@@ -557,7 +557,7 @@ def _mask_prob(mask, atom_p):
 
 # ── flags ───────────────────────────────────────────────────────────────────
 def _flag(kind, home, away, league, eid, detail, severity, start=None,
-          periods="FT", odds=None):
+          periods="FT", odds=None, basis=None):
     """One flag row.
 
     `odds` is the price of the leg a bettor would actually back — the long side
@@ -579,6 +579,12 @@ def _flag(kind, home, away, league, eid, detail, severity, start=None,
         "detail": f"[liderbet] {detail}", "severity": round(severity, 1),
         "outcome": None,
         "odds": round(float(odds), 3) if odds is not None else None,
+        # Overrides src.flag_rank.BASIS for this ROW. Needed because
+        # combo_dominance emits two different quantities: the totals branch
+        # reports EV against the atom model, the HT/FT branch reports the raw
+        # "superset pays X% more" with no model behind it. Same kind, one is
+        # money and one is not, so the kind table cannot decide it.
+        **({"basis": basis} if basis else {}),
     }
 
 
@@ -690,10 +696,18 @@ def analyse_match(g, home, away, league, eid, start=None,
                                  odds=max(o for _l, o in got[1])))
         for la, oa, lb, ob, gain in containment(hb):
             if gain >= min_dom:
+                # No atom model for the HT/FT grid, so unlike the totals
+                # branch above there is no fair to price this against: `gain`
+                # is how much longer the superset is than the subset, and a
+                # superset can pay 9% more and still be a terrible bet. Ranked
+                # as a signal, not as money.
                 out.append(_flag("combo_dominance", home, away, league, eid,
                                  f"HT/FT: '{la}' @ {oa:g} is contained in '{lb}' "
-                                 f"@ {ob:g} — the superset pays {gain:.2f}% more",
-                                 gain, start, periods="HT/FT", odds=ob))
+                                 f"@ {ob:g} — the superset pays {gain:.2f}% more "
+                                 f"(a free upgrade over '{la}', not a priced edge: "
+                                 f"the HT/FT grid has no fair to measure it against)",
+                                 gain, start, periods="HT/FT", odds=ob,
+                                 basis="gap"))
     return out
 
 
