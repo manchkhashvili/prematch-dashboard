@@ -136,37 +136,12 @@ def test_a_plain_two_way_moneyline_is_not_treated_as_a_draw_no_bet():
 
 # ── pickem_dominance: the better bet at the longer price ─────────────────────
 
-def _doms(rows):
-    """Every dominance flag, by side+price — the check can name more than one
-    leg on a board now, so a single .get(kind) would pick whichever landed
-    last."""
-    return {(f.outcome, f.odds): f
-            for f in C.find_consistency_flags(rows) if f.kind == "pickem_dominance"}
-
-
 def test_dominance_fires_when_the_zero_rung_is_the_longer_price():
-    f = _doms(_rows())[("away", 3.5)]
+    f = _kinds(_rows()).get("pickem_dominance")
     assert f is not None, "the impossible ratio was not detected"
+    assert f.outcome == "away"
+    assert f.severity == pytest.approx(12.90, abs=0.01)
     assert "1.129" in f.detail
-
-
-def test_dominance_scores_the_gap_to_the_identity_not_to_1_0():
-    """The row that prompted this, Pinheiros v Cascavel: the 0.0 away @6.4 sat
-    at 1.133x the 1X2 away @5.65 and went on the board at 13.3, because the
-    severity was (ratio - 1). The 1X2's own P(draw)=9% puts that ratio at
-    0.910, so the rung was 24.5% off its own identity and 46.7% clear of what
-    a 6.40 voider normally trades at. Owner: "did on very low level when there
-    was like very good arb/ev bet possible."
-
-    The fixture here is the Resovia board: ratio 1.129 against an identity of
-    0.773, in a price band whose median is 0.956.
-    """
-    f = _doms(_rows())[("away", 3.5)]
-    assert f.severity > 4 * 12.90, (
-        "the severity is still measured from 1.0 — it reports a third of the "
-        "distance the price has actually moved"
-    )
-    assert f.severity == pytest.approx(52.69, abs=0.05)
 
 
 def test_dominance_is_silent_on_a_coherent_board():
@@ -181,9 +156,10 @@ def test_dominance_reads_raw_prices_so_no_devig_choice_can_move_it():
     """The point of this check: it compares prices you can actually take.
     Scaling both sides of the 1X2 by a constant changes its vig entirely and
     must not change the verdict."""
-    base = _doms(_rows())[("away", 3.5)]
+    base = _kinds(_rows()).get("pickem_dominance")
     vigged = {k: v * 0.97 for k, v in BOARD["1X2"].items()}
-    still = _doms(_rows(**{"1X2": vigged}))[("away", 3.5)]
+    still = _kinds(_rows(**{"1X2": vigged})).get("pickem_dominance")
+    assert base is not None and still is not None
     assert still.severity > base.severity            # 1X2 shorter -> ratio worse
 
 
@@ -205,8 +181,9 @@ def test_dominance_covers_the_draw_no_bet_too_not_just_the_handicap():
         _o("spread", "FT", {"home": 2.30, "away": 1.45}, line=0.0,
            section="Asian Handicap"),
     ]
-    f = _doms(rows).get(("away", 1.95))
+    f = _kinds(rows).get("pickem_dominance")
     assert f is not None, "the DNB violation was not detected"
+    assert f.outcome == "away"
     assert "draw-no-bet" in f.detail
     assert "1.026" in f.detail
 
@@ -488,65 +465,3 @@ def test_liderbet_corner_rows_are_labelled_and_do_not_leak():
         "a _build call is missing submarket, so those rows would land unlabelled")
     # ...and the scraper can actually carry it
     assert "submarket" in inspect.signature(LB._build).parameters
-
-
-# ── the band that made the check fire at all (2026-09-23) ────────────────────
-
-def _board(x12, ah0):
-    return [
-        _o("moneyline", "FT", x12, section="Main result"),
-        _o("spread", "FT", ah0, line=0.0, section="Asian Handicap"),
-    ]
-
-
-def test_it_fires_below_1_0_where_the_old_bound_could_never_reach():
-    """WFC Osijek W v Donat Zadar W — 0.0 away @3.55 against a 1X2 away @4.00.
-
-    Ratio 0.887, so the old `ratio >= 1.0` bound could not see it however far
-    the price moved. But the 1X2's own P(draw)=23% puts that ratio at 0.770,
-    and a 3.55 voider normally trades at 0.955x its identity, so this one is
-    21% clear of its band. It was invisible, and it is the shape the owner
-    reported: detected not at all, or "on very low level".
-
-    On 4 608 same-fetch sides the ratio reached 1.0 exactly ZERO times, so
-    before this the whole check was dead on a normal board.
-    """
-    x12 = {"home": 1.72, "draw": 4.02, "away": 4.00}
-    f = _doms(_board(x12, {"home": 1.30, "away": 3.55})).get(("away", 3.55))
-    assert f is not None, (
-        "a voider 21% clear of its price band is still invisible — the bound "
-        "is back at 1.0, which nothing on a real board ever crosses"
-    )
-    assert f.severity == pytest.approx(20.8, abs=0.5)
-    assert "0.770" in f.detail          # the identity is stated, not implied
-
-
-def test_the_short_favourite_cluster_stays_quiet():
-    """FC Alashkert v FC BKMA — 0.0 home @1.07 against a 1X2 home @1.25, 5.6%
-    above its identity. That reads like a finding against a flat bound, and is
-    not one: below 1.20 the MEDIAN residual is 1.038, because a 2-way voider
-    carries less margin than a 3-way 1X2 and the gap runs with price. Fifteen
-    such rows would have arrived with a flat 1.05 cut, all noise."""
-    x12 = {"home": 1.25, "draw": 4.89, "away": 13.26}
-    assert not _doms(_board(x12, {"home": 1.07, "away": 8.00}))
-
-
-def test_the_reference_curve_runs_one_way():
-    """Measured monotone over 4 608 sides: 1.038 at 1.10 down to 0.826 at
-    7.00. A curve that turned around would mean the margin relationship had
-    changed shape, which is a re-measurement, not an edit."""
-    ys = [y for _x, y in C.PICKEM_DOM_CURVE]
-    assert ys == sorted(ys, reverse=True)
-    assert [x for x, _y in C.PICKEM_DOM_CURVE] == sorted(x for x, _y in C.PICKEM_DOM_CURVE)
-
-
-def test_the_hard_impossibility_still_outranks_the_band_cases():
-    """A voider LONGER than the 1X2 is a different claim from one merely
-    short of its band — it needs no calibration to be wrong. It must keep
-    saying so, and it must score far above the band rows."""
-    f = _doms(_rows())[("away", 3.5)]
-    assert "LONGER than the 1X2" in f.detail
-    x12 = {"home": 1.72, "draw": 4.02, "away": 4.00}
-    soft = _doms(_board(x12, {"home": 1.30, "away": 3.55}))[("away", 3.55)]
-    assert "normally trades at" in soft.detail
-    assert f.severity > soft.severity

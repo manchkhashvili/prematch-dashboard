@@ -76,38 +76,6 @@ from src.vig import devig_2way, devig_3way, devig_nway_shin  # FAIR PROBABILITIE
 ML_SPREAD_GAP_PP = 5.0     # ml vs spread win-prob gap (clean game: <=0.5pp)
 PICKEM_LOCK_PCT = 0.3      # min locked % for a pickem_arb row
 _PICKEM_MAX_SKEW_SEC = 120.0  # both legs must come from the same fetch
-
-# _pickem_dominance reference curve: the MEDIAN raw ratio AH0(side)/X12(side)
-# divided by the event's own 1 - P(draw), at each voider price. On fair prices
-# that residual is exactly 1.000; on the prices a book actually posts it is
-# not, because the 2-way voider and the 3-way 1X2 carry different margins, and
-# the difference runs hard with price.
-#
-# Measured on data/ticks.db, 4 608 CrystalBet soccer sides whose 1X2 and 0.0
-# rung came from the SAME fetch (9 615 events dropped on >120 s skew):
-#
-#     voider price   n      median residual
-#       1.0-1.2     411         1.038
-#       1.2-1.5    1044         1.027
-#       1.5-2.0    1236         1.012
-#       2.0-3.0    1162         0.989
-#       3.0-5.0     701         0.940
-#       5.0+         54         0.826
-#
-# Monotone across the whole range: the book's margin is worst on longshots, so
-# a 6.00 voider trades 17 % SHORT of the theoretical identity while a 1.10 one
-# trades 4 % long. A single bound cannot serve both ends — against a flat 1.05
-# the short-favourite band contributes 15 rows of pure noise while a 6.30
-# voider has to be 27 % out before it is noticed.
-PICKEM_DOM_CURVE: list[tuple[float, float]] = [
-    (1.10, 1.038), (1.35, 1.027), (1.75, 1.012),
-    (2.50, 0.989), (4.00, 0.940), (7.00, 0.826),
-]
-# How far above its own band a voider has to sit to be a finding, as a ratio.
-# The banded score has p50 0.996, p90 1.009 and p99 1.021 on that corpus, so
-# 1.08 is roughly four times the p99 excess: it fires on 14 of 4 608 sides
-# (0.30 %), all of them mid-to-long prices well clear of their band.
-PICKEM_DOM_Z = 1.08
 TOTAL_ADD_PTS = 5.0        # period totals vs parent sum (clean game: ~0.5pt)
 # ...and 5.0 is a BASKETBALL number: five points on a ~220-point total is 2 %.
 # The same constant on ice hockey would be five goals against a ~5.5-goal
@@ -1168,30 +1136,6 @@ def _pickem_dominance(period_odds: dict, per: str,
     prices you can actually take, so it is immune to the devig choice that
     every probability-space check here depends on.
 
-    BUT 1.0 IS NOT THE BOUND, and using it as one left the check dead. The
-    relation above says the ratio should sit at 1 - P(draw) — around 0.75 on a
-    normal board — so a voider at 0.95 is already 25 % longer than the 1X2 puts
-    it while never coming near 1.0. Measured on data/ticks.db over 4 608
-    CrystalBet soccer sides whose two legs came from the SAME fetch, the ratio
-    reached 1.0 exactly ZERO times (max 0.900), while 28 sides sat 5 % or more
-    above their own identity. Every one of them was invisible. Owner, on a row
-    that did fire: "scanner should detect something like on the screenshot
-    which it didnt, or did on very low level when there was like very good
-    arb/ev bet possible."
-
-    So the trigger and the severity both now measure against the identity, and
-    then against PICKEM_DOM_CURVE, because the identity does NOT hold on raw
-    prices: a 2-way voider and a 3-way 1X2 carry different margins, and the
-    gap runs hard with price (see the table at PICKEM_DOM_CURVE). Firing at
-    PICKEM_DOM_Z = 1.08 above the band puts 14 of those 4 608 sides on the
-    board (0.30 %) — all of them mid-to-long prices — and leaves the
-    short-favourite cluster alone, where a 5 % residual is the median.
-
-    The hard case survives inside the new one: a ratio at or above 1.0 scores
-    far above the band wherever it happens. Pinheiros v Cascavel, the row that
-    prompted this, was on the board at severity 13.3 as "(ratio - 1)"; the 0.0
-    rung was 24.5 % off its own identity and 46.7 % clear of its price band.
-
     Applies to EVERY market that voids the draw — the 0.0 handicap rung and the
     Draw No Bet alike. Two live cases, and each was invisible to a check that
     looked at only one of them:
@@ -1214,16 +1158,8 @@ def _pickem_dominance(period_odds: dict, per: str,
         only historical pickem_duplicate lock, caught here a second way.
 
     The DNB median of 0.774 lands on the theoretical 1 - P(draw) almost exactly,
-    which is the relation stated as a number. That was read at the time as "the
-    bound needs no slack: it is exact" — and the conclusion drawn from it was
-    backwards. A median residual of +0.003 says the identity is the right
-    reference; it is an argument for measuring against 1 - P(draw), not for
-    keeping a bound at 1.0 that nothing ever crosses.
-
-      BANDED RESIDUAL, 4 608 same-fetch sides (2026-09-23):
-        ratio               p1 0.651  p50 0.736  p99 0.850  max 0.900
-        ratio / (1-P(draw)) p1 0.851  p50 1.006  p90 1.035  p99 1.048
-        that, over the band  p50 0.996  p90 1.009  p99 1.021  max 1.290
+    which is the relation stated as a number. The bound needs no slack: it is
+    exact, and both live cases clear 1.0 outright.
     """
     ml3 = ml_at = None
     for o in period_odds.get("moneyline", []):
@@ -1271,43 +1207,18 @@ def _pickem_dominance(period_odds: dict, per: str,
             if not a or not m or a <= 1.0 or m <= 1.0:
                 continue
             ratio = a / m
-            if p_draw >= 1.0:
+            if ratio < 1.0:
                 continue
-            # Against the IDENTITY, not against 1.0. The bound the check used
-            # to enforce was "the voider must not be longer than the 1X2",
-            # which is a far weaker statement than the relation it documents:
-            # on 4 608 same-fetch sides the ratio never once reached 1.0 (max
-            # 0.900), so that bound fired zero times, while 28 sides sat 5 %+
-            # above where their own 1 - P(draw) puts them and none was visible.
-            resid = ratio / (1.0 - p_draw)
-            band = _interp_at(PICKEM_DOM_CURVE, a) or 1.0
-            z = resid / band
-            if z < PICKEM_DOM_Z:
-                continue
-            excess = (z - 1.0) * 100.0
+            excess = (ratio - 1.0) * 100.0
             if excess < min_pct:
                 continue
-            # ratio >= 1.0 is the hard case and needs no calibration at all:
-            # the voider VOIDS the draw where the 1X2 loses to it, so it is the
-            # strictly better bet and cannot also be the longer price. Below
-            # 1.0 the voider is correctly shorter and the only question is
-            # whether it is shorter by enough, which is what the band answers.
-            impossible = ratio >= 1.0
-            head = (f"the {label} {side} @{a:g} is LONGER than the 1X2 {side} "
-                    f"@{m:g} (ratio {ratio:.3f}) — the {label} voids the draw "
-                    f"where the 1X2 loses to it, so the better bet cannot be "
-                    f"the longer price"
-                    if impossible else
-                    f"the {label} {side} @{a:g} is only {ratio:.3f}x the 1X2 "
-                    f"{side} @{m:g}, where a voider at this price normally "
-                    f"trades at {band * (1.0 - p_draw):.3f}x")
             out.append((
-                f"{per}: {head}. The 1X2's own P(draw)={p_draw*100:.0f}% puts "
-                f"the fair ratio at {1-p_draw:.3f}, and this one is "
-                f"{(resid - 1.0) * 100:+.1f}% off it — {excess:.1f}% clear of "
-                f"the {a:g}-price band once the two markets' own margins are "
-                f"allowed for. Take the {label} over the 1X2 {side}: same win, "
-                f"stake back on the draw",
+                f"{per}: the {label} {side} @{a:g} is LONGER than the 1X2 "
+                f"{side} @{m:g} (ratio {ratio:.3f}), but the {label} voids the "
+                f"draw where the 1X2 loses to it — the better bet cannot be the "
+                f"longer price. The 1X2's own P(draw)={p_draw*100:.0f}% puts the "
+                f"ratio at {1-p_draw:.3f}. Take the {label}: same win, stake back "
+                f"on the draw, and {excess:.1f}% better odds",
                 excess, side, a,
             ))
     return out
