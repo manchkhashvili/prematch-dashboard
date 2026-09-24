@@ -295,6 +295,33 @@ function buildBetPrefillUrl(r) {
   return "/bets.html?" + p.toString();
 }
 
+// A failed poll must look like a failed poll, not a frozen page.
+//
+// The old catch wrote ONLY the ladder tbody, so the consistency table kept
+// whatever it had — and on a first load that is the "loading…" placeholder,
+// forever. That is exactly what the owner saw on 2026-09-24: "error loading
+// anomalies" above, "loading…" below, while the header kept ticking.
+//
+// The cause was not this page. The server had run out of file descriptors
+// (255 used against a 256 soft limit), so accept() returned EMFILE and every
+// connection was reset the moment it was made — see src/scrapers/cb_http.py
+// for the leak. fetch() rejects on a reset, so this catch ran on every poll.
+// It self-heals once the server has descriptors again, and now it says so
+// instead of looking dead.
+function renderFetchError(label, e) {
+  const when = new Date().toLocaleTimeString();
+  const secs = Math.round(POLL_MS / 1000);
+  const msg = `<tr><td colspan="12" class="empty">could not reach the server `
+    + `(${label}) at ${when} — retrying every ${secs}s. `
+    + `<span class="dim">If this persists, the dashboard process may be out of `
+    + `file descriptors; restart it, or relaunch with a higher limit `
+    + `(<code>ulimit -n 4096</code>).</span></td></tr>`;
+  for (const id of ["anom-body", "cons-body"]) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = msg;
+  }
+}
+
 async function fetchAndRender() {
   const minPct = parseFloat(minPctInput.value || "0.5");
   const url = `/api/new_inconsistencies?min_pct=${minPct}&spread_only=${spreadOnly.checked}`;
@@ -316,8 +343,7 @@ async function fetchAndRender() {
     Marks.bind(document.getElementById("anom-body"), rerender);
     Marks.bind(document.getElementById("cons-body"), rerender);
   } catch (e) {
-    document.getElementById("anom-body").innerHTML =
-      `<tr><td colspan="12" class="empty">error loading new inconsistencies</td></tr>`;
+    renderFetchError("new inconsistencies", e);
   }
 }
 

@@ -39,7 +39,10 @@ prematch_v2/docs/crystalbet.md for the wire-format reference):
 Sessions are per-sport (mirrors the one-BrowserContext-per-sport rule:
 CB's session-bound currentSport stomps itself otherwise) and re-warm
 hourly or on failure. curl_cffi's Session is sync; callers get async
-wrappers via asyncio.to_thread. Per-sport serialization is inherited from
+wrappers, each of which runs the work on THAT SESSION'S OWN thread (see
+CbHttpSession.__init__ — curl_cffi hands out a curl handle per thread and
+frees only the caller's, so a session must never be touched from two).
+Per-sport serialization is inherited from
 crystalbet.py's sport locks (ASP.NET serializes same-session requests
 server-side anyway).
 """
@@ -49,6 +52,7 @@ import asyncio
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Iterator, Optional
 from urllib.parse import urlencode, urlparse
 
@@ -145,7 +149,8 @@ def fetch_nav_sports() -> dict[int, str]:
     inconsistencies cycle sweeps this so a sport LSport starts pricing is
     scanned without anyone wiring it."""
     sess = CbHttpSession(16)
-    try:
+
+    def run():
         sess.warm()
         _PIN.pin(sess.s)
         r = sess.s.get(SPORTS_URL, headers=HEADERS, cookies=sess.cookies, timeout=GET_TIMEOUT)
@@ -154,8 +159,16 @@ def fetch_nav_sports() -> dict[int, str]:
         if not nav:
             raise RuntimeError("CB nav: no DoSportTypePostBack anchors on the English page")
         return nav
+
+    # Warm, fetch AND close all on the session's own thread. Doing any of it
+    # on the caller's thread strands that thread's curl handle for the life of
+    # the process: curl_cffi mints a handle per thread on first use and
+    # Session.close() frees only the caller's — so closing from the wrong
+    # thread leaks the real handle and mints a second one just to close it.
+    try:
+        return sess.submit(run).result()
     finally:
-        sess.close()
+        sess.shutdown()
 
 
 # ── ASP.NET wire-format helpers (pure functions) ──────────────────────────────
@@ -281,6 +294,36 @@ class CbHttpSession:
         self.fields: dict[str, str] = {}
         self.cookies: dict[str, str] = {}
         self.warmed_at = 0.0
+        # ONE thread, for the life of the session. Not an optimisation — a
+        # correctness requirement, twice over.
+        #
+        # 1. curl_cffi's Session defaults to use_thread_local_curl=True, so
+        #    `session.curl` MINTS A NEW Curl handle the first time each thread
+        #    touches it, and `Session.close()` closes only the CALLING
+        #    thread's. Every wrapper below used to run its work on
+        #    asyncio.to_thread — i.e. on whichever of the default executor's
+        #    ~12 threads was free — so each sport session accumulated a handle
+        #    per worker thread, each with its own connection pool, and closing
+        #    the session orphaned all but one. Measured on the owner's box
+        #    after 1 h 23 m uptime: 72 sockets to crystalbet.com, ~50 of them
+        #    in state CLOSED (TCP done, fd never released), against a 256 fd
+        #    soft limit the process was already at (255 used, highest fd 254).
+        #    Past that ceiling accept() returns EMFILE and uvicorn resets every
+        #    incoming connection, so the DASHBOARD stops answering — the tab
+        #    shows "error loading anomalies" and never recovers.
+        #
+        # 2. This object is ASP.NET postback state — `fields` carries
+        #    __VIEWSTATE and friends and is rewritten by every _post. Two
+        #    threads in here at once interleave viewstate and the session
+        #    dies. Nothing serialised that before; one worker does.
+        self._ex = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=f"cb-http-{sport_id}")
+
+    def submit(self, fn):
+        """Run `fn` on this session's own thread. Every entry point goes
+        through here, so the curl handle is created once and only ever used
+        and closed by the thread that owns it."""
+        return self._ex.submit(fn)
 
     # ── low level ──
 
@@ -443,12 +486,28 @@ class CbHttpSession:
         return blob
 
     def close(self) -> None:
+        """Close the curl handle. MUST run on this session's own thread —
+        curl_cffi frees only the calling thread's handle (see __init__)."""
         if self.s is not None:
             try:
                 self.s.close()
             except Exception:
                 pass
             self.s = None
+
+    def shutdown(self) -> None:
+        """Close the handle ON THE OWNING THREAD, then retire the thread.
+
+        Calling close() from anywhere else leaves the handle — and its
+        sockets — allocated for the life of the process, which is the leak
+        this class exists to avoid.
+        """
+        try:
+            self._ex.submit(self.close).result(timeout=10)
+        except Exception:
+            pass
+        finally:
+            self._ex.shutdown(wait=False)
 
 
 # ── Module-level per-sport singletons + async wrappers ────────────────────────
@@ -472,7 +531,7 @@ def reset_session(sport_id: int) -> None:
     The transport-level analogue of crystalbet._close_page_internal."""
     sess = _sessions.pop(sport_id, None)
     if sess is not None:
-        sess.close()
+        sess.shutdown()
 
 
 async def fetch_list_raw(sport_id: int) -> str:
@@ -500,7 +559,7 @@ async def fetch_list_raw(sport_id: int) -> str:
                           sport_id)
         return panel
 
-    return await asyncio.to_thread(run)
+    return await asyncio.wrap_future(sess.submit(run))
 
 
 async def fetch_list_html(sport_id: int):
@@ -515,7 +574,7 @@ async def fetch_list_html(sport_id: int):
         _ensure_warm_sync(sess)
         return sess.fetch_list_html()
 
-    return await asyncio.to_thread(run)
+    return await asyncio.wrap_future(sess.submit(run))
 
 
 async def expand_detail_html(sport_id: int, game_id: str):
@@ -532,7 +591,7 @@ async def expand_detail_html(sport_id: int, game_id: str):
             )
         return sess.expand_detail_html(game_id)
 
-    return await asyncio.to_thread(run)
+    return await asyncio.wrap_future(sess.submit(run))
 
 
 async def expand_detail_raw(sport_id: int, game_id: str) -> str:
@@ -556,7 +615,7 @@ async def expand_detail_raw(sport_id: int, game_id: str) -> str:
             )
         return sess.expand_detail_raw(game_id)
 
-    return await asyncio.to_thread(run)
+    return await asyncio.wrap_future(sess.submit(run))
 
 
 async def close_all() -> None:
