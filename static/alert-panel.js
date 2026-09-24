@@ -139,6 +139,13 @@
 
   const ALERT_DEFAULT_OFF = new Set(["ml_vs_spread"]);
 
+  // The severity column's colouring. Lives here because its 12 is the same 12
+  // as the panel's default bar — the table goes bold exactly where the alert
+  // would fire — and because both boards render the column identically.
+  function consClass(sev) {
+    return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : "";
+  }
+
   function init(prefix) {
     /* Written here, read by the shared alerts.js so the chimes follow you
      * across pages. Every name is the board's prefix plus a fixed suffix;
@@ -351,6 +358,7 @@
     ALERT_DEFAULT_OFF: ALERT_DEFAULT_OFF,
     lsGet: lsGet,
     lsSet: lsSet,
+    consClass: consClass,
     // The suffixes alerts.js must mirror. Exported so a test can read the
     // contract from one place instead of restating it.
     KEYS: ["ladder_alert_enabled", "ladder_alert_pct", "ladder_alert_delta",

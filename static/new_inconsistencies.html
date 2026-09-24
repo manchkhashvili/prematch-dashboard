@@ -424,7 +424,7 @@ const KIND_UNIT  = AlertPanel.KIND_UNIT;
 // This board is CrystalBet's LSport feed only, so it carries its own
 // thresholds and its own seen-map under "lsp_".
 AlertPanel.init("lsp_");
-function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
+const consClass = AlertPanel.consClass;
 
 // Build a /bets.html prefill for a consistency flag.
 //
