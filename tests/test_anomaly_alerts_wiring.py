@@ -17,45 +17,93 @@ import pytest
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 PAGE = STATIC / "anomalies.html"
+LSPORT_PAGE = STATIC / "new_inconsistencies.html"
+PANEL = STATIC / "alert-panel.js"
 ALERTS = STATIC / "alerts.js"
 
-PAGE_T = PAGE.read_text(encoding="utf-8")
 ALERTS_T = ALERTS.read_text(encoding="utf-8")
+PANEL_T = PANEL.read_text(encoding="utf-8")
+LSPORT_T = LSPORT_PAGE.read_text(encoding="utf-8")
+# The panel is markup on the page plus behaviour in the module (split
+# 2026-09-24 so the New inconsistencies tab could reuse it instead of growing
+# a third copy). Assertions about "the panel" read both.
+PAGE_T = PAGE.read_text(encoding="utf-8") + "\n" + PANEL_T
 
-# Every key the panel writes and the poller must read.
-SHARED_KEYS = [
-    "anom_ladder_alert_enabled",
-    "anom_ladder_alert_pct",
-    "anom_ladder_alert_delta",
-    "anom_ladder_alert_step",
-    "anom_cons_alert_enabled",
-    "anom_cons_alert_default",
-    "anom_cons_alert_kinds",
+# Both boards, and the prefix each one's settings live under.
+BOARDS = {
+    "anom_": PAGE,           # Anomalies       -> /api/anomalies/alerts
+    "lsp_": LSPORT_PAGE,     # New inconsist.  -> /api/new_inconsistencies/alerts
+}
+
+# Every key suffix the panel writes and the poller must read. Both sides build
+# the full name as prefix + suffix, so the test checks the construction rather
+# than a literal — a board that forgot a suffix, or spelled the prefix wrong,
+# still fails.
+KEY_SUFFIXES = [
+    "ladder_alert_enabled",
+    "ladder_alert_pct",
+    "ladder_alert_delta",
+    "ladder_alert_step",
+    "cons_alert_enabled",
+    "cons_alert_default",
+    "cons_alert_kinds",
     # Odds vetoes (2026-08-27). Same failure mode as every key above: a typo
     # leaves the panel saving a cap that nothing enforces, and the user sees
     # longshot chimes they thought they had switched off.
-    "anom_ladder_alert_max_odds",
-    "anom_cons_alert_max_odds",
+    "ladder_alert_max_odds",
+    "cons_alert_max_odds",
     # The floor (2026-08-29). Owner: "most of them are 1.02 1.05 7-8 odds and
     # they are noise". The cap only ever handled one end of that.
-    "anom_ladder_alert_min_odds",
-    "anom_cons_alert_min_odds",
+    "ladder_alert_min_odds",
+    "cons_alert_min_odds",
 ]
+SHARED_KEYS = ["anom_" + k for k in KEY_SUFFIXES]
 
 
 # ── the contract between the panel and the poller ────────────────────────────
 
-@pytest.mark.parametrize("key", SHARED_KEYS)
-def test_key_is_written_by_the_panel(key):
-    assert f'"{key}"' in PAGE_T, (
-        f"anomalies.html never references {key} — the panel cannot save it")
+@pytest.mark.parametrize("suffix", KEY_SUFFIXES)
+def test_key_is_written_by_the_panel(suffix):
+    assert f'"{suffix}"' in PANEL_T, (
+        f"alert-panel.js never builds {suffix} — the panel cannot save it")
 
 
-@pytest.mark.parametrize("key", SHARED_KEYS)
-def test_key_is_read_by_the_poller(key):
-    assert f'"{key}"' in ALERTS_T, (
-        f"alerts.js never references {key} — the panel writes a setting that "
+@pytest.mark.parametrize("suffix", KEY_SUFFIXES)
+def test_key_is_read_by_the_poller(suffix):
+    assert f'"{suffix}"' in ALERTS_T, (
+        f"alerts.js never builds {suffix} — the panel writes a setting that "
         "nothing reads, so the alert silently never fires")
+
+
+@pytest.mark.parametrize("prefix,page", list(BOARDS.items()))
+def test_each_board_starts_the_panel_under_its_own_prefix(prefix, page):
+    """Both boards run the same code; only the prefix differs. A board with no
+    init() has the markup and no behaviour — every box inert."""
+    t = page.read_text(encoding="utf-8")
+    assert f'AlertPanel.init("{prefix}")' in t, (
+        f"{page.name} never calls AlertPanel.init(\"{prefix}\")")
+    assert 'alert-panel.js' in t, f"{page.name} does not load the panel module"
+    assert 'id="alert-config"' in t, f"{page.name} has no panel markup"
+
+
+@pytest.mark.parametrize("prefix", list(BOARDS))
+def test_the_poller_polls_this_board(prefix):
+    assert f'anomKeys("{prefix}")' in ALERTS_T, (
+        f"alerts.js builds no key-set for {prefix} — that board's panel saves "
+        f"settings nothing reads")
+
+
+def test_the_two_boards_do_not_share_a_seen_map():
+    """ladderKey/consKey are built from event id + kind, which COLLIDE across
+    the boards — the LSport rows are CrystalBet rows. One shared seen-map
+    would let whichever board polled first mark a row seen and mute the
+    other's chime for good."""
+    i = ALERTS_T.index("function anomKeys")
+    body = ALERTS_T[i:ALERTS_T.index("\n  }", i)]
+    for k in ("LAD_SEEN_KEY", "CONS_SEEN_KEY", "LAD_SEEDED_KEY", "CONS_SEEDED_KEY"):
+        assert f"{k}:" in body and "p + " in body, (
+            f"{k} is not derived from the board prefix")
+    assert 'const LSP  = anomKeys("lsp_")' in ALERTS_T
 
 
 def test_no_orphan_anom_alert_keys_in_either_file():
@@ -104,8 +152,8 @@ def test_per_check_grid_is_built_from_the_rendered_kind_labels():
 def test_every_kind_has_a_severity_unit():
     """Severity is pp for some checks, points for others, % for the HT/FT ones.
     A missing unit renders a blank label next to a number that means nothing."""
-    labels = set(re.findall(r"^\s{2}(\w+):\s*\"", _block(PAGE_T, "const KIND_LABEL"), re.M))
-    units = set(re.findall(r"(\w+):\s*\"(?:pp|pts|%)\"", _block(PAGE_T, "const KIND_UNIT")))
+    labels = set(re.findall(r"^\s+(\w+):\s*\"", _block(PANEL_T, "const KIND_LABEL"), re.M))
+    units = set(re.findall(r"(\w+):\s*\"(?:pp|pts|%)\"", _block(PANEL_T, "const KIND_UNIT")))
     assert labels, "could not parse KIND_LABEL"
     missing = labels - units
     assert not missing, f"checks with no severity unit in KIND_UNIT: {sorted(missing)}"
@@ -143,10 +191,16 @@ def test_each_sound_claims_a_distinct_channel():
     """claimSound() de-duplicates across tabs per kind. Reusing another alert's
     channel name would let an opportunity alert mute a ladder alert."""
     kinds = set(re.findall(r'claimSound\("([^"]+)"\)', ALERTS_T))
-    assert {"anom-ladder", "anom-cons"} <= kinds
-    assert len(kinds) == len(set(kinds))
     # The pre-existing three must still be there and unshared.
     assert {"opps", "moves", "scan"} <= kinds
+    # The two findings channels are now built per board (2026-09-24), so each
+    # board chimes independently instead of one silencing the other.
+    i = ALERTS_T.index("function anomKeys")
+    body = ALERTS_T[i:ALERTS_T.index("\n  }", i)]
+    assert 'SOUND_LAD:  p + "ladder"' in body
+    assert 'SOUND_CONS: p + "cons"' in body
+    assert "claimSound(K.SOUND_LAD)" in ALERTS_T
+    assert "claimSound(K.SOUND_CONS)" in ALERTS_T
 
 
 def test_seeded_silently_on_first_pass():
@@ -187,7 +241,7 @@ def test_the_two_default_off_sets_are_identical():
     A kind in one set and not the other gives the exact failure this file
     exists to prevent — a control that shows one state and behaves as another.
     """
-    assert _default_off(PAGE_T) == _default_off(ALERTS_T)
+    assert _default_off(PANEL_T) == _default_off(ALERTS_T)
 
 
 def test_ml_vs_spread_is_a_diagnostic_not_an_alert():
@@ -197,7 +251,7 @@ def test_ml_vs_spread_is_a_diagnostic_not_an_alert():
     both the 1X2 and a line-0 pick'em rung — it produced 2 flags and 0 locks.
     Its bettable sibling pickem_arb is what should chime.
     """
-    off = _default_off(PAGE_T)
+    off = _default_off(PANEL_T)
     assert "ml_vs_spread" in off
     assert "pickem_arb" not in off, "the check that IS a bet must keep alerting"
 
@@ -206,8 +260,8 @@ def test_a_default_off_kind_is_still_listed_and_labelled():
     """Silenced is not hidden. The row stays on the tab and in the alert grid so
     it can be switched on, and a book contradicting itself stays visible."""
     import re
-    labels = set(re.findall(r"^\s{2}(\w+):\s*\"", _block(PAGE_T, "const KIND_LABEL"), re.M))
-    for kind in _default_off(PAGE_T):
+    labels = set(re.findall(r"^\s+(\w+):\s*\"", _block(PANEL_T, "const KIND_LABEL"), re.M))
+    for kind in _default_off(PANEL_T):
         assert kind in labels, f"{kind} is silenced AND unlabelled — invisible"
 
 

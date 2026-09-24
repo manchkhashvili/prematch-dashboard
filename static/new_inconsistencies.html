@@ -8,6 +8,7 @@
   <!-- theme.js MUST be in <head> (non-defer) so it sets data-theme before paint. -->
   <script src="/theme.js?v=20260527"></script>
   <script src="/alerts.js?v=20260816a" defer></script>
+  <script src="/alert-panel.js?v=20260924"></script>
   <script src="/marks.js?v=20260728"></script>
 </head>
 <body>
@@ -59,6 +60,74 @@
       900-game sweep. Same detectors, same row shapes; "Log" prefills a CB bet.
     </span>
   </div>
+
+  <!-- Same panel as the Anomalies tab; behaviour in /alert-panel.js. This
+       board keeps its OWN thresholds and its own seen-map under the "lsp_"
+       prefix — it is a narrower set of rows (CrystalBet's LSport feed only)
+       and deserves its own bars, and a shared seen-map would let whichever
+       board polled first mute the other's chimes. -->
+  <details class="alert-config" id="alert-config">
+    <summary>Alert settings <span class="hint" id="alert-cfg-summary"></span></summary>
+    <div class="cfg-body">
+
+      <fieldset id="lad-alert-set">
+        <legend><label><input type="checkbox" id="lad-alert-on" /> Ladder alerts</label></legend>
+        <p class="cfg-note">
+          Chimes when a ladder violation appears — or when an existing one gets
+          materially worse. Fires if <b>any</b> filled criterion is met; leave a
+          box blank to ignore it. All blank = nothing fires.
+        </p>
+        <div class="cfg-row">
+          <label for="lad-alert-pct" title="Wrong-direction move as a % of the smaller price — the '% off' column.">% off ≥</label>
+          <input type="number" id="lad-alert-pct" step="0.5" min="0" placeholder="off" />
+          <span class="kind-unit">%</span>
+        </div>
+        <div class="cfg-row">
+          <label for="lad-alert-delta" title="Wrong-direction move in absolute decimal odds — the size of the jump in the 'Odds → odds' column.">Odds change ≥</label>
+          <input type="number" id="lad-alert-delta" step="0.01" min="0" placeholder="off" />
+          <span class="kind-unit">dec</span>
+        </div>
+        <div class="cfg-row">
+          <label for="lad-alert-step" title="Gap between the two adjacent rungs the violation sits across — the size of the jump in the 'Ladder (line → line)' column.">Ladder step ≥</label>
+          <input type="number" id="lad-alert-step" step="0.5" min="0" placeholder="off" />
+          <span class="kind-unit">pts</span>
+        </div>
+        <div class="cfg-row">
+          <label for="lad-alert-max-odds" title="Never chime when the flagged rung pays more than this, whatever the other criteria say. Unlike the boxes above this is a VETO, not another way to fire.">Never above odds</label>
+          <input type="number" id="lad-alert-max-odds" step="1" min="0" placeholder="off" />
+          <label for="lad-alert-min-odds" title="Never chime when the flagged rung pays LESS than this. A veto, like the box above.">Never below odds</label>
+          <input type="number" id="lad-alert-min-odds" step="0.01" min="0" placeholder="off" />
+          <span class="kind-unit">dec</span>
+        </div>
+      </fieldset>
+
+      <fieldset id="cons-alert-set">
+        <legend><label><input type="checkbox" id="cons-alert-on" /> Consistency alerts</label></legend>
+        <p class="cfg-note">
+          Severity means a different thing per check — percentage points for the
+          moneyline checks, points for period totals, % for the HT/FT ones — so
+          each check gets its own bar. Blank inherits the default; unticking a
+          check silences it.
+        </p>
+        <div class="cfg-row">
+          <label for="cons-alert-default">Default severity ≥</label>
+          <input type="number" id="cons-alert-default" step="0.5" min="0" />
+        </div>
+        <div class="cfg-row">
+          <label for="cons-alert-max-odds" title="Never chime when the leg you would back pays more than this. A veto, not another way to fire: it overrides every per-check threshold below. Checks that name no single price are unaffected.">Never above odds</label>
+          <input type="number" id="cons-alert-max-odds" step="1" min="0" placeholder="off" />
+          <label for="cons-alert-min-odds" title="Never chime when the leg you would back pays LESS than this. A veto. Checks that name no single price are unaffected.">Never below odds</label>
+          <input type="number" id="cons-alert-min-odds" step="0.01" min="0" placeholder="off" />
+          <span class="kind-unit">dec</span>
+        </div>
+        <details>
+          <summary class="cfg-note" style="cursor:pointer;">Per-check thresholds</summary>
+          <div class="kind-grid" id="cons-kind-grid"></div>
+        </details>
+      </fieldset>
+
+    </div>
+  </details>
 
   <div class="table-wrap">
     <table id="anomalies">
@@ -347,51 +416,14 @@ async function fetchAndRender() {
   }
 }
 
-const KIND_LABEL = {
-  ml_vs_spread: "ML vs handicap",
-  pickem_arb: "pick'em lock (push-aware)",
-  // Both compare markets that settle IDENTICALLY — a 0.0 handicap and a Draw
-  // No Bet both void on the draw — so neither needs a model. Unlike
-  // ml_vs_spread, which reports the same disagreement and names no bet, these
-  // two name the position.
-  pickem_duplicate: "same bet, two prices (0.0 vs DNB)",
-  pickem_dominance: "0.0 rung longer than the 1X2",
-  // The only CORRELATION on this list — every other check is an identity. It
-  // fires on a favourite FLIP, not on the size of the gap; see _fts_vs_ml.
-  fts_vs_ml: "first scorer vs the 1X2",
-  favourite_flip: "favourite flip",
-  total_additivity: "period totals",
-  quarter_ml_extreme: "quarter ML extreme",
-  htft_combo: "HT/FT combo",
-  htft_fair: "HT/FT fair (model)",
-  tennis_set_match: "tennis: set vs match",
-  tennis_correct_score: "tennis: correct score",
-  duplicate_fixture: "same match listed twice",
-  duplicate_live: "same LIVE match listed twice",
-  half_result_vs_ft: "half result vs full-time",
-  // Both sports post a regulation market and an incl-OT one and tie them by
-  // arithmetic; hockey does it across REG and FT, AF within one period.
-  ot_vs_regulation: "OT vs regulation",
-  ot_monotone: "hockey: incl-OT below regulation",
-  betlive_flip: "betlive: favourite flip",
-  betlive_ot_fold: "betlive: OT-fold",
-  soccer_htft: "soccer HT/FT (soft)",
-  basketball_fav: "basketball fav disagreement",
-  soccer_fair: "soccer EV (model)",
-  soccer_identity: "soccer identity",
-  soccer_curve: "soccer curve",
-  // Volleyball (2026-09-21) — the tennis set checks in best-of-5, plus the
-  // model-free identities across the sets markets. See docs/volleyball.md.
-  vb_set_match: "volleyball: set vs match",
-  vb_correct_score: "volleyball: correct score",
-  vb_sets_duplicate: "volleyball: same outcome, two prices",
-  vb_sets_dominance: "volleyball: subset shorter than its superset",
-  vb_sets_cover: "volleyball: locked cover",
-  combo_cover: "lider combo: locked cover",
-  combo_dominance: "lider combo: containment",
-  combo_duplicate: "lider combo: same event, two prices",
-  combo_fair: "lider combo: vs model fair",
-};
+// One list, shared with the Anomalies tab — see /alert-panel.js. Keeping a
+// private copy here meant a new check had to be added in two places, and the
+// one that was forgotten simply never appeared in the per-check grid.
+const KIND_LABEL = AlertPanel.KIND_LABEL;
+const KIND_UNIT  = AlertPanel.KIND_UNIT;
+// This board is CrystalBet's LSport feed only, so it carries its own
+// thresholds and its own seen-map under "lsp_".
+AlertPanel.init("lsp_");
 function consClass(sev) { return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : ""; }
 
 // Build a /bets.html prefill for a consistency flag.

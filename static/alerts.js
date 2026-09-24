@@ -96,24 +96,57 @@
   // diagnostic — worth telling apart by ear without looking at the screen.
   // Config is written by the panel on /anomalies.html; these key names MUST
   // mirror the constants there (tests/test_anomaly_alerts_wiring.py pins that).
-  const LAD_ON      = "anom_ladder_alert_enabled";
-  const LAD_PCT     = "anom_ladder_alert_pct";
-  const LAD_DELTA   = "anom_ladder_alert_delta";
-  const LAD_STEP    = "anom_ladder_alert_step";
-  const CONS_ON     = "anom_cons_alert_enabled";
-  const CONS_DEF    = "anom_cons_alert_default";
-  const CONS_KINDS  = "anom_cons_alert_kinds";
-  // Odds vetoes (2026-08-27). Written by the same panel; see the note there.
-  // These are NOT another way to fire — they gate everything else, because a
-  // longshot flag is noise no matter how large its severity is.
-  const LAD_MAXODDS  = "anom_ladder_alert_max_odds";
-  const LAD_MINODDS  = "anom_ladder_alert_min_odds";
-  const CONS_MAXODDS = "anom_cons_alert_max_odds";
-  const CONS_MINODDS = "anom_cons_alert_min_odds";
-  const LAD_SEEN_KEY    = "anom_ladder_seen_v1";
-  const LAD_SEEDED_KEY  = "anom_ladder_seeded";
-  const CONS_SEEN_KEY   = "anom_cons_seen_v1";
-  const CONS_SEEDED_KEY = "anom_cons_seeded";
+  //
+  // TWO BOARDS, one implementation (2026-09-24). The Anomalies tab and the New
+  // inconsistencies tab each get their own thresholds and their own seen-map,
+  // keyed by a prefix:
+  //
+  //   "anom_"  /api/anomalies/alerts             every book, every sport
+  //   "lsp_"   /api/new_inconsistencies/alerts   CrystalBet's LSport feed
+  //
+  // Separate seen-maps are not a nicety. The two boards share event ids and
+  // check kinds, so ladderKey/consKey collide across them — one shared map
+  // would let whichever board polled first mark a row seen and mute the
+  // other's chime for good.
+  //
+  // Every name is the prefix plus a fixed suffix, and /alert-panel.js builds
+  // the same names from the same suffixes, so "anom_" reproduces exactly what
+  // shipped in 2026-08 and no saved setting is orphaned.
+  function anomKeys(p) {
+    return {
+      LAD_ON:      p + "ladder_alert_enabled",
+      LAD_PCT:     p + "ladder_alert_pct",
+      LAD_DELTA:   p + "ladder_alert_delta",
+      LAD_STEP:    p + "ladder_alert_step",
+      CONS_ON:     p + "cons_alert_enabled",
+      CONS_DEF:    p + "cons_alert_default",
+      CONS_KINDS:  p + "cons_alert_kinds",
+      // Odds vetoes (2026-08-27). Written by the same panel; see the note
+      // there. These are NOT another way to fire — they gate everything else,
+      // because a longshot flag is noise no matter how large its severity is.
+      LAD_MAXODDS:  p + "ladder_alert_max_odds",
+      LAD_MINODDS:  p + "ladder_alert_min_odds",
+      CONS_MAXODDS: p + "cons_alert_max_odds",
+      CONS_MINODDS: p + "cons_alert_min_odds",
+      LAD_SEEN_KEY:    p + "ladder_seen_v1",
+      LAD_SEEDED_KEY:  p + "ladder_seeded",
+      CONS_SEEN_KEY:   p + "cons_seen_v1",
+      CONS_SEEDED_KEY: p + "cons_seeded",
+      SOUND_LAD:  p + "ladder",
+      SOUND_CONS: p + "cons",
+    };
+  }
+  const ANOM = anomKeys("anom_");
+  const LSP  = anomKeys("lsp_");
+  // The original board's names, unchanged, so the rest of this file and the
+  // wiring tests keep reading the same identifiers.
+  const LAD_ON = ANOM.LAD_ON, LAD_PCT = ANOM.LAD_PCT, LAD_DELTA = ANOM.LAD_DELTA,
+        LAD_STEP = ANOM.LAD_STEP, CONS_ON = ANOM.CONS_ON, CONS_DEF = ANOM.CONS_DEF,
+        CONS_KINDS = ANOM.CONS_KINDS, LAD_MAXODDS = ANOM.LAD_MAXODDS,
+        LAD_MINODDS = ANOM.LAD_MINODDS, CONS_MAXODDS = ANOM.CONS_MAXODDS,
+        CONS_MINODDS = ANOM.CONS_MINODDS, LAD_SEEN_KEY = ANOM.LAD_SEEN_KEY,
+        LAD_SEEDED_KEY = ANOM.LAD_SEEDED_KEY, CONS_SEEN_KEY = ANOM.CONS_SEEN_KEY,
+        CONS_SEEDED_KEY = ANOM.CONS_SEEDED_KEY;
   // Re-alert when a finding gets materially worse, not on every poll it stays
   // above the bar. Deliberately RELATIVE: consistency severity is pp for some
   // checks, points for others and % for the HT/FT ones, so a fixed "+5" step
@@ -841,13 +874,14 @@
     return odds >= floor;
   }
 
-  function ladderPasses(r) {
+  function ladderPasses(r, K) {
+    K = K || ANOM;
     // Veto first: it overrides every criterion below, so an expensive rung
     // cannot chime by clearing one of them.
     const o = [r.odds_lo, r.odds_hi].filter(x => x != null);
-    if (o.length && !withinOddsCap(Math.max.apply(null, o), LAD_MAXODDS)) return false;
-    if (o.length && !aboveOddsFloor(Math.max.apply(null, o), LAD_MINODDS)) return false;
-    const pct = cfgNum(LAD_PCT), delta = cfgNum(LAD_DELTA), step = cfgNum(LAD_STEP);
+    if (o.length && !withinOddsCap(Math.max.apply(null, o), K.LAD_MAXODDS)) return false;
+    if (o.length && !aboveOddsFloor(Math.max.apply(null, o), K.LAD_MINODDS)) return false;
+    const pct = cfgNum(K.LAD_PCT), delta = cfgNum(K.LAD_DELTA), step = cfgNum(K.LAD_STEP);
     if (pct   !== null && r.pct   != null && r.pct   >= pct)   return true;
     if (delta !== null && r.delta != null && r.delta >= delta) return true;
     if (step  !== null && r.step  != null && r.step  >= step)  return true;
@@ -860,9 +894,10 @@
   // shows as off, or shows as on and never sounds.
   const ALERT_DEFAULT_OFF = new Set(["ml_vs_spread"]);
 
-  function consPasses(f, kindCfg, dflt) {
-    if (!withinOddsCap(f.odds, CONS_MAXODDS)) return false;
-    if (!aboveOddsFloor(f.odds, CONS_MINODDS)) return false;
+  function consPasses(f, kindCfg, dflt, K) {
+    K = K || ANOM;
+    if (!withinOddsCap(f.odds, K.CONS_MAXODDS)) return false;
+    if (!aboveOddsFloor(f.odds, K.CONS_MINODDS)) return false;
     const k = kindCfg[f.kind] || {};
     if (k.on === false) return false;               // check silenced
     // Diagnostics stay silent until switched on deliberately. `k.on === true`
@@ -919,50 +954,60 @@
     return fires;
   }
 
-  let ladderSeen = loadSeenMap(LAD_SEEN_KEY);
-  let consSeen   = loadSeenMap(CONS_SEEN_KEY);
+  // One poller per board. The seen-maps are per board for the reason spelled
+  // out at anomKeys(): the two feeds share event ids and check kinds, so a
+  // shared map would have one board silencing the other.
+  function makeFindingsPoller(K, url, label) {
+    let ladderSeen = loadSeenMap(K.LAD_SEEN_KEY);
+    let consSeen   = loadSeenMap(K.CONS_SEEN_KEY);
 
-  async function pollAnomalyFindings() {
-    const ladOn  = (localStorage.getItem(LAD_ON) === "1");
-    const consOn = (localStorage.getItem(CONS_ON) === "1");
-    if (!ladOn && !consOn) return;      // nothing enabled → don't even fetch
+    return async function pollFindings() {
+      const ladOn  = (localStorage.getItem(K.LAD_ON) === "1");
+      const consOn = (localStorage.getItem(K.CONS_ON) === "1");
+      if (!ladOn && !consOn) return;    // nothing enabled → don't even fetch
 
-    let feed;
-    try {
-      const r = await fetch("/api/anomalies/alerts");
-      if (!r.ok) return;
-      feed = await r.json();
-    } catch (e) { return; }
-    if (!feed.enabled) return;          // scanner off — nothing to say
+      let feed;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return;
+        feed = await r.json();
+      } catch (e) { return; }
+      if (!feed.enabled) return;        // scanner off — nothing to say
 
-    if (ladOn) {
-      const rows = (feed.ladders || []).map(r => { r.__key = ladderKey(r); return r; });
-      const n = evaluateFeed(rows, ladderSeen, ladderPasses,
-                             r => r.pct, LAD_SEEDED_KEY);
-      saveSeenMap(LAD_SEEN_KEY, ladderSeen);
-      if (n > 0) {
-        if (claimSound("anom-ladder")) playLadderAlert();
-        try { console.log(`[ladder-alert] ${n} new/worsened ladder violation(s)`); }
-        catch (e) {}
+      if (ladOn) {
+        const rows = (feed.ladders || []).map(r => { r.__key = ladderKey(r); return r; });
+        const n = evaluateFeed(rows, ladderSeen, r => ladderPasses(r, K),
+                               r => r.pct, K.LAD_SEEDED_KEY);
+        saveSeenMap(K.LAD_SEEN_KEY, ladderSeen);
+        if (n > 0) {
+          if (claimSound(K.SOUND_LAD)) playLadderAlert();
+          try { console.log(`[ladder-alert] ${label}: ${n} new/worsened ladder violation(s)`); }
+          catch (e) {}
+        }
       }
-    }
 
-    if (consOn) {
-      let kindCfg = {};
-      try { kindCfg = JSON.parse(localStorage.getItem(CONS_KINDS) || "{}") || {}; }
-      catch (e) { kindCfg = {}; }
-      const dflt = cfgNum(CONS_DEF);
-      const rows = (feed.consistency || []).map(f => { f.__key = consKey(f); return f; });
-      const n = evaluateFeed(rows, consSeen, f => consPasses(f, kindCfg, dflt),
-                             f => f.severity, CONS_SEEDED_KEY);
-      saveSeenMap(CONS_SEEN_KEY, consSeen);
-      if (n > 0) {
-        if (claimSound("anom-cons")) playConsistencyAlert();
-        try { console.log(`[consistency-alert] ${n} new/worsened flag(s)`); }
-        catch (e) {}
+      if (consOn) {
+        let kindCfg = {};
+        try { kindCfg = JSON.parse(localStorage.getItem(K.CONS_KINDS) || "{}") || {}; }
+        catch (e) { kindCfg = {}; }
+        const dflt = cfgNum(K.CONS_DEF);
+        const rows = (feed.consistency || []).map(f => { f.__key = consKey(f); return f; });
+        const n = evaluateFeed(rows, consSeen, f => consPasses(f, kindCfg, dflt, K),
+                               f => f.severity, K.CONS_SEEDED_KEY);
+        saveSeenMap(K.CONS_SEEN_KEY, consSeen);
+        if (n > 0) {
+          if (claimSound(K.SOUND_CONS)) playConsistencyAlert();
+          try { console.log(`[consistency-alert] ${label}: ${n} new/worsened flag(s)`); }
+          catch (e) {}
+        }
       }
-    }
+    };
   }
+
+  const pollAnomalyFindings = makeFindingsPoller(
+    ANOM, "/api/anomalies/alerts", "anomalies");
+  const pollLsportFindings = makeFindingsPoller(
+    LSP, "/api/new_inconsistencies/alerts", "new inconsistencies");
 
   // Initial poll + interval. Stagger by 2s so we don't slam the API on
   // page-load alongside the page's own /api/opportunities fetch.
@@ -978,6 +1023,9 @@
   // Anomaly content alerts, offset another 1s again.
   setTimeout(pollAnomalyFindings, 5_000);
   setInterval(pollAnomalyFindings, POLL_MS);
+  // The LSport board, offset another 1s so the two never fetch in one tick.
+  setTimeout(pollLsportFindings, 6_000);
+  setInterval(pollLsportFindings, POLL_MS);
 
   // Test seam. `module` does not exist in a browser, so this is inert there and
   // changes nothing about how the page behaves. It exists because the alert

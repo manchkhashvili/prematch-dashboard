@@ -315,10 +315,14 @@ def test_registered_everywhere_the_cycle_looks():
 def test_tab_labels_cover_every_volleyball_kind():
     kinds = {"vb_set_match", "vb_correct_score", "vb_sets_duplicate",
              "vb_sets_dominance", "vb_sets_cover"}
+    # One kind list, shared by both tabs since 2026-09-24 — a check added to
+    # the module reaches every board, which is the point of moving it there.
+    t = (ROOT / "static" / "alert-panel.js").read_text(encoding="utf-8")
+    for k in kinds:
+        assert f"{k}:" in t, ("alert-panel.js", k)
     for page in ("static/anomalies.html", "static/new_inconsistencies.html"):
-        t = (ROOT / page).read_text(encoding="utf-8")
-        for k in kinds:
-            assert f"  {k}:" in t, (page, k)
+        p = (ROOT / page).read_text(encoding="utf-8")
+        assert "AlertPanel.KIND_LABEL" in p, (page, "does not use the shared labels")
 
 
 def test_list_view_parses_like_basketball():

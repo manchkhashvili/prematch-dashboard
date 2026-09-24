@@ -297,8 +297,13 @@ def test_names_are_referenced_by_the_wiring_guard():
 
 @pytest.mark.parametrize("page", ["arbs.html", "anomalies.html"])
 def test_the_alert_panel_remembers_being_open(page):
+    # The Anomalies-style panel moved its behaviour into /alert-panel.js on
+    # 2026-09-24 so the New inconsistencies tab could share it; the markup
+    # still lives on each page. Read both where the page loads the module.
     t = (ARBS.parent / page).read_text(encoding="utf-8")
     assert 'id="alert-config"' in t, f"{page}: no alert panel"
+    if "alert-panel.js" in t:
+        t += "\n" + (ARBS.parent / "alert-panel.js").read_text(encoding="utf-8")
     assert "rememberPanelOpen" in t, (
         f"{page}: the panel does not persist its open state — every reload "
         "collapses it and hides the settings")

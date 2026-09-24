@@ -213,9 +213,11 @@ def test_the_new_kinds_alert_by_default():
     converting. They must not inherit that silence."""
     from pathlib import Path
     import re
+    # The kind list and the default-off set moved to the shared panel module
+    # on 2026-09-24, when the New inconsistencies tab got the same panel.
     page = (Path(C.__file__).resolve().parent.parent
-            / "static" / "anomalies.html").read_text()
-    labels = re.search(r"const KIND_LABEL\s*=\s*\{(.*?)\n\};", page, re.S).group(1)
+            / "static" / "alert-panel.js").read_text()
+    labels = re.search(r"const KIND_LABEL\s*=\s*\{(.*?)\n\s*\};", page, re.S).group(1)
     off = re.search(r"ALERT_DEFAULT_OFF\s*=\s*new Set\(\[(.*?)\]\)", page, re.S).group(1)
     for kind in ("pickem_duplicate", "pickem_dominance"):
         assert f"{kind}:" in labels, f"{kind} is not in the alert grid"
