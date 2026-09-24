@@ -560,3 +560,87 @@ watching it go `100/1509` then `75/1506` looks like the scan going backwards.
 Coverage is `cost[sport]`: `expanded` + `cached`. On the same board that showed
 `done 75/1506`, actual coverage was `expanded 125 + cached 1138 = 1263 of 1507`
 — **84 %**, not 5 %.
+
+---
+
+## 2026-09-24 — the dashboard "freezes": running out of file descriptors
+
+Owner: *"sometimes it freezes lately and goes like that"*, with the Anomalies
+tab showing `error loading anomalies` over a consistency table still saying
+`loading…`, while the header kept ticking.
+
+### It was never the anomalies endpoint
+
+```
+file descriptors in use:  255
+highest fd number:        254
+soft limit (launchd):     256
+```
+
+Past the ceiling `accept()` returns `EMFILE` and uvicorn resets every incoming
+connection. `fetch()` rejects on a reset, so the tab's catch ran on every poll.
+
+| test | result |
+|---|---|
+| 12 concurrent → `/api/anomalies` | 3 served, 9 instant `ECONNRESET` |
+| 12 concurrent → `/api/marks` (trivial) | **3 served, 9 reset** — identical |
+| 12 concurrent → threaded control server, same box | **12/12** |
+| `netstat` listen-queue overflows | **0** — not backlog |
+
+The same number succeed on any endpoint. That is an fd ceiling, not a slow
+handler. **Whenever the whole dashboard goes unreachable but the process is
+alive and cheap, count fds before reading any handler.**
+
+### One cause, not two
+
+The fds split 155 PIPE / 70 IPv4, which looked like two separate leaks. Both
+are `curl_cffi`. Its `Session` defaults to `use_thread_local_curl=True`:
+
+```python
+@property
+def curl(self):
+    if self._use_thread_local_curl:
+        if not getattr(self._local, "curl", None):
+            self._local.curl = Curl(debug=self.debug)   # NEW handle per thread
+        return self._local.curl
+
+def close(self) -> None:
+    self.curl.close()          # frees ONLY the calling thread's handle
+```
+
+Every handle costs **2 pipes plus its own connection pool**. `cb_http`'s
+wrappers ran on `asyncio.to_thread` — a different one of the default
+executor's ~12 threads each time — and **those threads never retire**, so each
+long-lived sport session collected a handle per worker thread and `close()`
+orphaned all but one. Measured against a local socket, five live sessions:
+
+| | PIPE |
+|---|---|
+| shared 12-thread pool (what it did) | **122** |
+| one thread per session (the fix) | **12** |
+
+That plus ~50 CrystalBet sockets in state `CLOSED` is the whole 255.
+
+### The rule
+
+**A long-lived `curl_cffi` Session must be touched by exactly one thread.**
+`asyncio.to_thread` is the wrong wrapper for one; give it its own
+`ThreadPoolExecutor(max_workers=1)` and close it there.
+
+Per-*call* Sessions are fine — `liderbet`, `betlive`, `crocobet` and `setanta`
+build one inside the worker and drop it on the same thread, so refcounting
+frees the handle. `xbet` keeps one per thread in a `threading.local`, which is
+bounded by the pool size rather than multiplied by it. Only `cb_http` had the
+pathological combination: **long-lived, and shared across threads.**
+
+It also fixed a latent correctness bug — `CbHttpSession` is ASP.NET postback
+state (`fields` carries `__VIEWSTATE`, rewritten by every `_post`) and nothing
+serialised two callers before.
+
+### Mitigation while a process is still leaking
+
+```bash
+ulimit -n 4096 && python main.py
+```
+
+Buys headroom; does not fix a leak. Pinned by `tests/test_cb_http_threads.py`.
