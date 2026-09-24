@@ -838,6 +838,35 @@
     try { localStorage.setItem(key, JSON.stringify([...map])); } catch (e) {}
   }
 
+  /* Games the user muted from either findings board (2026-09-24).
+   *
+   * Written by AlertPanel.Mutes in /alert-panel.js; the key name MUST match
+   * there — tests/test_anomaly_alerts_wiring.py pins it, because a typo would
+   * leave the button looking like it worked while every chime kept firing.
+   *
+   * Keyed by GAME, as `sport|match_label` lowercased. That is the only
+   * identity both sides can build: these compact feeds carry no event id the
+   * tables share, and the checks re-fire under a different kind, period or
+   * line as prices move, so a row-level mute would not hold on a fixture that
+   * had already been dismissed.
+   *
+   * Reloaded every poll so a mute takes effect on the next cycle, exactly like
+   * the Arbs mute it is modelled on.
+   */
+  const MUTED_GAMES_KEY = "findings_muted_games_v1";
+
+  function loadMutedGames() {
+    try {
+      const raw = localStorage.getItem(MUTED_GAMES_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) { return new Set(); }
+  }
+
+  function gameMuteKey(row) {
+    return (row.sport || "") + "|" +
+           String(row.match_label || "").trim().toLowerCase();
+  }
+
   function ladderKey(r) {
     return ["lad", r.book || "", r.event_id || "", r.market || "", r.period || "",
             r.side || "", r.line_lo, r.line_hi].join("|");
@@ -974,9 +1003,17 @@
       } catch (e) { return; }
       if (!feed.enabled) return;        // scanner off — nothing to say
 
+      // Reload every poll so a mute clicked on either tab applies next cycle.
+      const muted = loadMutedGames();
+      // A muted row still goes through evaluateFeed — it must land in the
+      // seen-map — but can never pass, so it never sounds. Dropping the rows
+      // instead would make un-muting retro-fire every finding that arrived
+      // while the game was quiet.
+      const unmuted = (passes) => (row) => !muted.has(gameMuteKey(row)) && passes(row);
+
       if (ladOn) {
         const rows = (feed.ladders || []).map(r => { r.__key = ladderKey(r); return r; });
-        const n = evaluateFeed(rows, ladderSeen, r => ladderPasses(r, K),
+        const n = evaluateFeed(rows, ladderSeen, unmuted(r => ladderPasses(r, K)),
                                r => r.pct, K.LAD_SEEDED_KEY);
         saveSeenMap(K.LAD_SEEN_KEY, ladderSeen);
         if (n > 0) {
@@ -992,7 +1029,8 @@
         catch (e) { kindCfg = {}; }
         const dflt = cfgNum(K.CONS_DEF);
         const rows = (feed.consistency || []).map(f => { f.__key = consKey(f); return f; });
-        const n = evaluateFeed(rows, consSeen, f => consPasses(f, kindCfg, dflt, K),
+        const n = evaluateFeed(rows, consSeen,
+                               unmuted(f => consPasses(f, kindCfg, dflt, K)),
                                f => f.severity, K.CONS_SEEDED_KEY);
         saveSeenMap(K.CONS_SEEN_KEY, consSeen);
         if (n > 0) {
@@ -1040,6 +1078,11 @@
                        ladderKey, consKey, RE_ALERT_FACTOR,
                        readLayers, normaliseGates, matchingLayers,
                        effectiveStep, oppQueryFloor, passesGates,
-                       readOppGates, DEFAULT_RE_ALERT_PP };
+                       readOppGates, DEFAULT_RE_ALERT_PP,
+                       // The game mute (2026-09-24): whether a muted row is
+                       // still TRACKED is the part that breaks silently, so
+                       // it is driven under node rather than only grepped.
+                       loadMutedGames, gameMuteKey, MUTED_GAMES_KEY,
+                       anomKeys };
   }
 })();

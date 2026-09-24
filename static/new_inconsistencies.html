@@ -411,6 +411,10 @@ async function fetchAndRender() {
     const rerender = () => { render(); renderConsistency(cons); };
     Marks.bind(document.getElementById("anom-body"), rerender);
     Marks.bind(document.getElementById("cons-body"), rerender);
+    // Same two tables, same rerender — a mute has to repaint the row it was
+    // clicked on, and the button label with it.
+    Mutes.bind(document.getElementById("anom-body"), rerender);
+    Mutes.bind(document.getElementById("cons-body"), rerender);
   } catch (e) {
     renderFetchError("new inconsistencies", e);
   }
@@ -425,6 +429,7 @@ const KIND_UNIT  = AlertPanel.KIND_UNIT;
 // thresholds and its own seen-map under "lsp_".
 AlertPanel.init("lsp_");
 const consClass = AlertPanel.consClass;
+const Mutes = AlertPanel.Mutes;
 
 // Build a /bets.html prefill for a consistency flag.
 //
@@ -492,7 +497,7 @@ function renderConsistency(flags) {
     body.innerHTML = `<tr><td colspan="10" class="empty">no consistency flags</td></tr>`; return;
   }
   body.innerHTML = flags.map(f => `
-    <tr class="${Marks.rowClass(Marks.key(f))}"${f.stale ? ' style="opacity:.5"' : ''}>
+    <tr class="${Marks.rowClass(Marks.key(f))} ${Mutes.rowClass(f)}"${f.stale ? ' style="opacity:.5"' : ''}>
       <td class="mono dim">${fmtTime(f.first_seen)}${f.stale ? ' ⚠︎' : ''}</td>
       <td><span class="conf conf-medium">${f.book || "cb"}</span></td>
       <td class="dim">${(f.sport || "").slice(0, 2)}</td>
@@ -503,7 +508,7 @@ function renderConsistency(flags) {
       <td>${f.detail}${f.stale ? ' <span class="dim">(stale — book unreachable last sweep)</span>' : ''}</td>
       <td class="num ${consClass(f.severity)}">${Number(f.severity).toFixed(1)}</td>
       <td><a class="log-bet-link" href="${buildConsistencyBetUrl(f)}"
-             title="Log a bet on this match — market, price and line are left blank for you to fill from the book">Log</a>${Marks.buttonHTML(Marks.key(f), f)}</td>
+             title="Log a bet on this match — market, price and line are left blank for you to fill from the book">Log</a>${Marks.buttonHTML(Marks.key(f), f)}${Mutes.buttonHTML(f)}</td>
     </tr>
   `).join("");
 }
@@ -576,7 +581,7 @@ function render() {
   }
 
   body.innerHTML = rows.map(r => `
-    <tr class="${Marks.rowClass(Marks.key(r))}">
+    <tr class="${Marks.rowClass(Marks.key(r))} ${Mutes.rowClass(r)}">
       <td class="mono dim">${fmtTime(r.start_time)}</td>
       <td><span class="conf conf-medium">${r.book || "cb"}</span></td>
       <td class="dim">${(r.sport || "").slice(0, 2)}</td>
@@ -590,7 +595,7 @@ function render() {
       <td class="num mono">${fmtNum(r.pin_fair_odds, 3)}</td>
       <td class="num ${edgeClass(r.pin_edge_pct)}">${r.pin_edge_pct == null ? "—" : fmtSigned(r.pin_edge_pct) + "%"}</td>
       <td class="num" title="${r.pin_move_label || ""}">${r.pin_move_pp == null ? "—" : fmtSigned(r.pin_move_pp) + "pp"}</td>
-      <td><a class="log-bet-link" href="${buildBetPrefillUrl(r)}" title="Log a CB bet on the flagged rung">Log</a>${Marks.buttonHTML(Marks.key(r), r)}</td>
+      <td><a class="log-bet-link" href="${buildBetPrefillUrl(r)}" title="Log a CB bet on the flagged rung">Log</a>${Marks.buttonHTML(Marks.key(r), r)}${Mutes.buttonHTML(r)}</td>
     </tr>
   `).join("");
 }

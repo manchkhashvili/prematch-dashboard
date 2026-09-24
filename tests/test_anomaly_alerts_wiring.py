@@ -93,6 +93,14 @@ def test_the_poller_polls_this_board(prefix):
         f"settings nothing reads")
 
 
+def test_the_game_mute_is_shared_and_read_by_the_poller():
+    """The one thing the two boards DO share. Same silent-failure shape as
+    every key above: a typo leaves the Mute button looking like it worked
+    while every chime keeps firing. Behaviour is in tests/test_game_mute.py."""
+    assert '"findings_muted_games_v1"' in PANEL_T
+    assert '"findings_muted_games_v1"' in ALERTS_T
+
+
 def test_the_two_boards_do_not_share_a_seen_map():
     """ladderKey/consKey are built from event id + kind, which COLLIDE across
     the boards — the LSport rows are CrystalBet rows. One shared seen-map

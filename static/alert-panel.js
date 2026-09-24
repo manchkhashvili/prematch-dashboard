@@ -146,6 +146,91 @@
     return sev >= 12 ? "edge-pos-bold" : sev >= 6 ? "edge-pos" : "";
   }
 
+
+  /* ── Muted games ──────────────────────────────────────────────────────────
+   *
+   * "Mute" silences the CHIME for every finding on one fixture, across both
+   * findings boards. Distinct from Marks, which means "I have money on this
+   * game" and is server-backed; this is a local preference about noise.
+   *
+   * ONE list, not one per board (unlike the thresholds). A game you have
+   * looked at and dismissed is dismissed — having to mute it twice, once per
+   * tab, would be a bug, not a feature.
+   *
+   * KEYED BY GAME, on purpose. The owner asked to mute games, and a row-level
+   * mute would not hold: the checks re-fire under a different kind, period or
+   * line as prices move, so each new row would chime again on a fixture that
+   * had already been dismissed.
+   *
+   * The key is `sport|match_label`, because that is the ONLY identity both
+   * sides can compute. alerts.js sees the compact alert feed
+   * (_ladder_alert_rows / _consistency_alert_rows), which carries `sport` and
+   * `match_label` and no event id it shares with the tables. Marks.key() is
+   * richer — it prefers pin_event_id — but the poller cannot reproduce it, and
+   * a key one side cannot build is a mute that never applies.
+   *
+   * Muted rows are still TRACKED by the poller's seen-map; they simply do not
+   * sound. Same rule as the Arbs mute: un-muting must not retro-fire every
+   * finding that appeared while the game was quiet.
+   */
+  const MUTED_KEY = "findings_muted_games_v1";
+
+  function muteKey(row) {
+    return (row.sport || "") + "|" +
+           String(row.match_label || "").trim().toLowerCase();
+  }
+
+  function loadMuted() {
+    try {
+      const raw = localStorage.getItem(MUTED_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) { return new Set(); }
+  }
+
+  function saveMuted(set) {
+    try { localStorage.setItem(MUTED_KEY, JSON.stringify([...set])); } catch (e) {}
+  }
+
+  function isMuted(row) { return loadMuted().has(muteKey(row)); }
+
+  function toggleMuted(key) {
+    const set = loadMuted();
+    if (set.has(key)) set.delete(key); else set.add(key);
+    saveMuted(set);
+    return set.has(key);
+  }
+
+  function muteRowClass(row) { return isMuted(row) ? "game-muted" : ""; }
+
+  function muteButtonHTML(row) {
+    const k = muteKey(row);
+    const on = loadMuted().has(k);
+    const title = on
+      ? "Muted — findings on this game stay on the board but never chime, on "
+        + "either tab. Click to unmute."
+      : "Mute this game: it stays on the board, and no finding on it chimes "
+        + "again, on either tab.";
+    return `<button type="button" class="mute-btn${on ? " muted" : ""}"`
+         + ` data-mute-key="${encodeURIComponent(k)}"`
+         + ` title="${title.replace(/"/g, "&quot;")}">`
+         + (on ? "Muted" : "Mute") + `</button>`;
+  }
+
+  function muteBind(root, rerender) {
+    if (!root || root.__mutesBound) return;
+    root.__mutesBound = true;
+    root.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button.mute-btn");
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const k = decodeURIComponent(btn.dataset.muteKey || "");
+      if (!k) return;
+      toggleMuted(k);
+      if (typeof rerender === "function") rerender();
+    });
+  }
+
   function init(prefix) {
     /* Written here, read by the shared alerts.js so the chimes follow you
      * across pages. Every name is the board's prefix plus a fixed suffix;
@@ -359,6 +444,13 @@
     lsGet: lsGet,
     lsSet: lsSet,
     consClass: consClass,
+    // The game-mute, shared by both findings boards. MUTED_KEY is also read
+    // by alerts.js — see the contract test.
+    Mutes: {
+      KEY: MUTED_KEY, key: muteKey, load: loadMuted, has: isMuted,
+      toggle: toggleMuted, rowClass: muteRowClass,
+      buttonHTML: muteButtonHTML, bind: muteBind,
+    },
     // The suffixes alerts.js must mirror. Exported so a test can read the
     // contract from one place instead of restating it.
     KEYS: ["ladder_alert_enabled", "ladder_alert_pct", "ladder_alert_delta",

@@ -910,3 +910,47 @@ tr.game-marked:not(.has-bet):not(.user-highlighted) {
   letter-spacing: 0;
 }
 
+
+/* ── Muted games (2026-09-24) ─────────────────────────────────────────────
+   "Mute" silences the CHIME for every finding on a fixture, on both findings
+   boards. It is deliberately NOT a hide: the row stays on the board and stays
+   readable, because a muted game is one you have judged, not one you want to
+   stop seeing. So the treatment is a dim and a left rule, nothing louder. */
+tr.game-muted td {
+  opacity: 0.55;
+}
+tr.game-muted td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--text-dim);
+  opacity: 1;
+}
+/* The button must stay legible on a row that is dimmed, or you cannot find
+   the control that undoes the dimming. */
+tr.game-muted .mute-btn {
+  opacity: 1;
+}
+
+/* Same footprint as .mark-btn and .log-bet-link so the three line up. */
+.mute-btn {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.mute-btn:hover {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.mute-btn.muted {
+  color: var(--warn);
+  border-color: var(--warn);
+}
